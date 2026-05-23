@@ -12,6 +12,7 @@ const styles = require('./styles');
 const { usePlatform, useProfile } = require('stremio/common');
 const { default: SeasonEpisodePicker } = require('../EpisodePicker');
 const { buildDownloadPayload } = require('stremio/customStremio/downloadPayload');
+const { createDownload } = require('stremio/customStremio/localBackendClient');
 
 const ALL_ADDONS_KEY = 'ALL';
 const PREFERRED_ADDON_STORAGE_KEY = 'customStremio.preferredAddon';
@@ -174,9 +175,21 @@ const StreamsList = ({ className, metaId, video, type, onEpisodeSearch, ...props
             onSelect: onPreferredAddonSelected
         };
     }, [streamsByAddon, preferredAddon, onPreferredAddonSelected]);
-    const onDownloadPlaceholder = React.useCallback((downloadPayload) => {
+    const onDownloadPlaceholder = React.useCallback(async (downloadPayload) => {
         // eslint-disable-next-line no-console
         console.debug('customStremio.downloadPlaceholder', downloadPayload);
+
+        try {
+            const record = await createDownload(downloadPayload);
+            // eslint-disable-next-line no-console
+            console.debug('customStremio.downloadCreated', record);
+        } catch (error) {
+            console.error('customStremio.downloadCreateError', {
+                message: error?.message || 'Failed to create local backend download record',
+                status: error?.status ?? null,
+                backendError: error?.backendError ?? null
+            });
+        }
     }, []);
 
     const handleEpisodePicker = React.useCallback((season, episode) => {

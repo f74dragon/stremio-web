@@ -78,7 +78,50 @@ Notes:
 
 ## Next Recommended Step
 
-Create a frontend backend-client utility that can call `/health` and `POST /downloads`, but keep Download button behavior easy to test.
+Add a simple title-level downloads panel that lists backend records for the current `metaId`.
+
+## Milestone 5D Findings: Download Button Backend Call
+
+- Files changed:
+  - `src/routes/MetaDetails/StreamsList/StreamsList.js`
+  - `docs/CUSTOM_STREMIO_PROJECT.md`
+- Current behavior:
+  - The existing Download button still logs `customStremio.downloadPlaceholder`.
+  - After logging the placeholder payload, it now calls the local backend with `createDownload(payload)`.
+  - On success it logs `customStremio.downloadCreated` with the created queued backend record.
+  - On failure it logs `customStremio.downloadCreateError` with a useful message, status, and backend error when available.
+- Runtime requirements:
+  - The local backend must be running at `http://127.0.0.1:5577` for backend record creation to succeed.
+- Error behavior:
+  - If the backend is offline or returns an error, the UI does not crash.
+  - The placeholder payload log still appears even when backend creation fails.
+- Current limitations:
+  - No real downloading yet
+  - No download progress panel yet
+  - No duplicate-click protection yet; rapid repeated clicks can create multiple queued records until a later milestone addresses it
+
+## Milestone 5C Findings: Frontend Local Backend Client
+
+- Created utility file: `src/customStremio/localBackendClient.js`
+- Exported functions:
+  - `getBackendHealth()`
+  - `createDownload(payload)`
+  - `listDownloads(metaId)`
+  - `getDownload(id)`
+  - `pauseDownload(id)`
+  - `resumeDownload(id)`
+  - `cancelDownload(id)`
+  - `deleteDownload(id)`
+- Shared helper:
+  - `requestJson(path, options)`
+- Behavior notes:
+  - Uses the local backend base URL `http://127.0.0.1:5577`
+  - Uses `fetch`
+  - Sets JSON request headers automatically when sending a body
+  - Parses JSON responses safely, including empty-body cases
+  - Throws useful errors with HTTP status code and backend error message when available
+  - Validates missing payloads and missing download ids before making requests
+  - No UI behavior changed yet; the utility is not wired into the Download button in this milestone
 
 ## Milestone 5B Findings: Local Backend Skeleton
 
