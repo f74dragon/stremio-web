@@ -78,7 +78,47 @@ Notes:
 
 ## Next Recommended Step
 
-Use the console output to decide the exact backend download request shape.
+Define the local backend API contract for downloads before implementing the backend.
+
+## Milestone 4B Findings: Download Payload Utility
+
+- Files changed:
+  - `src/customStremio/downloadPayload.js`
+  - `src/routes/MetaDetails/StreamsList/StreamsList.js`
+  - `docs/CUSTOM_STREMIO_PROJECT.md`
+- New custom utility:
+  - `src/customStremio/downloadPayload.js`
+  - exports `buildDownloadPayload(input)`
+- Why custom code is being isolated:
+  - The placeholder download payload shape is custom project logic, not core Stremio behavior.
+  - Moving it into a dedicated `customStremio` utility keeps `StreamsList.js` smaller and makes the future backend request mapping easier to evolve in one place.
+  - The utility is defensive and normalizes missing fields to `null` instead of relying on UI components to guard every nested property access.
+- Current behavior after extraction:
+  - The visible `Download` button in each stream item still appears unchanged.
+  - Clicking `Download` still logs the same `customStremio.downloadPlaceholder` object shape.
+  - Main stream playback/open behavior is unchanged.
+  - Preferred-addon sorting and manual addon filtering are unchanged.
+- How to test behavior stayed the same:
+  - Open a per-video stream page and confirm the `Download` action still appears on stream items.
+  - Click the main body of a stream item and confirm playback/open behavior still works.
+  - Click `Download` and confirm a `customStremio.downloadPlaceholder` payload still appears in the browser console.
+  - Compare the logged fields against Milestone 4A:
+    - `metaId`
+    - `type`
+    - `videoId`
+    - `videoTitle`
+    - `season`
+    - `episode`
+    - `videoReleased`
+    - `addonName`
+    - `streamName`
+    - `streamDescription`
+    - `streamUrl`
+    - `externalUrl`
+    - `downloadUrl`
+    - `fileName`
+    - `streamingUrl`
+  - Confirm preferred-addon sorting still works in the `All addons` view.
 
 ## Milestone 4A Findings: Placeholder Download Button
 

@@ -11,6 +11,7 @@ const Stream = require('./Stream');
 const styles = require('./styles');
 const { usePlatform, useProfile } = require('stremio/common');
 const { default: SeasonEpisodePicker } = require('../EpisodePicker');
+const { buildDownloadPayload } = require('stremio/customStremio/downloadPayload');
 
 const ALL_ADDONS_KEY = 'ALL';
 const PREFERRED_ADDON_STORAGE_KEY = 'customStremio.preferredAddon';
@@ -275,23 +276,13 @@ const StreamsList = ({ className, metaId, video, type, onEpisodeSearch, ...props
                                             thumbnail={stream.thumbnail}
                                             progress={stream.progress}
                                             deepLinks={stream.deepLinks}
-                                            downloadPayload={{
-                                                metaId: metaId ?? null,
-                                                type: type ?? null,
-                                                videoId: video?.id ?? null,
-                                                videoTitle: video?.title ?? null,
-                                                season: typeof video?.season === 'number' ? video.season : null,
-                                                episode: typeof video?.episode === 'number' ? video.episode : null,
-                                                videoReleased: video?.released instanceof Date && !isNaN(video.released.getTime()) ? video.released.toISOString() : null,
-                                                addonName: stream.addonName ?? null,
-                                                streamName: stream.name ?? null,
-                                                streamDescription: stream.description ?? null,
-                                                streamUrl: stream.url ?? null,
-                                                externalUrl: stream.externalUrl ?? null,
-                                                downloadUrl: stream.deepLinks?.externalPlayer?.download ?? null,
-                                                fileName: stream.deepLinks?.externalPlayer?.fileName ?? null,
-                                                streamingUrl: stream.deepLinks?.externalPlayer?.streaming ?? null
-                                            }}
+                                            downloadPayload={buildDownloadPayload({
+                                                metaId,
+                                                type,
+                                                video,
+                                                addonName: stream.addonName,
+                                                stream
+                                            })}
                                             onDownloadPlaceholder={onDownloadPlaceholder}
                                             onClick={stream.onClick}
                                         />
