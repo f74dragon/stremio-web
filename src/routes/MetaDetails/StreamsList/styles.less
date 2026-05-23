@@ -73,13 +73,15 @@
     .select-choices-wrapper {
         display: flex;
         align-items: center;
+        flex-wrap: wrap;
         z-index: 2;
         margin: 1em 1em 0 1em;
-        gap: 0 0.5em;
+        gap: 0.5em;
         overflow: visible;
 
         .back-button-container {
             display: flex;
+            flex: none;
             justify-content: center;
             align-items: center;
             border-radius: 0.5em;
@@ -105,7 +107,8 @@
         }
 
         .episode-title {
-            min-width: 45%;
+            flex: 1 1 18rem;
+            min-width: 0;
             color: var(--primary-foreground-color);
             white-space: nowrap;
             overflow: hidden;
@@ -113,8 +116,8 @@
         }
 
         .select-input-container {
-            min-width: 40%;
-            flex-grow: 1;
+            flex: 1 1 15rem;
+            min-width: 15rem;
             background-color: none;
 
             &:hover, &:focus, &:global(.active) {

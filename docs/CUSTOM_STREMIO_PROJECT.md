@@ -92,6 +92,7 @@ Run the app, choose a preferred addon on an episode stream page, and verify that
   - Added `normalizeAddonName(value)` to compare addon names case-insensitively and safely.
   - Added `isPreferredAddonStream(stream)` to detect whether a rendered stream belongs to the stored preferred addon.
   - Added a second `MultiselectMenu` control near the existing addon filter UI with the label text shown as `Preferred addon: ...`.
+  - Adjusted `src/routes/MetaDetails/StreamsList/styles.less` so the stream-page header row can wrap and give the episode title plus dropdown controls more usable width on long titles.
   - The preferred-addon picker stores the addon display name, not the transport URL.
   - Existing `filteredStreams` logic remains intact; the new `orderedFilteredStreams` step only reorders the already filtered results.
   - Reordering only happens when:
