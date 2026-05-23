@@ -200,6 +200,7 @@ const MetaDetails = ({ urlParams, queryParams }) => {
                     streamPath !== null ?
                         <StreamsList
                             className={styles['streams-list']}
+                            metaId={metaDetails.metaItem?.content?.type === 'Ready' ? metaDetails.metaItem.content.content.id : null}
                             streams={metaDetails.streams}
                             video={video}
                             type={streamPath.type}

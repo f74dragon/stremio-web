@@ -12,7 +12,7 @@ const { useRouteFocused } = require('stremio-router');
 const StreamPlaceholder = require('./StreamPlaceholder');
 const styles = require('./styles');
 
-const Stream = ({ className, videoId, videoReleased, addonName, name, description, thumbnail, progress, deepLinks, ...props }) => {
+const Stream = ({ className, videoId, videoReleased, addonName, name, description, thumbnail, progress, deepLinks, downloadPayload, onDownloadPlaceholder, ...props }) => {
     const profile = useProfile();
     const toast = useToast();
     const platform = usePlatform();
@@ -193,6 +193,16 @@ const Stream = ({ className, videoId, videoReleased, addonName, name, descriptio
                 });
         }
     }, [streamLink]);
+    const downloadButtonOnClick = React.useCallback((event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        event.nativeEvent.togglePopupPrevented = true;
+        event.nativeEvent.buttonClickPrevented = true;
+
+        if (typeof onDownloadPlaceholder === 'function') {
+            onDownloadPlaceholder(downloadPayload);
+        }
+    }, [downloadPayload, onDownloadPlaceholder]);
 
     const renderThumbnailFallback = React.useCallback(() => (
         <Icon className={styles['placeholder-icon']} name={'ic_broken_link'} />
@@ -228,11 +238,15 @@ const Stream = ({ className, videoId, videoReleased, addonName, name, descriptio
                     }
                 </div>
                 <div className={styles['description-container']} title={description}>{description}</div>
+                <Button className={styles['download-button-container']} title={'Download'} tabIndex={-1} onClick={downloadButtonOnClick}>
+                    <Icon className={styles['download-icon']} name={'download'} />
+                    <div className={styles['download-label']}>Download</div>
+                </Button>
                 <Icon className={styles['icon']} name={'play'} />
                 {children}
             </Button>
         );
-    }, [thumbnail, progress, addonName, name, description, href, target, download, onClick]);
+    }, [thumbnail, progress, addonName, name, description, href, target, download, onClick, downloadButtonOnClick]);
 
     const renderMenu = React.useMemo(() => function renderMenu() {
         return (
@@ -318,6 +332,8 @@ Stream.propTypes = {
             })
         })
     }),
+    downloadPayload: PropTypes.object,
+    onDownloadPlaceholder: PropTypes.func,
     onClick: PropTypes.func
 };
 

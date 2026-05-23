@@ -17,7 +17,7 @@ const PREFERRED_ADDON_STORAGE_KEY = 'customStremio.preferredAddon';
 
 const normalizeAddonName = (value) => String(value ?? '').trim().toLowerCase();
 
-const StreamsList = ({ className, video, type, onEpisodeSearch, ...props }) => {
+const StreamsList = ({ className, metaId, video, type, onEpisodeSearch, ...props }) => {
     const { t } = useTranslation();
     const core = useCore();
     const platform = usePlatform();
@@ -173,6 +173,10 @@ const StreamsList = ({ className, video, type, onEpisodeSearch, ...props }) => {
             onSelect: onPreferredAddonSelected
         };
     }, [streamsByAddon, preferredAddon, onPreferredAddonSelected]);
+    const onDownloadPlaceholder = React.useCallback((downloadPayload) => {
+        // eslint-disable-next-line no-console
+        console.debug('customStremio.downloadPlaceholder', downloadPayload);
+    }, []);
 
     const handleEpisodePicker = React.useCallback((season, episode) => {
         onEpisodeSearch(season, episode);
@@ -271,6 +275,24 @@ const StreamsList = ({ className, video, type, onEpisodeSearch, ...props }) => {
                                             thumbnail={stream.thumbnail}
                                             progress={stream.progress}
                                             deepLinks={stream.deepLinks}
+                                            downloadPayload={{
+                                                metaId: metaId ?? null,
+                                                type: type ?? null,
+                                                videoId: video?.id ?? null,
+                                                videoTitle: video?.title ?? null,
+                                                season: typeof video?.season === 'number' ? video.season : null,
+                                                episode: typeof video?.episode === 'number' ? video.episode : null,
+                                                videoReleased: video?.released instanceof Date && !isNaN(video.released.getTime()) ? video.released.toISOString() : null,
+                                                addonName: stream.addonName ?? null,
+                                                streamName: stream.name ?? null,
+                                                streamDescription: stream.description ?? null,
+                                                streamUrl: stream.url ?? null,
+                                                externalUrl: stream.externalUrl ?? null,
+                                                downloadUrl: stream.deepLinks?.externalPlayer?.download ?? null,
+                                                fileName: stream.deepLinks?.externalPlayer?.fileName ?? null,
+                                                streamingUrl: stream.deepLinks?.externalPlayer?.streaming ?? null
+                                            }}
+                                            onDownloadPlaceholder={onDownloadPlaceholder}
                                             onClick={stream.onClick}
                                         />
                                     ))}
@@ -303,6 +325,7 @@ const StreamsList = ({ className, video, type, onEpisodeSearch, ...props }) => {
 
 StreamsList.propTypes = {
     className: PropTypes.string,
+    metaId: PropTypes.string,
     streams: PropTypes.arrayOf(PropTypes.object).isRequired,
     video: PropTypes.object,
     type: PropTypes.string,

@@ -56,7 +56,7 @@ Notes:
 - `1. Project tracking document`: Completed
 - `2. Locate stream/title data flow`: Completed
 - `3. Preferred addon stream sorting/filtering`: In progress (`Milestone 3A` implemented)
-- `4. Add placeholder Download / Play Download buttons`: Not started
+- `4. Add placeholder Download / Play Download buttons`: In progress (`Milestone 4A` implemented)
 - `5. Create local backend prototype`: Not started
 - `6. Implement real download manager`: Not started
 - `7. Add title-specific downloads panel`: Not started
@@ -78,7 +78,50 @@ Notes:
 
 ## Next Recommended Step
 
-Run the app, choose a preferred addon on an episode stream page, and verify that the All addons view puts that addon first while manual addon filtering still works.
+Use the console output to decide the exact backend download request shape.
+
+## Milestone 4A Findings: Placeholder Download Button
+
+- Files changed:
+  - `src/routes/MetaDetails/MetaDetails.js`
+  - `src/routes/MetaDetails/StreamsList/StreamsList.js`
+  - `src/routes/MetaDetails/StreamsList/Stream/Stream.js`
+  - `src/routes/MetaDetails/StreamsList/Stream/styles.less`
+  - `docs/CUSTOM_STREMIO_PROJECT.md`
+- Implementation summary:
+  - Added a minimal `metaId` prop pass-through from `MetaDetails.js` into `StreamsList` so the placeholder log can include the selected title id.
+  - Added a `console.debug('customStremio.downloadPlaceholder', payload)` placeholder callback in `StreamsList.js`.
+  - Added a visible secondary `Download` action inside each rendered stream item in `Stream.js`.
+  - The Download action prevents default click behavior and stops propagation so it does not trigger normal stream playback.
+  - Existing main stream click/play behavior and existing context-menu copy/open actions are preserved.
+- Data logged from the current UI layer:
+  - `metaId`
+  - `type`
+  - `videoId`
+  - `videoTitle`
+  - `season`
+  - `episode`
+  - `videoReleased`
+  - `addonName`
+  - `streamName`
+  - `streamDescription`
+  - `streamUrl`
+  - `externalUrl`
+  - `downloadUrl`
+  - `fileName`
+  - `streamingUrl`
+- Missing or limited data:
+  - No backend download identifier or backend request schema exists yet.
+  - The placeholder log is limited to fields currently visible in the UI/model layer.
+  - Some streams may not provide `streamUrl`, `externalUrl`, `downloadUrl`, `fileName`, or `streamingUrl`; these can be `null`.
+- How to test:
+  - Open a title and navigate to a per-video stream page.
+  - Confirm each stream item shows a `Download` action.
+  - Click the main stream item and confirm playback/open behavior still works as before.
+  - Click `Download` and confirm playback does not start and a structured `console.debug` payload appears.
+  - Confirm the payload includes the selected title/video/addon/stream fields listed above.
+  - Confirm streams missing download-like URLs still log safely without crashing.
+  - Confirm preferred-addon ordering and manual addon filtering still behave as before.
 
 ## Milestone 3A Findings: Configurable Preferred Addon Sorting
 
@@ -255,7 +298,7 @@ Run the app, choose a preferred addon on an episode stream page, and verify that
 - The file contains all required sections.
 - Milestones 1 and 2 are completed.
 - Milestone 3 is now in progress through `Milestone 3A`.
-- Source changes for `Milestone 3A` are limited to `src/routes/MetaDetails/StreamsList/StreamsList.js`.
+- Milestone 4 is now in progress through `Milestone 4A`.
 
 ## Assumptions
 
