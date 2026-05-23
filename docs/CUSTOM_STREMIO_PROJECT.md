@@ -57,7 +57,7 @@ Notes:
 - `2. Locate stream/title data flow`: Completed
 - `3. Preferred addon stream sorting/filtering`: In progress (`Milestone 3A` implemented)
 - `4. Add placeholder Download / Play Download buttons`: In progress (`Milestone 4A` implemented)
-- `5. Create local backend prototype`: Not started
+- `5. Create local backend prototype`: In progress (`Milestone 5B` backend skeleton created)
 - `6. Implement real download manager`: Not started
 - `7. Add title-specific downloads panel`: Not started
 - `8. Add global downloads page`: Not started
@@ -78,7 +78,48 @@ Notes:
 
 ## Next Recommended Step
 
-Define the local backend API contract for downloads before implementing the backend.
+Create a frontend backend-client utility that can call `/health` and `POST /downloads`, but keep Download button behavior easy to test.
+
+## Milestone 5B Findings: Local Backend Skeleton
+
+- Files created:
+  - `local-backend/package.json`
+  - `local-backend/server.js`
+  - `local-backend/README.md`
+- Endpoints implemented:
+  - `GET /health`
+  - `POST /downloads`
+  - `GET /downloads`
+  - `GET /downloads/:id`
+  - `POST /downloads/:id/pause`
+  - `POST /downloads/:id/resume`
+  - `POST /downloads/:id/cancel`
+  - `DELETE /downloads/:id`
+- Current behavior:
+  - Binds to `127.0.0.1:5577`
+  - Stores download records in memory only
+  - Uses documented URL priority `downloadUrl -> streamingUrl -> streamUrl -> externalUrl`
+  - Returns `400` when no usable URL is present
+  - Does not perform real downloads yet
+  - Does not persist data yet
+  - Does not launch MPC-HC yet
+- How to run:
+  - `cd local-backend`
+  - `npm install`
+  - `npm start`
+
+## Milestone 5A Findings: Backend API Contract
+
+- Added backend API contract document: [CUSTOM_STREMIO_BACKEND_API.md](C:/Users/zuse2/Documents/GitHub/stremio-web/docs/CUSTOM_STREMIO_BACKEND_API.md)
+- The contract uses the current `buildDownloadPayload(input)` frontend output as the `POST /downloads` request shape.
+- The contract defines:
+  - local development base URL `http://127.0.0.1:5577`
+  - download record fields and backend-generated fields
+  - URL selection priority for backend downloads
+  - placeholder control endpoints for download lifecycle and playback
+  - Windows-oriented file organization rules
+  - local-only security assumptions
+- This separates backend contract planning from backend implementation so future agents can build the local service against a stable request/response shape first.
 
 ## Milestone 4B Findings: Download Payload Utility
 
