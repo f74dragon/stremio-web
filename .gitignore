@@ -5,3 +5,10 @@
 .DS_Store
 .prettierignore
 /local-backend/node_modules
+/.codex
+localhost+2-key.pem
+localhost+2.pem
+webpack.config.js
+webpack.config.js
+webpack.config.js
+webpack.config.js
