@@ -19,7 +19,7 @@ const PREFERRED_ADDON_STORAGE_KEY = 'customStremio.preferredAddon';
 
 const normalizeAddonName = (value) => String(value ?? '').trim().toLowerCase();
 
-const StreamsList = ({ className, metaId, video, type, onEpisodeSearch, ...props }) => {
+const StreamsList = ({ className, metaId, video, type, onEpisodeSearch, onDownloadCreated, ...props }) => {
     const { t } = useTranslation();
     const core = useCore();
     const platform = usePlatform();
@@ -183,6 +183,9 @@ const StreamsList = ({ className, metaId, video, type, onEpisodeSearch, ...props
             const record = await createDownload(downloadPayload);
             // eslint-disable-next-line no-console
             console.debug('customStremio.downloadCreated', record);
+            if (typeof onDownloadCreated === 'function') {
+                onDownloadCreated(record);
+            }
         } catch (error) {
             console.error('customStremio.downloadCreateError', {
                 message: error?.message || 'Failed to create local backend download record',
@@ -333,7 +336,8 @@ StreamsList.propTypes = {
     streams: PropTypes.arrayOf(PropTypes.object).isRequired,
     video: PropTypes.object,
     type: PropTypes.string,
-    onEpisodeSearch: PropTypes.func
+    onEpisodeSearch: PropTypes.func,
+    onDownloadCreated: PropTypes.func
 };
 
 module.exports = StreamsList;

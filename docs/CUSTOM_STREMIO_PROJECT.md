@@ -58,8 +58,8 @@ Notes:
 - `3. Preferred addon stream sorting/filtering`: In progress (`Milestone 3A` implemented)
 - `4. Add placeholder Download / Play Download buttons`: In progress (`Milestone 4A` implemented)
 - `5. Create local backend prototype`: In progress (`Milestone 5B` backend skeleton created)
+- `7. Add title-specific downloads panel`: In progress (`Milestone 7A` implemented)
 - `6. Implement real download manager`: Not started
-- `7. Add title-specific downloads panel`: Not started
 - `8. Add global downloads page`: Not started
 - `9. Add MPC-HC launch support`: Not started
 - `10. Add watched/unwatched integration`: Not started
@@ -78,7 +78,33 @@ Notes:
 
 ## Next Recommended Step
 
-Add a simple title-level downloads panel that lists backend records for the current `metaId`.
+Add simple backend status and duplicate-download prevention before implementing real downloads.
+
+## Milestone 7A Findings: Title Downloads Panel
+
+- Files changed:
+  - `src/customStremio/components/TitleDownloadsPanel.js`
+  - `src/customStremio/components/TitleDownloadsPanel.less`
+  - `src/routes/MetaDetails/StreamsList/StreamsList.js`
+  - `docs/CUSTOM_STREMIO_PROJECT.md`
+- Panel behavior:
+  - Adds a compact title-level downloads panel on the per-video stream page when `metaId` is available.
+  - The panel calls `listDownloads(metaId)` on mount and whenever `metaId` changes.
+  - It shows loading, offline/error, empty, and populated states.
+  - It includes a manual `Refresh` button.
+  - It displays each record's title, addon name, stream name, status, progress, local path when present, and created timestamp when present.
+- Backend requirements:
+  - The local backend must be running at `http://127.0.0.1:5577` for the panel to load records.
+- Auto-refresh:
+  - After a successful `createDownload(payload)` call from the existing Download button, `StreamsList.js` increments a local refresh key so the panel reloads automatically.
+- Layout adjustment:
+  - The title downloads panel was revised again so it now renders below `Summary` inside `MetaPreview`, above the trailer/library/share controls.
+  - Panel visibility no longer depends on the extra middle spacing column or browser zoom level.
+- Limitations:
+  - Display-only prototype UI
+  - No pause/resume/cancel controls yet
+  - No global downloads page yet
+  - Backend records are still in-memory only, so they disappear when the backend restarts
 
 ## Milestone 5D Findings: Download Button Backend Call
 

@@ -10,6 +10,7 @@ const { withCoreSuspender } = require('stremio/common');
 const { VerticalNavBar, HorizontalNavBar, DelayedRenderer, Image, MetaPreview, ModalDialog } = require('stremio/components');
 const StreamsList = require('./StreamsList');
 const VideosList = require('./VideosList');
+const TitleDownloadsPanel = require('stremio/customStremio/components/TitleDownloadsPanel');
 const useMetaDetails = require('./useMetaDetails');
 const useSeason = require('./useSeason');
 const useMetaExtensionTabs = require('./useMetaExtensionTabs');
@@ -20,6 +21,7 @@ const MetaDetails = ({ urlParams, queryParams }) => {
     const { t } = useTranslation();
     const core = useCore();
     const metaDetails = useMetaDetails(urlParams);
+    const [downloadsRefreshKey, setDownloadsRefreshKey] = React.useState(0);
     const [season, setSeason] = useSeason(urlParams, queryParams);
     const [tabs, metaExtension, clearMetaExtension] = useMetaExtensionTabs(metaDetails.metaExtensions);
     const [metaPath, streamPath] = React.useMemo(() => {
@@ -93,6 +95,9 @@ const MetaDetails = ({ urlParams, queryParams }) => {
     const seasonOnSelect = React.useCallback((event) => {
         setSeason(event.value);
     }, [setSeason]);
+    const handleDownloadCreated = React.useCallback(() => {
+        setDownloadsRefreshKey((currentValue) => currentValue + 1);
+    }, []);
     const handleEpisodeSearch = React.useCallback((season, episode) => {
         const searchVideoHash = encodeURIComponent(`${urlParams.id}:${season}:${episode}`);
         const url = window.location.hash;
@@ -192,6 +197,17 @@ const MetaDetails = ({ urlParams, queryParams }) => {
                                             toggleWatched={toggleWatched}
                                             metaId={metaDetails.metaItem.content.content.id}
                                             ratingInfo={metaDetails.ratingInfo}
+                                            footerContent={
+                                                streamPath !== null ?
+                                                    (
+                                                        <TitleDownloadsPanel
+                                                            metaId={metaDetails.metaItem.content.content.id}
+                                                            refreshKey={downloadsRefreshKey}
+                                                        />
+                                                    )
+                                                    :
+                                                    null
+                                            }
                                         />
                                     </React.Fragment>
                 }
@@ -205,6 +221,7 @@ const MetaDetails = ({ urlParams, queryParams }) => {
                             video={video}
                             type={streamPath.type}
                             onEpisodeSearch={handleEpisodeSearch}
+                            onDownloadCreated={handleDownloadCreated}
                         />
                         :
                         metaPath !== null ?

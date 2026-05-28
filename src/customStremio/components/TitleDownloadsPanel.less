@@ -1,0 +1,91 @@
+@import (reference) '~@stremio/stremio-colors/less/stremio-colors.less';
+
+.panel-container {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    margin: 0;
+    padding: 0.9rem 1rem;
+    width: 100%;
+    box-sizing: border-box;
+    border-radius: var(--border-radius);
+    background-color: rgba(6, 7, 12, 0.72);
+    backdrop-filter: blur(18px);
+    box-shadow: 0 1rem 2.5rem rgba(0, 0, 0, 0.3);
+}
+
+.panel-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+}
+
+.panel-title {
+    font-size: 1rem;
+    font-weight: 500;
+    color: var(--primary-foreground-color);
+}
+
+.refresh-button {
+    flex: none;
+    padding: 0.35rem 0.85rem;
+    border-radius: 999px;
+    color: var(--primary-foreground-color);
+    background-color: rgba(255, 255, 255, 0.12);
+
+    &:hover, &:focus {
+        background-color: var(--secondary-accent-color);
+    }
+}
+
+.panel-state,
+.panel-error {
+    font-size: 0.9rem;
+    color: var(--primary-foreground-color);
+    opacity: 0.85;
+}
+
+.panel-error {
+    color: var(--secondary-accent-color);
+    opacity: 1;
+}
+
+.records-container {
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+}
+
+.record-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    padding: 0.75rem 0.85rem;
+    border-radius: var(--border-radius);
+    background-color: rgba(255, 255, 255, 0.07);
+}
+
+.record-title {
+    font-size: 0.95rem;
+    font-weight: 500;
+    color: var(--primary-foreground-color);
+}
+
+.record-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1rem;
+    font-size: 0.85rem;
+    color: var(--primary-foreground-color);
+    opacity: 0.85;
+}
+
+.record-path,
+.record-created {
+    font-size: 0.8rem;
+    color: var(--primary-foreground-color);
+    opacity: 0.75;
+    word-break: break-word;
+}
