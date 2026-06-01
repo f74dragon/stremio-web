@@ -78,7 +78,27 @@ Notes:
 
 ## Next Recommended Step
 
-Surface duplicate/created status in the frontend title downloads panel, then implement real file downloading.
+Implement real backend file downloading with progress updates for direct URLs.
+
+## Milestone 5F Findings: Frontend Duplicate Download Status
+
+- Files changed:
+  - `src/routes/MetaDetails/StreamsList/StreamsList.js`
+  - `docs/CUSTOM_STREMIO_PROJECT.md`
+- Current behavior:
+  - The frontend now checks `record.duplicate` after `createDownload(payload)` returns.
+  - New backend records log `customStremio.downloadCreated`.
+  - Duplicate backend responses log `customStremio.downloadDuplicate`.
+  - Existing backend errors still log `customStremio.downloadCreateError`.
+- Visible status message:
+  - Added a temporary user-visible status message in `StreamsList` as a fixed top-center toast/pill overlay.
+  - Messages are:
+    - `Download queued.`
+    - `Already added.`
+    - `Download backend unavailable.`
+  - The message auto-clears after a few seconds and now animates in/out without depending on the stream sidebar width.
+- Refresh behavior:
+  - The title downloads panel still refreshes after both new and duplicate backend responses.
 
 ## Milestone 5E Findings: Backend Duplicate Download Prevention
 

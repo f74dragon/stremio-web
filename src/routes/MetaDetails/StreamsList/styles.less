@@ -13,6 +13,60 @@
     display: flex;
     flex-direction: column;
 
+    .download-status-toast-container {
+        position: fixed;
+        top: 1rem;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 20;
+        width: min(32rem, calc(100vw - 2rem));
+        display: flex;
+        justify-content: center;
+        pointer-events: none;
+    }
+
+    .download-status-toast {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 2.75rem;
+        width: auto;
+        max-width: 100%;
+        padding: 0.75rem 1.1rem;
+        border-radius: 999px;
+        color: var(--primary-foreground-color);
+        font-size: 0.95rem;
+        line-height: 1.3;
+        text-align: center;
+        box-shadow: 0 0.9rem 2rem rgba(0, 0, 0, 0.3);
+        backdrop-filter: blur(18px);
+        -webkit-backdrop-filter: blur(18px);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        transition: opacity 0.22s ease, transform 0.22s ease;
+    }
+
+    .download-status-toast-visible {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+
+    .download-status-toast-hidden {
+        opacity: 0;
+        transform: translateY(-0.45rem) scale(0.96);
+    }
+
+    .download-status-toast-created {
+        background-color: rgba(53, 120, 77, 0.72);
+    }
+
+    .download-status-toast-duplicate {
+        background-color: rgba(28, 28, 36, 0.82);
+    }
+
+    .download-status-toast-error {
+        background-color: rgba(179, 68, 68, 0.78);
+    }
+
     .message-container {
         flex: 0 1 auto;
         align-self: stretch;
@@ -188,6 +242,16 @@
 @media only screen and (max-width: @minimum) {
     .streams-list-container {
         overflow: visible;
+
+        .download-status-toast-container {
+            top: 0.75rem;
+            width: calc(100vw - 1.5rem);
+        }
+
+        .download-status-toast {
+            width: 100%;
+            padding: 0.8rem 1rem;
+        }
 
         .streams-container {
             margin-top: 0;

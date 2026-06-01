@@ -25,7 +25,10 @@ const StreamsList = ({ className, metaId, video, type, onEpisodeSearch, onDownlo
     const platform = usePlatform();
     const profile = useProfile();
     const streamsContainerRef = React.useRef(null);
+    const downloadStatusHideTimeoutRef = React.useRef(null);
+    const downloadStatusClearTimeoutRef = React.useRef(null);
     const [selectedAddon, setSelectedAddon] = React.useState(ALL_ADDONS_KEY);
+    const [downloadStatus, setDownloadStatus] = React.useState(null);
     const [preferredAddon, setPreferredAddon] = React.useState(() => {
         try {
             if (typeof window === 'undefined' || !window.localStorage) {
@@ -175,14 +178,51 @@ const StreamsList = ({ className, metaId, video, type, onEpisodeSearch, onDownlo
             onSelect: onPreferredAddonSelected
         };
     }, [streamsByAddon, preferredAddon, onPreferredAddonSelected]);
+    const showDownloadStatus = React.useCallback((message, tone) => {
+        const statusId = Date.now();
+        setDownloadStatus({ id: statusId, message, tone, visible: true });
+
+        if (downloadStatusHideTimeoutRef.current !== null) {
+            clearTimeout(downloadStatusHideTimeoutRef.current);
+        }
+        if (downloadStatusClearTimeoutRef.current !== null) {
+            clearTimeout(downloadStatusClearTimeoutRef.current);
+        }
+
+        downloadStatusHideTimeoutRef.current = setTimeout(() => {
+            setDownloadStatus((currentStatus) => {
+                if (currentStatus === null || currentStatus.id !== statusId) {
+                    return currentStatus;
+                }
+
+                return {
+                    ...currentStatus,
+                    visible: false
+                };
+            });
+            downloadStatusHideTimeoutRef.current = null;
+        }, 3200);
+
+        downloadStatusClearTimeoutRef.current = setTimeout(() => {
+            setDownloadStatus((currentStatus) => currentStatus !== null && currentStatus.id === statusId ? null : currentStatus);
+            downloadStatusClearTimeoutRef.current = null;
+        }, 4000);
+    }, []);
     const onDownloadPlaceholder = React.useCallback(async (downloadPayload) => {
         // eslint-disable-next-line no-console
         console.debug('customStremio.downloadPlaceholder', downloadPayload);
 
         try {
             const record = await createDownload(downloadPayload);
-            // eslint-disable-next-line no-console
-            console.debug('customStremio.downloadCreated', record);
+            if (record?.duplicate === true) {
+                // eslint-disable-next-line no-console
+                console.debug('customStremio.downloadDuplicate', record);
+                showDownloadStatus('Already added.', 'duplicate');
+            } else {
+                // eslint-disable-next-line no-console
+                console.debug('customStremio.downloadCreated', record);
+                showDownloadStatus('Download queued.', 'created');
+            }
             if (typeof onDownloadCreated === 'function') {
                 onDownloadCreated(record);
             }
@@ -192,7 +232,19 @@ const StreamsList = ({ className, metaId, video, type, onEpisodeSearch, onDownlo
                 status: error?.status ?? null,
                 backendError: error?.backendError ?? null
             });
+            showDownloadStatus('Download backend unavailable.', 'error');
         }
+    }, [onDownloadCreated, showDownloadStatus]);
+
+    React.useEffect(() => {
+        return () => {
+            if (downloadStatusHideTimeoutRef.current !== null) {
+                clearTimeout(downloadStatusHideTimeoutRef.current);
+            }
+            if (downloadStatusClearTimeoutRef.current !== null) {
+                clearTimeout(downloadStatusClearTimeoutRef.current);
+            }
+        };
     }, []);
 
     const handleEpisodePicker = React.useCallback((season, episode) => {
@@ -201,6 +253,23 @@ const StreamsList = ({ className, metaId, video, type, onEpisodeSearch, onDownlo
 
     return (
         <div className={classnames(className, styles['streams-list-container'])}>
+            {
+                downloadStatus !== null ?
+                    <div className={styles['download-status-toast-container']} aria-live={'polite'} aria-atomic={'true'}>
+                        <div
+                            className={classnames(
+                                styles['download-status-toast'],
+                                styles[`download-status-toast-${downloadStatus.tone}`],
+                                downloadStatus.visible ? styles['download-status-toast-visible'] : styles['download-status-toast-hidden']
+                            )}
+                            role={'status'}
+                        >
+                            {downloadStatus.message}
+                        </div>
+                    </div>
+                    :
+                    null
+            }
             <div className={styles['select-choices-wrapper']}>
                 {
                     video ?

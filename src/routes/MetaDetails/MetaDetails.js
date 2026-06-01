@@ -18,8 +18,8 @@ const styles = require('./styles');
 
 const STREAMS_SIDEBAR_WIDTH_STORAGE_KEY = 'customStremio.streamsSidebarWidth';
 const STREAMS_SIDEBAR_MIN_WIDTH = 420;
-const STREAMS_SIDEBAR_MAX_WIDTH = 960;
-const STREAMS_SIDEBAR_MIN_MAIN_CONTENT_WIDTH = 320;
+const STREAMS_SIDEBAR_MAX_WIDTH = 2260;
+const STREAMS_SIDEBAR_MIN_MAIN_CONTENT_WIDTH = 50;
 
 const clampSidebarWidth = (width, containerWidth) => {
     const maxWidth = typeof containerWidth === 'number' && !Number.isNaN(containerWidth) ?
