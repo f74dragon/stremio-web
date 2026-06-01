@@ -80,6 +80,42 @@ Notes:
 
 Implement real backend file downloading with progress updates for direct URLs.
 
+## Milestone 5G Findings: Record-Aware Download Button State
+
+- Files changed:
+  - `src/customStremio/downloadRecordMatching.js`
+  - `src/routes/MetaDetails/StreamsList/StreamsList.js`
+  - `src/routes/MetaDetails/StreamsList/Stream/Stream.js`
+  - `src/routes/MetaDetails/StreamsList/Stream/styles.less`
+  - `docs/CUSTOM_STREMIO_PROJECT.md`
+- Matching helper:
+  - Added `src/customStremio/downloadRecordMatching.js` to keep frontend record matching aligned with backend duplicate logic.
+  - It exposes:
+    - `getPayloadSourceUrl(payload)`
+    - `getRecordSourceUrl(record)`
+    - `isActiveDownloadRecord(record)`
+    - `doesRecordMatchPayload(record, payload)`
+    - `findMatchingDownloadRecord(records, payload)`
+- Button states:
+  - `Download`
+  - `Adding...`
+  - `Queued`
+  - `Downloading`
+  - `Paused`
+  - `Downloaded`
+- Current behavior:
+  - `StreamsList` now loads current backend records for the active `metaId` and computes a matching record for each stream payload.
+  - Matching mirrors the backend duplicate rule:
+    - source URL priority is `downloadUrl -> streamingUrl -> streamUrl -> externalUrl`
+    - active statuses are `queued`, `downloading`, `paused`, and `completed`
+    - matching uses `metaId + videoId + sourceUrl` when `videoId` exists
+    - otherwise matching falls back to `metaId + type + sourceUrl`
+  - Stream buttons with an active matching record now render a stateful label and avoid sending another create request from the button click.
+  - New create requests temporarily show `Adding...` until the backend responds, then settle into the matched backend status.
+- Deferred behavior:
+  - Progress visuals, cancel controls, and play-open actions for completed downloads are still deferred until real backend downloading exists.
+  - This milestone only reduces duplicate-click confusion and makes the button state reflect known backend records.
+
 ## Milestone 5F Findings: Frontend Duplicate Download Status
 
 - Files changed:

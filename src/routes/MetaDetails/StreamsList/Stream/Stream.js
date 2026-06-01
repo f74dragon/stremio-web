@@ -12,7 +12,26 @@ const { useRouteFocused } = require('stremio-router');
 const StreamPlaceholder = require('./StreamPlaceholder');
 const styles = require('./styles');
 
-const Stream = ({ className, videoId, videoReleased, addonName, name, description, thumbnail, progress, deepLinks, downloadPayload, onDownloadPlaceholder, ...props }) => {
+const getDownloadButtonLabel = (downloadRecord, isDownloadPending) => {
+    if (isDownloadPending) {
+        return 'Adding...';
+    }
+
+    switch (downloadRecord?.status) {
+        case 'queued':
+            return 'Queued';
+        case 'downloading':
+            return 'Downloading';
+        case 'paused':
+            return 'Paused';
+        case 'completed':
+            return 'Downloaded';
+        default:
+            return 'Download';
+    }
+};
+
+const Stream = ({ className, videoId, videoReleased, addonName, name, description, thumbnail, progress, deepLinks, downloadPayload, downloadRecord, isDownloadPending, onDownloadPlaceholder, ...props }) => {
     const profile = useProfile();
     const toast = useToast();
     const platform = usePlatform();
@@ -199,10 +218,13 @@ const Stream = ({ className, videoId, videoReleased, addonName, name, descriptio
         event.nativeEvent.togglePopupPrevented = true;
         event.nativeEvent.buttonClickPrevented = true;
 
-        if (typeof onDownloadPlaceholder === 'function') {
+        if (!downloadRecord && !isDownloadPending && typeof onDownloadPlaceholder === 'function') {
             onDownloadPlaceholder(downloadPayload);
         }
-    }, [downloadPayload, onDownloadPlaceholder]);
+    }, [downloadPayload, downloadRecord, isDownloadPending, onDownloadPlaceholder]);
+
+    const downloadButtonLabel = React.useMemo(() => getDownloadButtonLabel(downloadRecord, isDownloadPending), [downloadRecord, isDownloadPending]);
+    const downloadButtonDisabled = downloadRecord !== null || isDownloadPending;
 
     const renderThumbnailFallback = React.useCallback(() => (
         <Icon className={styles['placeholder-icon']} name={'ic_broken_link'} />
@@ -238,9 +260,18 @@ const Stream = ({ className, videoId, videoReleased, addonName, name, descriptio
                     }
                 </div>
                 <div className={styles['description-container']} title={description}>{description}</div>
-                <Button className={styles['download-button-container']} title={'Download'} tabIndex={-1} onClick={downloadButtonOnClick}>
+                <Button
+                    className={classnames(
+                        styles['download-button-container'],
+                        downloadButtonDisabled ? styles['download-button-disabled'] : null,
+                        downloadRecord?.status ? styles[`download-button-${downloadRecord.status}`] : null
+                    )}
+                    title={downloadButtonLabel}
+                    tabIndex={-1}
+                    onClick={downloadButtonOnClick}
+                >
                     <Icon className={styles['download-icon']} name={'download'} />
-                    <div className={styles['download-label']}>Download</div>
+                    <div className={styles['download-label']}>{downloadButtonLabel}</div>
                 </Button>
                 <Icon className={styles['icon']} name={'play'} />
                 {children}
@@ -333,6 +364,8 @@ Stream.propTypes = {
         })
     }),
     downloadPayload: PropTypes.object,
+    downloadRecord: PropTypes.object,
+    isDownloadPending: PropTypes.bool,
     onDownloadPlaceholder: PropTypes.func,
     onClick: PropTypes.func
 };

@@ -12,7 +12,8 @@ const styles = require('./styles');
 const { usePlatform, useProfile } = require('stremio/common');
 const { default: SeasonEpisodePicker } = require('../EpisodePicker');
 const { buildDownloadPayload } = require('stremio/customStremio/downloadPayload');
-const { createDownload } = require('stremio/customStremio/localBackendClient');
+const { createDownload, listDownloads } = require('stremio/customStremio/localBackendClient');
+const { findMatchingDownloadRecord, getPayloadSourceUrl, isActiveDownloadRecord } = require('stremio/customStremio/downloadRecordMatching');
 
 const ALL_ADDONS_KEY = 'ALL';
 const PREFERRED_ADDON_STORAGE_KEY = 'customStremio.preferredAddon';
@@ -29,6 +30,8 @@ const StreamsList = ({ className, metaId, video, type, onEpisodeSearch, onDownlo
     const downloadStatusClearTimeoutRef = React.useRef(null);
     const [selectedAddon, setSelectedAddon] = React.useState(ALL_ADDONS_KEY);
     const [downloadStatus, setDownloadStatus] = React.useState(null);
+    const [downloadRecords, setDownloadRecords] = React.useState([]);
+    const [pendingDownloadKeys, setPendingDownloadKeys] = React.useState({});
     const [preferredAddon, setPreferredAddon] = React.useState(() => {
         try {
             if (typeof window === 'undefined' || !window.localStorage) {
@@ -208,9 +211,45 @@ const StreamsList = ({ className, metaId, video, type, onEpisodeSearch, onDownlo
             downloadStatusClearTimeoutRef.current = null;
         }, 4000);
     }, []);
+    const loadDownloadRecords = React.useCallback(async () => {
+        if (!metaId) {
+            setDownloadRecords([]);
+            return [];
+        }
+
+        try {
+            const response = await listDownloads(metaId);
+            const items = Array.isArray(response?.items) ? response.items : [];
+            setDownloadRecords(items);
+            return items;
+        } catch {
+            setDownloadRecords([]);
+            return [];
+        }
+    }, [metaId]);
+    const getPendingDownloadKey = React.useCallback((downloadPayload) => {
+        const sourceUrl = getPayloadSourceUrl(downloadPayload);
+        if (!sourceUrl) {
+            return null;
+        }
+
+        const payloadVideoId = downloadPayload?.videoId;
+        return payloadVideoId ?
+            `${downloadPayload.metaId || ''}::${payloadVideoId}::${sourceUrl}`
+            :
+            `${downloadPayload.metaId || ''}::${downloadPayload?.type || ''}::${sourceUrl}`;
+    }, []);
     const onDownloadPlaceholder = React.useCallback(async (downloadPayload) => {
+        const pendingDownloadKey = getPendingDownloadKey(downloadPayload);
         // eslint-disable-next-line no-console
         console.debug('customStremio.downloadPlaceholder', downloadPayload);
+
+        if (pendingDownloadKey) {
+            setPendingDownloadKeys((currentKeys) => ({
+                ...currentKeys,
+                [pendingDownloadKey]: true
+            }));
+        }
 
         try {
             const record = await createDownload(downloadPayload);
@@ -223,6 +262,9 @@ const StreamsList = ({ className, metaId, video, type, onEpisodeSearch, onDownlo
                 console.debug('customStremio.downloadCreated', record);
                 showDownloadStatus('Download queued.', 'created');
             }
+
+            await loadDownloadRecords();
+
             if (typeof onDownloadCreated === 'function') {
                 onDownloadCreated(record);
             }
@@ -233,8 +275,16 @@ const StreamsList = ({ className, metaId, video, type, onEpisodeSearch, onDownlo
                 backendError: error?.backendError ?? null
             });
             showDownloadStatus('Download backend unavailable.', 'error');
+        } finally {
+            if (pendingDownloadKey) {
+                setPendingDownloadKeys((currentKeys) => {
+                    const nextKeys = { ...currentKeys };
+                    delete nextKeys[pendingDownloadKey];
+                    return nextKeys;
+                });
+            }
         }
-    }, [onDownloadCreated, showDownloadStatus]);
+    }, [getPendingDownloadKey, loadDownloadRecords, onDownloadCreated, showDownloadStatus]);
 
     React.useEffect(() => {
         return () => {
@@ -246,6 +296,9 @@ const StreamsList = ({ className, metaId, video, type, onEpisodeSearch, onDownlo
             }
         };
     }, []);
+    React.useEffect(() => {
+        loadDownloadRecords();
+    }, [loadDownloadRecords]);
 
     const handleEpisodePicker = React.useCallback((season, episode) => {
         onEpisodeSearch(season, episode);
@@ -350,28 +403,37 @@ const StreamsList = ({ className, metaId, video, type, onEpisodeSearch, onDownlo
                             :
                             <React.Fragment>
                                 <div className={styles['streams-container']} ref={streamsContainerRef}>
-                                    {orderedFilteredStreams.map((stream, index) => (
-                                        <Stream
-                                            key={index}
-                                            videoId={video?.id}
-                                            videoReleased={video?.released}
-                                            addonName={stream.addonName}
-                                            name={stream.name}
-                                            description={stream.description}
-                                            thumbnail={stream.thumbnail}
-                                            progress={stream.progress}
-                                            deepLinks={stream.deepLinks}
-                                            downloadPayload={buildDownloadPayload({
-                                                metaId,
-                                                type,
-                                                video,
-                                                addonName: stream.addonName,
-                                                stream
-                                            })}
-                                            onDownloadPlaceholder={onDownloadPlaceholder}
-                                            onClick={stream.onClick}
-                                        />
-                                    ))}
+                                    {orderedFilteredStreams.map((stream, index) => {
+                                        const downloadPayload = buildDownloadPayload({
+                                            metaId,
+                                            type,
+                                            video,
+                                            addonName: stream.addonName,
+                                            stream
+                                        });
+                                        const downloadRecord = findMatchingDownloadRecord(downloadRecords, downloadPayload);
+                                        const pendingDownloadKey = getPendingDownloadKey(downloadPayload);
+                                        const isDownloadPending = pendingDownloadKey ? pendingDownloadKeys[pendingDownloadKey] === true : false;
+
+                                        return (
+                                            <Stream
+                                                key={index}
+                                                videoId={video?.id}
+                                                videoReleased={video?.released}
+                                                addonName={stream.addonName}
+                                                name={stream.name}
+                                                description={stream.description}
+                                                thumbnail={stream.thumbnail}
+                                                progress={stream.progress}
+                                                deepLinks={stream.deepLinks}
+                                                downloadPayload={downloadPayload}
+                                                downloadRecord={isActiveDownloadRecord(downloadRecord) ? downloadRecord : null}
+                                                isDownloadPending={isDownloadPending}
+                                                onDownloadPlaceholder={onDownloadPlaceholder}
+                                                onClick={stream.onClick}
+                                            />
+                                        );
+                                    })}
                                     {
                                         showInstallAddonsButton ?
                                             <Button className={styles['install-button-container']} title={t('ADDON_CATALOGUE_MORE')} href={'#/addons'}>
