@@ -16,12 +16,38 @@ const useSeason = require('./useSeason');
 const useMetaExtensionTabs = require('./useMetaExtensionTabs');
 const styles = require('./styles');
 
+const STREAMS_SIDEBAR_WIDTH_STORAGE_KEY = 'customStremio.streamsSidebarWidth';
+const STREAMS_SIDEBAR_MIN_WIDTH = 420;
+const STREAMS_SIDEBAR_MAX_WIDTH = 960;
+const STREAMS_SIDEBAR_MIN_MAIN_CONTENT_WIDTH = 320;
+
+const clampSidebarWidth = (width, containerWidth) => {
+    const maxWidth = typeof containerWidth === 'number' && !Number.isNaN(containerWidth) ?
+        Math.min(STREAMS_SIDEBAR_MAX_WIDTH, Math.max(STREAMS_SIDEBAR_MIN_WIDTH, containerWidth - STREAMS_SIDEBAR_MIN_MAIN_CONTENT_WIDTH))
+        :
+        STREAMS_SIDEBAR_MAX_WIDTH;
+
+    return Math.min(maxWidth, Math.max(STREAMS_SIDEBAR_MIN_WIDTH, width));
+};
+
 const MetaDetails = ({ urlParams, queryParams }) => {
     const contentRef = React.useRef(null);
+    const sidebarResizeStateRef = React.useRef(null);
     const { t } = useTranslation();
     const core = useCore();
     const metaDetails = useMetaDetails(urlParams);
     const [downloadsRefreshKey, setDownloadsRefreshKey] = React.useState(0);
+    const [streamsSidebarWidth, setStreamsSidebarWidth] = React.useState(() => {
+        try {
+            if (typeof window === 'undefined' || !window.localStorage) {
+                return 480;
+            }
+
+            return clampSidebarWidth(Number(window.localStorage.getItem(STREAMS_SIDEBAR_WIDTH_STORAGE_KEY)) || 480);
+        } catch {
+            return 480;
+        }
+    });
     const [season, setSeason] = useSeason(urlParams, queryParams);
     const [tabs, metaExtension, clearMetaExtension] = useMetaExtensionTabs(metaDetails.metaExtensions);
     const [metaPath, streamPath] = React.useMemo(() => {
@@ -108,6 +134,77 @@ const MetaDetails = ({ urlParams, queryParams }) => {
 
         window.location = searchVideoPath;
     }, [urlParams, window.location]);
+    const stopSidebarResize = React.useCallback(() => {
+        sidebarResizeStateRef.current = null;
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+    }, []);
+    const handleSidebarResizeMove = React.useCallback((event) => {
+        if (sidebarResizeStateRef.current === null) {
+            return;
+        }
+
+        const { contentLeft, contentWidth } = sidebarResizeStateRef.current;
+        const nextWidth = clampSidebarWidth(contentLeft + contentWidth - event.clientX, contentWidth);
+        setStreamsSidebarWidth(nextWidth);
+    }, []);
+    const startSidebarResize = React.useCallback((event) => {
+        if (window.matchMedia(`(max-width:  ${767}px)`).matches) {
+            return;
+        }
+
+        if (!contentRef.current) {
+            return;
+        }
+
+        const contentBounds = contentRef.current.getBoundingClientRect();
+        sidebarResizeStateRef.current = {
+            contentLeft: contentBounds.left,
+            contentWidth: contentBounds.width
+        };
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+        event.preventDefault();
+    }, []);
+
+    React.useEffect(() => {
+        window.addEventListener('pointermove', handleSidebarResizeMove);
+        window.addEventListener('pointerup', stopSidebarResize);
+        window.addEventListener('pointercancel', stopSidebarResize);
+
+        return () => {
+            window.removeEventListener('pointermove', handleSidebarResizeMove);
+            window.removeEventListener('pointerup', stopSidebarResize);
+            window.removeEventListener('pointercancel', stopSidebarResize);
+            stopSidebarResize();
+        };
+    }, [handleSidebarResizeMove, stopSidebarResize]);
+
+    React.useEffect(() => {
+        const resizeSidebarToViewport = () => {
+            const containerWidth = contentRef.current?.getBoundingClientRect().width || window.innerWidth;
+            setStreamsSidebarWidth((currentValue) => clampSidebarWidth(currentValue, containerWidth));
+        };
+
+        resizeSidebarToViewport();
+        window.addEventListener('resize', resizeSidebarToViewport);
+
+        return () => {
+            window.removeEventListener('resize', resizeSidebarToViewport);
+        };
+    }, []);
+
+    React.useEffect(() => {
+        try {
+            if (typeof window === 'undefined' || !window.localStorage) {
+                return;
+            }
+
+            window.localStorage.setItem(STREAMS_SIDEBAR_WIDTH_STORAGE_KEY, String(Math.round(streamsSidebarWidth)));
+        } catch {
+            // Ignore persistence failures and keep the in-memory width.
+        }
+    }, [streamsSidebarWidth]);
 
     const renderBackgroundImageFallback = React.useCallback(() => null, []);
     const renderBackground = React.useMemo(() => !!(
@@ -214,15 +311,25 @@ const MetaDetails = ({ urlParams, queryParams }) => {
                 <div className={styles['spacing']} />
                 {
                     streamPath !== null ?
-                        <StreamsList
-                            className={styles['streams-list']}
-                            metaId={metaDetails.metaItem?.content?.type === 'Ready' ? metaDetails.metaItem.content.content.id : null}
-                            streams={metaDetails.streams}
-                            video={video}
-                            type={streamPath.type}
-                            onEpisodeSearch={handleEpisodeSearch}
-                            onDownloadCreated={handleDownloadCreated}
-                        />
+                        <div className={styles['streams-list-shell']} style={{ width: `${streamsSidebarWidth}px` }}>
+                            <div
+                                className={styles['streams-list-resize-handle']}
+                                onPointerDown={startSidebarResize}
+                                title={'Resize stream sidebar'}
+                                role={'separator'}
+                                aria-orientation={'vertical'}
+                                aria-label={'Resize stream sidebar'}
+                            />
+                            <StreamsList
+                                className={styles['streams-list']}
+                                metaId={metaDetails.metaItem?.content?.type === 'Ready' ? metaDetails.metaItem.content.content.id : null}
+                                streams={metaDetails.streams}
+                                video={video}
+                                type={streamPath.type}
+                                onEpisodeSearch={handleEpisodeSearch}
+                                onDownloadCreated={handleDownloadCreated}
+                            />
+                        </div>
                         :
                         metaPath !== null ?
                             <VideosList

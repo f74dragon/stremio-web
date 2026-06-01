@@ -80,6 +80,23 @@ Notes:
 
 Add simple backend status and duplicate-download prevention before implementing real downloads.
 
+## Milestone 7B Findings: Resizable Stream Sidebar
+
+- Files changed:
+  - `src/routes/MetaDetails/MetaDetails.js`
+  - `src/routes/MetaDetails/styles.less`
+  - `docs/CUSTOM_STREMIO_PROJECT.md`
+- Current behavior:
+  - The per-video stream sidebar no longer uses a fixed desktop width only.
+  - A drag handle now appears on the left edge of the stream sidebar on desktop.
+  - Dragging the handle resizes the sidebar width within bounded min/max values so long stream titles and controls have more room.
+  - The selected width is persisted in local storage using `customStremio.streamsSidebarWidth`.
+- Limits:
+  - Desktop-only interaction
+  - Mobile layout keeps the existing stacked behavior and disables the resize handle
+- Safety:
+  - Stream playback behavior, preferred-addon sorting, and the download panel flow are unchanged.
+
 ## Milestone 7A Findings: Title Downloads Panel
 
 - Files changed:
