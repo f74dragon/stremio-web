@@ -9,6 +9,7 @@ const SERVICE_VERSION = 'dev';
 const app = express();
 const downloads = new Map();
 let downloadCounter = 0;
+const ACTIVE_DUPLICATE_STATUSES = new Set(['queued', 'downloading', 'paused', 'completed']);
 
 const getNowIso = () => new Date().toISOString();
 
@@ -59,6 +60,32 @@ const createDownloadRecord = (payload) => {
         completedAt: null,
         error: null
     };
+};
+
+const getPayloadVideoId = (payload) => {
+    return typeof payload?.videoId === 'string' && payload.videoId.length > 0 ? payload.videoId : null;
+};
+
+const findActiveDuplicateDownload = (payload, sourceUrl) => {
+    const payloadMetaId = payload?.metaId ?? null;
+    const payloadType = payload?.type ?? null;
+    const payloadVideoId = getPayloadVideoId(payload);
+
+    return Array.from(downloads.values()).find((record) => {
+        if (!ACTIVE_DUPLICATE_STATUSES.has(record.status)) {
+            return false;
+        }
+
+        if (record.sourceUrl !== sourceUrl || record.metaId !== payloadMetaId) {
+            return false;
+        }
+
+        if (payloadVideoId !== null) {
+            return record.videoId === payloadVideoId;
+        }
+
+        return (record.videoId === null || record.videoId === undefined) && record.type === payloadType;
+    }) || null;
 };
 
 const updateDownloadRecord = (record, updates) => {
@@ -122,9 +149,21 @@ app.post('/downloads', (request, response) => {
         return;
     }
 
+    const duplicateRecord = findActiveDuplicateDownload(payload, sourceUrl);
+    if (duplicateRecord) {
+        response.status(200).json({
+            ...duplicateRecord,
+            duplicate: true
+        });
+        return;
+    }
+
     const record = createDownloadRecord(payload);
     downloads.set(record.id, record);
-    response.status(201).json(record);
+    response.status(201).json({
+        ...record,
+        duplicate: false
+    });
 });
 
 app.get('/downloads', (request, response) => {

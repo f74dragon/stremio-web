@@ -82,7 +82,8 @@ Example combined download record shape:
   "createdAt": "2026-05-23T12:00:00.000Z",
   "updatedAt": "2026-05-23T12:00:00.000Z",
   "completedAt": null,
-  "error": null
+  "error": null,
+  "duplicate": false
 }
 ```
 
@@ -120,8 +121,22 @@ Purpose:
 Request body:
 - The frontend `buildDownloadPayload(input)` output fields listed above.
 
+Duplicate behavior:
+- Backend must detect active duplicates before creating a new record.
+- Active duplicate match rule:
+  - same `metaId`
+  - same `videoId`
+  - same selected `sourceUrl`
+  - and existing status in `queued`, `downloading`, `paused`, or `completed`
+- If `videoId` is missing, fallback duplicate matching uses:
+  - same `metaId`
+  - same `type`
+  - same selected `sourceUrl`
+- Records with status `canceled`, `failed`, or `deleted` do not block a new create.
+
 Response shape:
-- Full download record including generated backend fields.
+- New record: HTTP `201` with full download record and `duplicate: false`
+- Duplicate active record: HTTP `200` with the existing full download record and `duplicate: true`
 
 ### 3. `GET /downloads`
 

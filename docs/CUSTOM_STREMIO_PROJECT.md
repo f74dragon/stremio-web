@@ -78,7 +78,27 @@ Notes:
 
 ## Next Recommended Step
 
-Add simple backend status and duplicate-download prevention before implementing real downloads.
+Surface duplicate/created status in the frontend title downloads panel, then implement real file downloading.
+
+## Milestone 5E Findings: Backend Duplicate Download Prevention
+
+- Files changed:
+  - `local-backend/server.js`
+  - `local-backend/README.md`
+  - `docs/CUSTOM_STREMIO_BACKEND_API.md`
+  - `docs/CUSTOM_STREMIO_PROJECT.md`
+- Duplicate matching rule:
+  - active duplicates are matched backend-side using `metaId + videoId + sourceUrl`
+  - when `videoId` is missing, matching falls back to `metaId + type + sourceUrl`
+  - only statuses `queued`, `downloading`, `paused`, and `completed` block a new create
+  - `canceled`, `failed`, and `deleted` records do not block a new create
+- Current behavior:
+  - duplicate `POST /downloads` requests now return the existing record with HTTP `200` and `duplicate: true`
+  - new records still return a created record with `duplicate: false`
+- Limitations:
+  - duplicate prevention is still in-memory only
+  - backend restarts clear the duplicate history
+  - no real file downloading yet
 
 ## Milestone 7B Findings: Resizable Stream Sidebar
 
