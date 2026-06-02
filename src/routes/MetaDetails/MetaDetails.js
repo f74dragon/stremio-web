@@ -7,6 +7,7 @@ const classnames = require('classnames');
 const { useCore } = require('stremio/core');
 const { useContentGamepadNavigation } = require('stremio/services/GamepadNavigation');
 const { withCoreSuspender } = require('stremio/common');
+const { listDownloads } = require('stremio/customStremio/localBackendClient');
 const { VerticalNavBar, HorizontalNavBar, DelayedRenderer, Image, MetaPreview, ModalDialog } = require('stremio/components');
 const StreamsList = require('./StreamsList');
 const VideosList = require('./VideosList');
@@ -20,6 +21,7 @@ const STREAMS_SIDEBAR_WIDTH_STORAGE_KEY = 'customStremio.streamsSidebarWidth';
 const STREAMS_SIDEBAR_MIN_WIDTH = 420;
 const STREAMS_SIDEBAR_MAX_WIDTH = 2260;
 const STREAMS_SIDEBAR_MIN_MAIN_CONTENT_WIDTH = 50;
+const ACTIVE_DOWNLOAD_STATUSES = new Set(['queued', 'downloading', 'paused']);
 
 const clampSidebarWidth = (width, containerWidth) => {
     const maxWidth = typeof containerWidth === 'number' && !Number.isNaN(containerWidth) ?
@@ -33,10 +35,16 @@ const clampSidebarWidth = (width, containerWidth) => {
 const MetaDetails = ({ urlParams, queryParams }) => {
     const contentRef = React.useRef(null);
     const sidebarResizeStateRef = React.useRef(null);
+    const titleDownloadsLoadedRef = React.useRef(false);
+    const titleDownloadsSnapshotRef = React.useRef('');
     const { t } = useTranslation();
     const core = useCore();
     const metaDetails = useMetaDetails(urlParams);
     const [downloadsRefreshKey, setDownloadsRefreshKey] = React.useState(0);
+    const [titleDownloadRecords, setTitleDownloadRecords] = React.useState([]);
+    const [titleDownloadsInitialLoading, setTitleDownloadsInitialLoading] = React.useState(false);
+    const [titleDownloadsRefreshing, setTitleDownloadsRefreshing] = React.useState(false);
+    const [titleDownloadsError, setTitleDownloadsError] = React.useState('');
     const [streamsSidebarWidth, setStreamsSidebarWidth] = React.useState(() => {
         try {
             if (typeof window === 'undefined' || !window.localStorage) {
@@ -68,6 +76,16 @@ const MetaDetails = ({ urlParams, queryParams }) => {
             :
             null;
     }, [metaDetails.metaItem, streamPath]);
+    const metaItemContent = React.useMemo(() => {
+        return metaDetails.metaItem !== null && metaDetails.metaItem.content.type === 'Ready' ?
+            metaDetails.metaItem.content.content
+            :
+            null;
+    }, [metaDetails.metaItem]);
+    const titleDownloadsMetaId = metaItemContent?.id ?? null;
+    const titleDownloadsHasActiveRecords = React.useMemo(() => {
+        return titleDownloadRecords.some((record) => ACTIVE_DOWNLOAD_STATUSES.has(record?.status));
+    }, [titleDownloadRecords]);
     const addToLibrary = React.useCallback(() => {
         if (metaDetails.metaItem === null || metaDetails.metaItem.content.type !== 'Ready') {
             return;
@@ -124,6 +142,55 @@ const MetaDetails = ({ urlParams, queryParams }) => {
     const handleDownloadCreated = React.useCallback(() => {
         setDownloadsRefreshKey((currentValue) => currentValue + 1);
     }, []);
+    const loadTitleDownloads = React.useCallback(async ({ silent = false } = {}) => {
+        if (!titleDownloadsMetaId) {
+            setTitleDownloadRecords([]);
+            setTitleDownloadsError('');
+            setTitleDownloadsInitialLoading(false);
+            setTitleDownloadsRefreshing(false);
+            titleDownloadsLoadedRef.current = false;
+            titleDownloadsSnapshotRef.current = '';
+            return [];
+        }
+
+        if (!silent && !titleDownloadsLoadedRef.current) {
+            setTitleDownloadsInitialLoading(true);
+        } else if (silent || titleDownloadsLoadedRef.current) {
+            setTitleDownloadsRefreshing(true);
+        }
+
+        if (!silent || !titleDownloadsLoadedRef.current) {
+            setTitleDownloadsError('');
+        }
+
+        try {
+            const response = await listDownloads(titleDownloadsMetaId);
+            const items = Array.isArray(response?.items) ? response.items : [];
+            const nextSnapshot = JSON.stringify(items);
+
+            if (titleDownloadsSnapshotRef.current !== nextSnapshot) {
+                setTitleDownloadRecords(items);
+                titleDownloadsSnapshotRef.current = nextSnapshot;
+            }
+
+            titleDownloadsLoadedRef.current = true;
+            setTitleDownloadsError('');
+            return items;
+        } catch (requestError) {
+            const message = requestError?.message || 'Local backend is unavailable.';
+
+            if (!titleDownloadsLoadedRef.current) {
+                setTitleDownloadRecords([]);
+                titleDownloadsSnapshotRef.current = '';
+            }
+
+            setTitleDownloadsError(message);
+            return titleDownloadsLoadedRef.current ? titleDownloadRecords : [];
+        } finally {
+            setTitleDownloadsInitialLoading(false);
+            setTitleDownloadsRefreshing(false);
+        }
+    }, [titleDownloadsMetaId, titleDownloadRecords]);
     const handleEpisodeSearch = React.useCallback((season, episode) => {
         const searchVideoHash = encodeURIComponent(`${urlParams.id}:${season}:${episode}`);
         const url = window.location.hash;
@@ -205,6 +272,33 @@ const MetaDetails = ({ urlParams, queryParams }) => {
             // Ignore persistence failures and keep the in-memory width.
         }
     }, [streamsSidebarWidth]);
+    React.useEffect(() => {
+        if (streamPath === null) {
+            setTitleDownloadRecords([]);
+            setTitleDownloadsError('');
+            setTitleDownloadsInitialLoading(false);
+            setTitleDownloadsRefreshing(false);
+            titleDownloadsLoadedRef.current = false;
+            titleDownloadsSnapshotRef.current = '';
+            return;
+        }
+
+        loadTitleDownloads();
+    }, [downloadsRefreshKey, loadTitleDownloads, streamPath]);
+
+    React.useEffect(() => {
+        if (streamPath === null || !titleDownloadsMetaId || !titleDownloadsHasActiveRecords || titleDownloadsError) {
+            return undefined;
+        }
+
+        const intervalId = window.setInterval(() => {
+            loadTitleDownloads({ silent: true });
+        }, 1500);
+
+        return () => {
+            window.clearInterval(intervalId);
+        };
+    }, [loadTitleDownloads, streamPath, titleDownloadsError, titleDownloadsHasActiveRecords, titleDownloadsMetaId]);
 
     const renderBackgroundImageFallback = React.useCallback(() => null, []);
     const renderBackground = React.useMemo(() => !!(
@@ -298,8 +392,12 @@ const MetaDetails = ({ urlParams, queryParams }) => {
                                                 streamPath !== null ?
                                                     (
                                                         <TitleDownloadsPanel
-                                                            metaId={metaDetails.metaItem.content.content.id}
-                                                            refreshKey={downloadsRefreshKey}
+                                                            metaId={titleDownloadsMetaId}
+                                                            items={titleDownloadRecords}
+                                                            initialLoading={titleDownloadsInitialLoading}
+                                                            refreshing={titleDownloadsRefreshing}
+                                                            error={titleDownloadsError}
+                                                            onRefresh={loadTitleDownloads}
                                                         />
                                                     )
                                                     :
@@ -322,8 +420,10 @@ const MetaDetails = ({ urlParams, queryParams }) => {
                             />
                             <StreamsList
                                 className={styles['streams-list']}
-                                metaId={metaDetails.metaItem?.content?.type === 'Ready' ? metaDetails.metaItem.content.content.id : null}
+                                metaId={titleDownloadsMetaId}
+                                parentTitle={metaItemContent?.name ?? video?.title ?? null}
                                 streams={metaDetails.streams}
+                                downloadRecords={titleDownloadRecords}
                                 video={video}
                                 type={streamPath.type}
                                 onEpisodeSearch={handleEpisodeSearch}

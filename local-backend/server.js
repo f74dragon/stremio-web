@@ -1,15 +1,16 @@
 const express = require('express');
 const cors = require('cors');
+const { startDownload, cancelDownload, isDownloadActive, isSupportedSourceUrl } = require('./downloadManager');
 
 const HOST = '127.0.0.1';
 const PORT = Number(process.env.PORT) || 5577;
 const SERVICE_NAME = 'custom-stremio-local-backend';
 const SERVICE_VERSION = 'dev';
+const ACTIVE_DUPLICATE_STATUSES = new Set(['queued', 'downloading', 'paused', 'completed']);
 
 const app = express();
 const downloads = new Map();
 let downloadCounter = 0;
-const ACTIVE_DUPLICATE_STATUSES = new Set(['queued', 'downloading', 'paused', 'completed']);
 
 const getNowIso = () => new Date().toISOString();
 
@@ -33,6 +34,7 @@ const createDownloadRecord = (payload) => {
     return {
         metaId: payload?.metaId ?? null,
         type: payload?.type ?? null,
+        parentTitle: payload?.parentTitle ?? payload?.videoTitle ?? null,
         videoId: payload?.videoId ?? null,
         videoTitle: payload?.videoTitle ?? null,
         season: typeof payload?.season === 'number' ? payload.season : null,
@@ -99,6 +101,15 @@ const updateDownloadRecord = (record, updates) => {
     return nextRecord;
 };
 
+const updateDownloadRecordById = (recordId, updates) => {
+    const existingRecord = downloads.get(recordId);
+    if (!existingRecord) {
+        return null;
+    }
+
+    return updateDownloadRecord(existingRecord, updates);
+};
+
 const getDownloadRecordOrSend404 = (id, response) => {
     const record = downloads.get(id);
     if (!record) {
@@ -112,11 +123,26 @@ const getDownloadRecordOrSend404 = (id, response) => {
     return record;
 };
 
+const startBackgroundDownload = (record) => {
+    startDownload(record, updateDownloadRecordById).catch((error) => {
+        const nextRecord = downloads.get(record.id);
+        if (nextRecord && nextRecord.status !== 'failed' && nextRecord.status !== 'canceled') {
+            updateDownloadRecord(nextRecord, {
+                status: 'failed',
+                error: error?.message || 'Download failed',
+                completedAt: null,
+                speedBytesPerSecond: 0,
+                etaSeconds: null
+            });
+        }
+    });
+};
+
 app.use(cors());
 app.use(express.json());
 
 app.use((request, response, next) => {
-    console.log(`${request.method} ${request.route?.path || request.path.split('/')[1] || '/'}`);
+    console.log(`${request.method} ${request.path}`);
     next();
 });
 
@@ -149,6 +175,14 @@ app.post('/downloads', (request, response) => {
         return;
     }
 
+    if (!isSupportedSourceUrl(sourceUrl)) {
+        response.status(400).json({
+            ok: false,
+            error: 'Unsupported source URL protocol. Only http and https are supported.'
+        });
+        return;
+    }
+
     const duplicateRecord = findActiveDuplicateDownload(payload, sourceUrl);
     if (duplicateRecord) {
         response.status(200).json({
@@ -160,6 +194,7 @@ app.post('/downloads', (request, response) => {
 
     const record = createDownloadRecord(payload);
     downloads.set(record.id, record);
+    startBackgroundDownload(record);
     response.status(201).json({
         ...record,
         duplicate: false
@@ -198,12 +233,10 @@ app.post('/downloads/:id/pause', (request, response) => {
         return;
     }
 
-    if (record.status === 'queued' || record.status === 'downloading') {
-        response.json(updateDownloadRecord(record, { status: 'paused' }));
-        return;
-    }
-
-    response.json(record);
+    response.status(501).json({
+        ok: false,
+        error: 'Pause is not implemented yet'
+    });
 });
 
 app.post('/downloads/:id/resume', (request, response) => {
@@ -212,35 +245,53 @@ app.post('/downloads/:id/resume', (request, response) => {
         return;
     }
 
-    if (record.status === 'paused') {
-        response.json(updateDownloadRecord(record, { status: 'queued' }));
+    response.status(501).json({
+        ok: false,
+        error: 'Resume is not implemented yet'
+    });
+});
+
+app.post('/downloads/:id/cancel', async (request, response) => {
+    const record = getDownloadRecordOrSend404(request.params.id, response);
+    if (!record) {
+        return;
+    }
+
+    if (isDownloadActive(record.id)) {
+        await cancelDownload(record.id);
+        response.json(downloads.get(record.id) || record);
+        return;
+    }
+
+    if (record.status === 'queued') {
+        response.json(updateDownloadRecord(record, {
+            status: 'canceled',
+            speedBytesPerSecond: 0,
+            etaSeconds: null,
+            error: null
+        }));
         return;
     }
 
     response.json(record);
 });
 
-app.post('/downloads/:id/cancel', (request, response) => {
+app.delete('/downloads/:id', async (request, response) => {
     const record = getDownloadRecordOrSend404(request.params.id, response);
     if (!record) {
         return;
     }
 
-    if (record.status === 'queued' || record.status === 'downloading' || record.status === 'paused') {
-        response.json(updateDownloadRecord(record, { status: 'canceled' }));
-        return;
+    if (isDownloadActive(record.id)) {
+        await cancelDownload(record.id);
     }
 
-    response.json(record);
-});
-
-app.delete('/downloads/:id', (request, response) => {
-    const record = getDownloadRecordOrSend404(request.params.id, response);
-    if (!record) {
-        return;
-    }
-
-    const deletedRecord = updateDownloadRecord(record, { status: 'deleted' });
+    const latestRecord = downloads.get(record.id) || record;
+    const deletedRecord = updateDownloadRecord(latestRecord, {
+        status: 'deleted',
+        speedBytesPerSecond: 0,
+        etaSeconds: null
+    });
     response.json({
         ok: true,
         id: deletedRecord.id,

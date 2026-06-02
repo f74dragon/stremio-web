@@ -23,6 +23,7 @@ The frontend will send `POST /downloads` using the current `buildDownloadPayload
 
 - `metaId`
 - `type`
+- `parentTitle`
 - `videoId`
 - `videoTitle`
 - `season`
@@ -59,6 +60,7 @@ Example combined download record shape:
   "id": "dl_0001",
   "metaId": "tt1234567",
   "type": "series",
+  "parentTitle": "Show Title",
   "videoId": "tt1234567:1:2",
   "videoTitle": "Episode Title",
   "season": 1,
@@ -138,6 +140,11 @@ Response shape:
 - New record: HTTP `201` with full download record and `duplicate: false`
 - Duplicate active record: HTTP `200` with the existing full download record and `duplicate: true`
 
+Runtime behavior:
+- New records start a real background direct-file download immediately after record creation.
+- The response returns before the file transfer completes.
+- Frontend polling or refresh should read progress from later `GET /downloads` or `GET /downloads/:id` responses.
+
 ### 3. `GET /downloads`
 
 Purpose:
@@ -177,7 +184,14 @@ Request body:
 - none
 
 Response shape:
-- Updated full download record.
+- Current milestone limitation: HTTP `501`
+
+```json
+{
+  "ok": false,
+  "error": "Pause is not implemented yet"
+}
+```
 
 ### 6. `POST /downloads/:id/resume`
 
@@ -188,7 +202,14 @@ Request body:
 - none
 
 Response shape:
-- Updated full download record.
+- Current milestone limitation: HTTP `501`
+
+```json
+{
+  "ok": false,
+  "error": "Resume is not implemented yet"
+}
+```
 
 ### 7. `POST /downloads/:id/cancel`
 
@@ -200,6 +221,10 @@ Request body:
 
 Response shape:
 - Updated full download record.
+
+Behavior notes:
+- If the download is actively running, the backend aborts the active transfer and updates the record to `canceled`.
+- Partial files may remain on disk for now.
 
 ### 8. `DELETE /downloads/:id`
 
@@ -255,6 +280,16 @@ Notes:
 - `failed`
 - `deleted`
 
+## Progress Field Notes
+
+- `bytesDownloaded` increases during active downloads.
+- `bytesTotal` comes from `Content-Length` when the remote server provides it.
+- `progress` is a percentage when `bytesTotal` is known.
+- If `Content-Length` is missing, `bytesTotal` remains `null` and `progress` stays `0` safely until completion.
+- `speedBytesPerSecond` and `etaSeconds` are derived from current transfer progress.
+- `completedAt` is set when a download finishes successfully.
+- `localPath` is set to the final target file path once the backend resolves the destination.
+
 ## File Organization Rule
 
 Intended default structure:
@@ -274,11 +309,18 @@ Stremio Downloads/
 
 Filenames and folder names must be sanitized for Windows.
 
+Current implementation notes:
+- Default root folder is `%USERPROFILE%\Downloads\Stremio Downloads`
+- `CUSTOM_STREMIO_DOWNLOAD_DIR` overrides that root in development
+- `parentTitle` is used for the top-level movie/show folder name
+- `videoTitle` remains the episode or item-level title used in the file name
+
 ## Security Notes
 
 - Bind to `127.0.0.1` only.
 - Do not expose backend to LAN/internet.
 - Validate URLs.
+- Allow only `http` and `https` source URLs.
 - Avoid logging sensitive RealDebrid/addon URLs in production.
 - Treat resolved stream URLs as temporary.
 

@@ -22,10 +22,23 @@
     gap: 0.75rem;
 }
 
+.panel-title-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 0.75rem;
+}
+
 .panel-title {
     font-size: 1rem;
     font-weight: 500;
     color: var(--primary-foreground-color);
+}
+
+.panel-refreshing {
+    font-size: 0.78rem;
+    color: var(--primary-foreground-color);
+    opacity: 0.62;
 }
 
 .refresh-button {
@@ -50,6 +63,11 @@
 .panel-error {
     color: var(--secondary-accent-color);
     opacity: 1;
+}
+
+.panel-error-inline {
+    font-size: 0.82rem;
+    color: var(--secondary-accent-color);
 }
 
 .records-container {

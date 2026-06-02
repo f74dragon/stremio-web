@@ -1,8 +1,8 @@
 # Custom Stremio Local Backend
 
-Development-only local backend placeholder for the custom Stremio download flow.
+Development-only local backend for the custom Stremio download flow.
 
-It currently exposes in-memory API endpoints for health checks and placeholder download records. It does not download files yet.
+It now performs real direct HTTP/HTTPS file downloads in the background, stores records in memory, and updates progress fields over time. It still does not persist records, implement pause/resume, or launch MPC-HC yet.
 
 ## Install
 
@@ -26,101 +26,117 @@ The server binds to:
 
 `http://127.0.0.1:5577`
 
-## Test: Health
+## Download Folder
 
-```bash
-curl http://127.0.0.1:5577/health
+Default root:
+
+`%USERPROFILE%\Downloads\Stremio Downloads`
+
+Override it with:
+
+```powershell
+$env:CUSTOM_STREMIO_DOWNLOAD_DIR = 'C:\Temp\Custom Stremio Downloads'
+npm start
 ```
 
-## Test: Create Download
+## Current Download Behavior
 
-```bash
-curl -X POST http://127.0.0.1:5577/downloads \
-  -H "Content-Type: application/json" \
-  -d "{\"metaId\":\"tt1234567\",\"type\":\"series\",\"videoId\":\"tt1234567:1:2\",\"videoTitle\":\"Episode Title\",\"season\":1,\"episode\":2,\"videoReleased\":\"2024-03-01T00:00:00.000Z\",\"addonName\":\"Torrentio\",\"streamName\":\"1080p BluRay\",\"streamDescription\":\"English, x264\",\"streamUrl\":null,\"externalUrl\":null,\"downloadUrl\":\"https://example.com/file.torrent\",\"fileName\":\"Episode.Title.S01E02.mkv\",\"streamingUrl\":\"http://127.0.0.1:11470/stream/...\"}"
+- `POST /downloads` returns immediately with a queued record, then starts a background download.
+- Records update in memory as the download moves through `queued`, `downloading`, `completed`, `failed`, or `canceled`.
+- Duplicate prevention still applies before a new download starts.
+- Only `http` and `https` source URLs are accepted.
+
+## Cancel / Pause / Resume
+
+- `POST /downloads/:id/cancel` stops an active download and marks the record `canceled`.
+- Partial files may remain on disk after cancel or failure in this milestone.
+- `POST /downloads/:id/pause` and `POST /downloads/:id/resume` currently return `501 Not Implemented`.
+
+## PowerShell Test: Health
+
+```powershell
+Invoke-RestMethod -Uri 'http://127.0.0.1:5577/health'
 ```
 
-Duplicate behavior:
+## PowerShell Test: Create Direct Download
 
-- First matching request creates a new record and returns `duplicate: false`.
-- Repeating the same active request returns the existing record with `duplicate: true`.
-- Matching is based on `metaId + videoId + sourceUrl` for normal video records.
-- If `videoId` is missing, matching falls back to `metaId + type + sourceUrl`.
-- Records with status `canceled`, `failed`, or `deleted` do not block a new create.
+Replace `downloadUrl` with a real direct video URL.
 
-## Test: Duplicate Download Prevention
+```powershell
+$payload = @{
+  metaId = 'tt1234567'
+  type = 'movie'
+  videoId = $null
+  videoTitle = 'Test Movie'
+  season = $null
+  episode = $null
+  videoReleased = '2024-03-01T00:00:00.000Z'
+  addonName = 'Direct URL'
+  streamName = '1080p'
+  streamDescription = 'Direct file test'
+  streamUrl = $null
+  externalUrl = $null
+  downloadUrl = 'http://127.0.0.1:8090/video.mp4'
+  fileName = 'Test.Movie.mp4'
+  streamingUrl = $null
+} | ConvertTo-Json
 
-Run the same request twice:
-
-```bash
-curl -X POST http://127.0.0.1:5577/downloads \
-  -H "Content-Type: application/json" \
-  -d "{\"metaId\":\"tt1234567\",\"type\":\"series\",\"videoId\":\"tt1234567:1:2\",\"videoTitle\":\"Episode Title\",\"season\":1,\"episode\":2,\"videoReleased\":\"2024-03-01T00:00:00.000Z\",\"addonName\":\"Torrentio\",\"streamName\":\"1080p BluRay\",\"streamDescription\":\"English, x264\",\"streamUrl\":null,\"externalUrl\":null,\"downloadUrl\":\"https://example.com/file.torrent\",\"fileName\":\"Episode.Title.S01E02.mkv\",\"streamingUrl\":\"http://127.0.0.1:11470/stream/...\"}"
+$created = Invoke-RestMethod -Uri 'http://127.0.0.1:5577/downloads' -Method Post -ContentType 'application/json' -Body $payload
+$created | ConvertTo-Json -Depth 8
 ```
 
-- The first response should include `duplicate: false`.
-- The second response should return the same record id with `duplicate: true`.
-- `GET /downloads` should still show only one active record.
-- After `POST /downloads/:id/cancel`, the same payload can create a fresh record again.
+## PowerShell Test: Poll Progress
 
-## Test: Create Download Without Usable URL
+Replace the id with the created record id if needed.
 
-```bash
-curl -X POST http://127.0.0.1:5577/downloads \
-  -H "Content-Type: application/json" \
-  -d "{\"metaId\":\"tt1234567\",\"type\":\"series\",\"videoId\":\"tt1234567:1:2\",\"videoTitle\":\"Episode Title\"}"
+```powershell
+1..10 | ForEach-Object {
+  Invoke-RestMethod -Uri ("http://127.0.0.1:5577/downloads/{0}" -f $created.id) | ConvertTo-Json -Depth 8
+  Start-Sleep -Milliseconds 700
+}
 ```
 
-## Test: List Downloads
+## PowerShell Test: Duplicate Prevention
 
-```bash
-curl http://127.0.0.1:5577/downloads
+Run the same request twice while the first record is still active:
+
+```powershell
+$first = Invoke-RestMethod -Uri 'http://127.0.0.1:5577/downloads' -Method Post -ContentType 'application/json' -Body $payload
+$second = Invoke-RestMethod -Uri 'http://127.0.0.1:5577/downloads' -Method Post -ContentType 'application/json' -Body $payload
+
+$first | ConvertTo-Json -Depth 8
+$second | ConvertTo-Json -Depth 8
 ```
 
-Filter by `metaId`:
+Expected:
 
-```bash
-curl "http://127.0.0.1:5577/downloads?metaId=tt1234567"
+- first response: `duplicate: false`
+- second response: `duplicate: true`
+
+## PowerShell Test: Cancel Active Download
+
+```powershell
+Invoke-RestMethod -Uri ("http://127.0.0.1:5577/downloads/{0}/cancel" -f $created.id) -Method Post | ConvertTo-Json -Depth 8
 ```
 
-## Test: Get One Download
+## PowerShell Test: Unsupported Protocol
 
-Replace `dl_...` with an id returned from `POST /downloads`.
+```powershell
+$badPayload = @{
+  metaId = 'ttbad'
+  type = 'movie'
+  videoId = $null
+  videoTitle = 'Bad Protocol'
+  downloadUrl = 'ftp://example.com/file.mp4'
+} | ConvertTo-Json
 
-```bash
-curl http://127.0.0.1:5577/downloads/dl_1234567890_1
-```
-
-## Placeholder Lifecycle Endpoints
-
-Pause:
-
-```bash
-curl -X POST http://127.0.0.1:5577/downloads/dl_1234567890_1/pause
-```
-
-Resume:
-
-```bash
-curl -X POST http://127.0.0.1:5577/downloads/dl_1234567890_1/resume
-```
-
-Cancel:
-
-```bash
-curl -X POST http://127.0.0.1:5577/downloads/dl_1234567890_1/cancel
-```
-
-Delete:
-
-```bash
-curl -X DELETE http://127.0.0.1:5577/downloads/dl_1234567890_1
+Invoke-RestMethod -Uri 'http://127.0.0.1:5577/downloads' -Method Post -ContentType 'application/json' -Body $badPayload
 ```
 
 ## Notes
 
-- This is a development placeholder only.
-- It stores download records in memory only.
-- It does not download files yet.
-- It does not persist data across restarts.
-- It does not launch MPC-HC yet.
+- Records are still in memory only.
+- Backend restarts lose records and active progress.
+- Real file downloading is implemented only for direct `http`/`https` URLs in this milestone.
+- Pause/resume are not implemented yet.
+- MPC-HC launching is not implemented yet.

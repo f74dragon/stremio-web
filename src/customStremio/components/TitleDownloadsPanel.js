@@ -1,7 +1,6 @@
 const React = require('react');
 const PropTypes = require('prop-types');
 const { Button } = require('stremio/components');
-const { listDownloads } = require('stremio/customStremio/localBackendClient');
 const styles = require('./TitleDownloadsPanel.less');
 
 const formatProgress = (value) => {
@@ -30,60 +29,49 @@ const getRecordTitle = (record) => {
     return 'Untitled download';
 };
 
-const TitleDownloadsPanel = ({ metaId, refreshKey = 0 }) => {
-    const [items, setItems] = React.useState([]);
-    const [loading, setLoading] = React.useState(false);
-    const [error, setError] = React.useState('');
-
-    const loadDownloads = React.useCallback(async () => {
-        if (!metaId) {
-            setItems([]);
-            setError('');
-            setLoading(false);
-            return;
-        }
-
-        setLoading(true);
-        setError('');
-
-        try {
-            const response = await listDownloads(metaId);
-            setItems(Array.isArray(response?.items) ? response.items : []);
-        } catch (requestError) {
-            setItems([]);
-            setError(requestError?.message || 'Local backend is unavailable.');
-        } finally {
-            setLoading(false);
-        }
-    }, [metaId]);
-
-    React.useEffect(() => {
-        loadDownloads();
-    }, [loadDownloads, refreshKey]);
-
+const TitleDownloadsPanel = ({ metaId, items = [], initialLoading = false, refreshing = false, error = '', onRefresh }) => {
     if (!metaId) {
         return null;
     }
 
+    const hasItems = items.length > 0;
+    const showInitialLoading = initialLoading && !hasItems;
+    const showInitialError = !hasItems && error;
+    const showInlineError = hasItems && error;
+
     return (
         <div className={styles['panel-container']}>
             <div className={styles['panel-header']}>
-                <div className={styles['panel-title']}>Downloads for this title</div>
-                <Button className={styles['refresh-button']} title={'Refresh downloads'} onClick={loadDownloads}>
+                <div className={styles['panel-title-row']}>
+                    <div className={styles['panel-title']}>Downloads for this title</div>
+                    {
+                        refreshing ?
+                            <div className={styles['panel-refreshing']}>Refreshing...</div>
+                            :
+                            null
+                    }
+                </div>
+                <Button className={styles['refresh-button']} title={'Refresh downloads'} onClick={onRefresh}>
                     Refresh
                 </Button>
             </div>
             {
-                loading ?
+                showInitialLoading ?
                     <div className={styles['panel-state']}>Loading downloads...</div>
                     :
-                    error ?
+                    showInitialError ?
                         <div className={styles['panel-error']}>{error}</div>
                         :
-                        items.length === 0 ?
+                        !hasItems ?
                             <div className={styles['panel-state']}>No downloads for this title yet.</div>
                             :
                             <div className={styles['records-container']}>
+                                {
+                                    showInlineError ?
+                                        <div className={styles['panel-error-inline']}>{error}</div>
+                                        :
+                                        null
+                                }
                                 {items.map((record) => (
                                     <div key={record.id || `${record.videoId}-${record.createdAt}`} className={styles['record-card']}>
                                         <div className={styles['record-title']}>{getRecordTitle(record)}</div>
@@ -119,7 +107,11 @@ const TitleDownloadsPanel = ({ metaId, refreshKey = 0 }) => {
 
 TitleDownloadsPanel.propTypes = {
     metaId: PropTypes.string,
-    refreshKey: PropTypes.number
+    items: PropTypes.arrayOf(PropTypes.object),
+    initialLoading: PropTypes.bool,
+    refreshing: PropTypes.bool,
+    error: PropTypes.string,
+    onRefresh: PropTypes.func
 };
 
 module.exports = TitleDownloadsPanel;

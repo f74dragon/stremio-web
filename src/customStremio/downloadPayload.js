@@ -9,6 +9,7 @@ const buildDownloadPayload = (input) => {
     const metaId = input?.metaId ?? null;
     const type = input?.type ?? null;
     const video = input?.video ?? null;
+    const parentTitle = input?.parentTitle ?? null;
     const addonName = input?.addonName ?? null;
     const stream = input?.stream ?? null;
     const deepLinks = stream?.deepLinks ?? null;
@@ -17,6 +18,7 @@ const buildDownloadPayload = (input) => {
     return {
         metaId,
         type,
+        parentTitle: parentTitle || video?.title || null,
         videoId: video?.id ?? null,
         videoTitle: video?.title ?? null,
         season: typeof video?.season === 'number' ? video.season : null,

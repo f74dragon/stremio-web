@@ -59,7 +59,7 @@ Notes:
 - `4. Add placeholder Download / Play Download buttons`: In progress (`Milestone 4A` implemented)
 - `5. Create local backend prototype`: In progress (`Milestone 5B` backend skeleton created)
 - `7. Add title-specific downloads panel`: In progress (`Milestone 7A` implemented)
-- `6. Implement real download manager`: Not started
+- `6. Implement real download manager`: In progress (`Milestone 6A` implemented)
 - `8. Add global downloads page`: Not started
 - `9. Add MPC-HC launch support`: Not started
 - `10. Add watched/unwatched integration`: Not started
@@ -78,7 +78,77 @@ Notes:
 
 ## Next Recommended Step
 
-Implement real backend file downloading with progress updates for direct URLs.
+Commit backend download milestone, then add frontend cancel/delete/play controls for real download records.
+
+## Milestone 6A.2 Findings: Smooth Download Polling UI
+
+- Files changed:
+  - `src/customStremio/components/TitleDownloadsPanel.js`
+  - `src/customStremio/components/TitleDownloadsPanel.less`
+  - `src/routes/MetaDetails/MetaDetails.js`
+  - `docs/CUSTOM_STREMIO_PROJECT.md`
+- Polling behavior:
+  - Title download polling no longer clears or reloads the panel on each refresh.
+  - The full loading state is now reserved for the initial load when no records have been shown yet.
+  - Background polling keeps the existing records rendered and updates status/progress in place.
+- Offline/error behavior:
+  - If the backend becomes unavailable after records are already visible, the panel keeps the last visible records and shows a small inline error note instead of replacing the whole panel.
+  - A subtle `Refreshing...` indicator can appear during background refreshes without flashing the list.
+
+## Milestone 6A.1 Findings: Series Folder Naming and Polling Fix
+
+- Files changed:
+  - `src/customStremio/downloadPayload.js`
+  - `src/customStremio/components/TitleDownloadsPanel.js`
+  - `src/routes/MetaDetails/MetaDetails.js`
+  - `src/routes/MetaDetails/StreamsList/StreamsList.js`
+  - `local-backend/fileUtils.js`
+  - `local-backend/server.js`
+  - `docs/CUSTOM_STREMIO_BACKEND_API.md`
+  - `docs/CUSTOM_STREMIO_PROJECT.md`
+- Metadata change:
+  - Added `parentTitle` to the download payload and backend record shape.
+  - For movies it carries the movie title.
+  - For series it carries the parent show title, while `videoTitle` remains the episode title.
+- Folder naming fix:
+  - Movie downloads now use the parent/movie title for the top-level folder and file base name.
+  - Series downloads now use the show title for the top-level folder, keep `Season 01` style season folders, and keep `S01E01 - Episode Title.ext` style file names.
+- Polling change:
+  - Title-level download records are now loaded and polled from `MetaDetails` so both the downloads panel and stream-row button states use the same backend snapshot.
+  - Polling runs only while a title has active `queued`, `downloading`, or `paused` records.
+  - Polling stops on unmount and after backend errors to avoid unnecessary request spam.
+- Button state result:
+  - Stream-row buttons should now move from `Downloading` to `Downloaded` after backend completion because the shared records refresh while active downloads exist.
+
+## Milestone 6A Findings: Real Backend File Downloading
+
+- Files changed:
+  - `local-backend/server.js`
+  - `local-backend/downloadManager.js`
+  - `local-backend/fileUtils.js`
+  - `local-backend/README.md`
+  - `docs/CUSTOM_STREMIO_BACKEND_API.md`
+  - `docs/CUSTOM_STREMIO_PROJECT.md`
+- Current backend behavior:
+  - The local backend now performs real direct `http`/`https` file downloads in the background after `POST /downloads`.
+  - The record is returned immediately as `queued`, then updates in memory through `downloading`, `completed`, `failed`, or `canceled`.
+  - Duplicate prevention remains backend-side and unchanged.
+- Progress fields:
+  - `bytesDownloaded`
+  - `bytesTotal`
+  - `progress`
+  - `speedBytesPerSecond`
+  - `etaSeconds`
+  - `completedAt`
+  - `localPath`
+- Default download folder:
+  - `%USERPROFILE%\Downloads\Stremio Downloads`
+  - Development override: `CUSTOM_STREMIO_DOWNLOAD_DIR`
+- Current limitations:
+  - direct-file downloads only for `http` and `https`
+  - pause/resume are still not implemented and now return honest `501` responses
+  - partial files may remain after cancel or failure
+  - records and active downloads are still in-memory only
 
 ## Milestone 5G Findings: Record-Aware Download Button State
 

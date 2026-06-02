@@ -12,7 +12,7 @@ const styles = require('./styles');
 const { usePlatform, useProfile } = require('stremio/common');
 const { default: SeasonEpisodePicker } = require('../EpisodePicker');
 const { buildDownloadPayload } = require('stremio/customStremio/downloadPayload');
-const { createDownload, listDownloads } = require('stremio/customStremio/localBackendClient');
+const { createDownload } = require('stremio/customStremio/localBackendClient');
 const { findMatchingDownloadRecord, getPayloadSourceUrl, isActiveDownloadRecord } = require('stremio/customStremio/downloadRecordMatching');
 
 const ALL_ADDONS_KEY = 'ALL';
@@ -20,7 +20,7 @@ const PREFERRED_ADDON_STORAGE_KEY = 'customStremio.preferredAddon';
 
 const normalizeAddonName = (value) => String(value ?? '').trim().toLowerCase();
 
-const StreamsList = ({ className, metaId, video, type, onEpisodeSearch, onDownloadCreated, ...props }) => {
+const StreamsList = ({ className, metaId, parentTitle, downloadRecords = [], video, type, onEpisodeSearch, onDownloadCreated, ...props }) => {
     const { t } = useTranslation();
     const core = useCore();
     const platform = usePlatform();
@@ -30,7 +30,6 @@ const StreamsList = ({ className, metaId, video, type, onEpisodeSearch, onDownlo
     const downloadStatusClearTimeoutRef = React.useRef(null);
     const [selectedAddon, setSelectedAddon] = React.useState(ALL_ADDONS_KEY);
     const [downloadStatus, setDownloadStatus] = React.useState(null);
-    const [downloadRecords, setDownloadRecords] = React.useState([]);
     const [pendingDownloadKeys, setPendingDownloadKeys] = React.useState({});
     const [preferredAddon, setPreferredAddon] = React.useState(() => {
         try {
@@ -211,22 +210,6 @@ const StreamsList = ({ className, metaId, video, type, onEpisodeSearch, onDownlo
             downloadStatusClearTimeoutRef.current = null;
         }, 4000);
     }, []);
-    const loadDownloadRecords = React.useCallback(async () => {
-        if (!metaId) {
-            setDownloadRecords([]);
-            return [];
-        }
-
-        try {
-            const response = await listDownloads(metaId);
-            const items = Array.isArray(response?.items) ? response.items : [];
-            setDownloadRecords(items);
-            return items;
-        } catch {
-            setDownloadRecords([]);
-            return [];
-        }
-    }, [metaId]);
     const getPendingDownloadKey = React.useCallback((downloadPayload) => {
         const sourceUrl = getPayloadSourceUrl(downloadPayload);
         if (!sourceUrl) {
@@ -263,8 +246,6 @@ const StreamsList = ({ className, metaId, video, type, onEpisodeSearch, onDownlo
                 showDownloadStatus('Download queued.', 'created');
             }
 
-            await loadDownloadRecords();
-
             if (typeof onDownloadCreated === 'function') {
                 onDownloadCreated(record);
             }
@@ -284,7 +265,7 @@ const StreamsList = ({ className, metaId, video, type, onEpisodeSearch, onDownlo
                 });
             }
         }
-    }, [getPendingDownloadKey, loadDownloadRecords, onDownloadCreated, showDownloadStatus]);
+    }, [getPendingDownloadKey, onDownloadCreated, showDownloadStatus]);
 
     React.useEffect(() => {
         return () => {
@@ -296,10 +277,6 @@ const StreamsList = ({ className, metaId, video, type, onEpisodeSearch, onDownlo
             }
         };
     }, []);
-    React.useEffect(() => {
-        loadDownloadRecords();
-    }, [loadDownloadRecords]);
-
     const handleEpisodePicker = React.useCallback((season, episode) => {
         onEpisodeSearch(season, episode);
     }, [onEpisodeSearch]);
@@ -406,6 +383,7 @@ const StreamsList = ({ className, metaId, video, type, onEpisodeSearch, onDownlo
                                     {orderedFilteredStreams.map((stream, index) => {
                                         const downloadPayload = buildDownloadPayload({
                                             metaId,
+                                            parentTitle,
                                             type,
                                             video,
                                             addonName: stream.addonName,
@@ -464,7 +442,9 @@ const StreamsList = ({ className, metaId, video, type, onEpisodeSearch, onDownlo
 StreamsList.propTypes = {
     className: PropTypes.string,
     metaId: PropTypes.string,
+    parentTitle: PropTypes.string,
     streams: PropTypes.arrayOf(PropTypes.object).isRequired,
+    downloadRecords: PropTypes.arrayOf(PropTypes.object),
     video: PropTypes.object,
     type: PropTypes.string,
     onEpisodeSearch: PropTypes.func,
