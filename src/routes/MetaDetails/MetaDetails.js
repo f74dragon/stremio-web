@@ -7,7 +7,7 @@ const classnames = require('classnames');
 const { useCore } = require('stremio/core');
 const { useContentGamepadNavigation } = require('stremio/services/GamepadNavigation');
 const { withCoreSuspender } = require('stremio/common');
-const { listDownloads, cancelDownload, deleteDownload } = require('stremio/customStremio/localBackendClient');
+const { listDownloads, cancelDownload, deleteDownload, playDownload } = require('stremio/customStremio/localBackendClient');
 const { VerticalNavBar, HorizontalNavBar, DelayedRenderer, Image, MetaPreview, ModalDialog } = require('stremio/components');
 const StreamsList = require('./StreamsList');
 const VideosList = require('./VideosList');
@@ -273,6 +273,25 @@ const MetaDetails = ({ urlParams, queryParams }) => {
             setTitleDownloadAction(recordId, null);
         }
     }, [clearTitleDownloadActionError, loadTitleDownloads, setTitleDownloadAction]);
+    const handlePlayDownload = React.useCallback(async (recordId) => {
+        if (!recordId || titleDownloadActionsRef.current[recordId]) {
+            return;
+        }
+
+        clearTitleDownloadActionError(recordId);
+        setTitleDownloadAction(recordId, 'play');
+
+        try {
+            await playDownload(recordId);
+        } catch (requestError) {
+            setTitleDownloadActionErrors((currentErrors) => ({
+                ...currentErrors,
+                [recordId]: requestError?.backendError || 'Could not open this download. Check the local backend player configuration.'
+            }));
+        } finally {
+            setTitleDownloadAction(recordId, null);
+        }
+    }, [clearTitleDownloadActionError, setTitleDownloadAction]);
     const handleEpisodeSearch = React.useCallback((season, episode) => {
         const searchVideoHash = encodeURIComponent(`${urlParams.id}:${season}:${episode}`);
         const url = window.location.hash;
@@ -486,6 +505,7 @@ const MetaDetails = ({ urlParams, queryParams }) => {
                                                             actionErrors={titleDownloadActionErrors}
                                                             onRefresh={loadTitleDownloads}
                                                             onCancel={handleCancelDownload}
+                                                            onPlay={handlePlayDownload}
                                                             onRemove={handleRemoveDownloadRecord}
                                                         />
                                                     )

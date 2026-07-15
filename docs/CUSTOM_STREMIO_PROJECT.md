@@ -61,7 +61,7 @@ Notes:
 - `7. Add title-specific downloads panel`: In progress (`Milestone 7A` implemented)
 - `6. Implement real download manager`: In progress (`Milestone 6A` implemented)
 - `8. Add global downloads page`: Not started
-- `9. Add MPC-HC launch support`: Not started
+- `9. Add MPC-HC launch support`: In progress (`Milestone 9A` panel playback implemented)
 - `10. Add watched/unwatched integration`: Not started
 - `11. Package as Windows app`: Not started
 
@@ -78,7 +78,36 @@ Notes:
 
 ## Next Recommended Step
 
-Implement local playback for completed records through backend `POST /play`, then turn completed stream buttons into Play Download controls.
+Turn completed stream-row `Downloaded` buttons into Play Download controls using the existing backend playback action.
+
+## Milestone 9A Findings: Play Completed Downloads from the Panel
+
+- Files changed:
+  - `local-backend/playerLauncher.js`
+  - `local-backend/server.js`
+  - `local-backend/README.md`
+  - `src/customStremio/localBackendClient.js`
+  - `src/customStremio/components/TitleDownloadsPanel.js`
+  - `src/customStremio/components/TitleDownloadsPanel.less`
+  - `src/routes/MetaDetails/MetaDetails.js`
+  - `docs/CUSTOM_STREMIO_BACKEND_API.md`
+  - `docs/CUSTOM_STREMIO_PROJECT.md`
+- Player configuration:
+  - The backend uses only the explicit `CUSTOM_STREMIO_PLAYER_PATH` environment setting.
+  - No installation-directory scanning or guessed executable paths are used.
+  - Current development path: `C:\Program Files\MPC-HC\mpc-hc64.exe`.
+- Playback safety:
+  - `POST /play` accepts a stored `downloadId` only and never accepts an arbitrary caller-provided local path.
+  - Only completed records can be played.
+  - The configured player and downloaded media path must both exist as regular files.
+  - MPC-HC is launched directly with the media path as one argument and without a shell.
+- Panel behavior:
+  - Completed records expose a primary `Play` action alongside `Remove record`.
+  - Playback uses the same per-record action lock and inline error treatment as cancel/remove.
+  - The button shows `Opening...` while the backend launch request is pending.
+- Deferred behavior:
+  - Stream-row `Downloaded` controls are unchanged in this pass.
+  - Open folder, persistent records, watched integration, and debrid availability remain deferred.
 
 ## Development Environment Cleanup: Portable Local HTTPS
 

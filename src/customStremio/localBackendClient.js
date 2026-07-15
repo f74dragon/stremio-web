@@ -65,13 +65,15 @@ const listDownloads = async (metaId) => {
     return requestJson(path);
 };
 
-const requireDownloadId = (id, functionName) => {
+const requireDownloadIdValue = (id, functionName) => {
     if (id === undefined || id === null || `${id}`.trim().length === 0) {
         throw new Error(`${functionName} requires a download id`);
     }
 
-    return encodeURIComponent(String(id));
+    return String(id).trim();
 };
+
+const requireDownloadId = (id, functionName) => encodeURIComponent(requireDownloadIdValue(id, functionName));
 
 const getDownload = async (id) => requestJson(`/downloads/${requireDownloadId(id, 'getDownload')}`);
 
@@ -91,6 +93,13 @@ const deleteDownload = async (id) => requestJson(`/downloads/${requireDownloadId
     method: 'DELETE'
 });
 
+const playDownload = async (id) => requestJson('/play', {
+    method: 'POST',
+    body: {
+        downloadId: requireDownloadIdValue(id, 'playDownload')
+    }
+});
+
 module.exports = {
     LOCAL_BACKEND_BASE_URL,
     requestJson,
@@ -101,5 +110,6 @@ module.exports = {
     pauseDownload,
     resumeDownload,
     cancelDownload,
-    deleteDownload
+    deleteDownload,
+    playDownload
 };

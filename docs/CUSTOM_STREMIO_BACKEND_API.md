@@ -251,9 +251,7 @@ Purpose:
 
 Request body:
 
-- `downloadId` optional
-- `localPath` optional
-- `preferExternalPlayer` default `true`
+- `downloadId` required
 
 Response shape:
 
@@ -267,8 +265,12 @@ Response shape:
 ```
 
 Notes:
-- Backend should require at least one of `downloadId` or `localPath`.
-- If both are provided, `downloadId` should resolve to the canonical stored path and take precedence unless explicitly overridden later.
+- Only records with status `completed` can be played.
+- The backend resolves the canonical `localPath` from its own stored record. Arbitrary paths supplied by callers are not accepted.
+- The player executable must be explicitly configured through `CUSTOM_STREMIO_PLAYER_PATH` before the backend starts.
+- The backend validates that both the configured player and downloaded media are regular files before launching.
+- The player is launched directly with the media path as a single process argument; no shell command is constructed.
+- Expected errors include `400` for a missing id, `404` for an unknown record, `409` for a non-completed record, `410` for a missing downloaded file, and `503` for missing/invalid player configuration.
 
 ## Status Values
 

@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const { startDownload, cancelDownload, isDownloadActive, isSupportedSourceUrl } = require('./downloadManager');
+const { launchMediaFile } = require('./playerLauncher');
 
 const HOST = '127.0.0.1';
 const PORT = Number(process.env.PORT) || 5577;
@@ -297,6 +298,50 @@ app.delete('/downloads/:id', async (request, response) => {
         id: deletedRecord.id,
         status: deletedRecord.status
     });
+});
+
+app.post('/play', async (request, response) => {
+    const downloadId = typeof request.body?.downloadId === 'string' ? request.body.downloadId.trim() : '';
+    if (!downloadId) {
+        response.status(400).json({
+            ok: false,
+            error: 'downloadId is required'
+        });
+        return;
+    }
+
+    const record = getDownloadRecordOrSend404(downloadId, response);
+    if (!record) {
+        return;
+    }
+
+    if (record.status !== 'completed') {
+        response.status(409).json({
+            ok: false,
+            error: 'Only completed downloads can be played'
+        });
+        return;
+    }
+
+    try {
+        const launchResult = await launchMediaFile(record.localPath);
+        response.json({
+            ok: true,
+            downloadId: record.id,
+            localPath: launchResult.localPath,
+            launched: true
+        });
+    } catch (error) {
+        const status = error?.code === 'MEDIA_FILE_NOT_FOUND' ?
+            410
+            :
+            ['PLAYER_NOT_CONFIGURED', 'PLAYER_PATH_INVALID', 'PLAYER_NOT_FOUND'].includes(error?.code) ? 503 : 500;
+        response.status(status).json({
+            ok: false,
+            errorCode: error?.code || 'PLAYER_LAUNCH_FAILED',
+            error: error?.message || 'Could not launch the configured media player'
+        });
+    }
 });
 
 app.listen(PORT, HOST, () => {

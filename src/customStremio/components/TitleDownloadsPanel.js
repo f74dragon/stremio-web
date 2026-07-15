@@ -6,6 +6,7 @@ const styles = require('./TitleDownloadsPanel.less');
 
 const CANCELABLE_STATUSES = new Set(['queued', 'downloading', 'paused']);
 const REMOVABLE_STATUSES = new Set(['completed', 'failed', 'canceled']);
+const PLAYABLE_STATUSES = new Set(['completed']);
 
 const formatProgress = (value) => {
     const numericValue = Number(value);
@@ -47,6 +48,7 @@ const TitleDownloadsPanel = ({
     actionErrors = {},
     onRefresh,
     onCancel,
+    onPlay,
     onRemove
 }) => {
     const { t } = useTranslation();
@@ -113,6 +115,7 @@ const TitleDownloadsPanel = ({
                                     const actionError = recordId ? actionErrors[recordId] : null;
                                     const actionInProgress = typeof action === 'string';
                                     const canCancel = recordId && CANCELABLE_STATUSES.has(status);
+                                    const canPlay = recordId && PLAYABLE_STATUSES.has(status);
                                     const canRemove = recordId && REMOVABLE_STATUSES.has(status);
 
                                     return (
@@ -161,13 +164,39 @@ const TitleDownloadsPanel = ({
                                                     null
                                             }
                                             {
-                                                canCancel || canRemove ?
+                                                canCancel || canPlay || canRemove ?
                                                     <div className={styles['record-actions']}>
                                                         {
                                                             canRemove ?
                                                                 <div className={styles['record-action-note']}>
                                                                     {t('CUSTOM_DOWNLOAD_REMOVE_NOTE', { defaultValue: 'The downloaded file will stay on disk.' })}
                                                                 </div>
+                                                                :
+                                                                null
+                                                        }
+                                                        {
+                                                            canPlay ?
+                                                                <Button
+                                                                    className={styles['play-button']}
+                                                                    title={t('CUSTOM_DOWNLOAD_PLAY_TITLE', {
+                                                                        defaultValue: 'Play {{title}} in MPC-HC',
+                                                                        title: recordTitle
+                                                                    })}
+                                                                    role={'button'}
+                                                                    aria-label={t('CUSTOM_DOWNLOAD_PLAY_TITLE', {
+                                                                        defaultValue: 'Play {{title}} in MPC-HC',
+                                                                        title: recordTitle
+                                                                    })}
+                                                                    aria-disabled={actionInProgress}
+                                                                    disabled={actionInProgress}
+                                                                    tabIndex={actionInProgress ? -1 : 0}
+                                                                    onClick={() => !actionInProgress && onPlay?.(recordId)}
+                                                                >
+                                                                    {action === 'play' ?
+                                                                        t('CUSTOM_DOWNLOAD_OPENING', { defaultValue: 'Opening...' })
+                                                                        :
+                                                                        t('CUSTOM_DOWNLOAD_PLAY', { defaultValue: 'Play' })}
+                                                                </Button>
                                                                 :
                                                                 null
                                                         }
@@ -242,10 +271,11 @@ TitleDownloadsPanel.propTypes = {
     initialLoading: PropTypes.bool,
     refreshing: PropTypes.bool,
     error: PropTypes.string,
-    actionStates: PropTypes.objectOf(PropTypes.oneOf(['cancel', 'remove'])),
+    actionStates: PropTypes.objectOf(PropTypes.oneOf(['cancel', 'play', 'remove'])),
     actionErrors: PropTypes.objectOf(PropTypes.string),
     onRefresh: PropTypes.func,
     onCancel: PropTypes.func,
+    onPlay: PropTypes.func,
     onRemove: PropTypes.func
 };
 

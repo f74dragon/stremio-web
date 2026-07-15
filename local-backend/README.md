@@ -2,7 +2,7 @@
 
 Development-only local backend for the custom Stremio download flow.
 
-It now performs real direct HTTP/HTTPS file downloads in the background, stores records in memory, and updates progress fields over time. It still does not persist records, implement pause/resume, or launch MPC-HC yet.
+It performs real direct HTTP/HTTPS file downloads in the background, stores records in memory, updates progress fields over time, and can launch completed local files in an explicitly configured media player. It still does not persist records or implement pause/resume.
 
 ## Install
 
@@ -25,6 +25,17 @@ npm run dev
 The server binds to:
 
 `http://127.0.0.1:5577`
+
+## Media Player
+
+Set the media player executable path before starting the backend. The backend does not scan the filesystem or guess installation locations.
+
+```powershell
+$env:CUSTOM_STREMIO_PLAYER_PATH = 'C:\Program Files\MPC-HC\mpc-hc64.exe'
+npm start
+```
+
+The setting applies to the current PowerShell session. `POST /play` accepts only a stored `downloadId`; callers cannot submit arbitrary local paths for the backend to open.
 
 ## Download Folder
 
@@ -119,6 +130,18 @@ Expected:
 Invoke-RestMethod -Uri ("http://127.0.0.1:5577/downloads/{0}/cancel" -f $created.id) -Method Post | ConvertTo-Json -Depth 8
 ```
 
+## PowerShell Test: Play Completed Download
+
+After `$created` reaches `completed`:
+
+```powershell
+$playPayload = @{
+  downloadId = $created.id
+} | ConvertTo-Json
+
+Invoke-RestMethod -Uri 'http://127.0.0.1:5577/play' -Method Post -ContentType 'application/json' -Body $playPayload | ConvertTo-Json -Depth 8
+```
+
 ## PowerShell Test: Unsupported Protocol
 
 ```powershell
@@ -139,4 +162,4 @@ Invoke-RestMethod -Uri 'http://127.0.0.1:5577/downloads' -Method Post -ContentTy
 - Backend restarts lose records and active progress.
 - Real file downloading is implemented only for direct `http`/`https` URLs in this milestone.
 - Pause/resume are not implemented yet.
-- MPC-HC launching is not implemented yet.
+- Completed records can be opened through `POST /play` when `CUSTOM_STREMIO_PLAYER_PATH` points to a valid player executable.
