@@ -2,7 +2,7 @@
 
 Development-only local backend for the custom Stremio download flow.
 
-It performs real direct HTTP/HTTPS file downloads in the background, stores records in memory, updates progress fields over time, and can launch completed local files in an explicitly configured media player. It still does not persist records or implement pause/resume.
+It performs real direct HTTP/HTTPS file downloads in the background, persists download records locally, updates progress fields over time, and can launch completed local files in an explicitly configured media player. Pause/resume is not implemented yet.
 
 ## Install
 
@@ -50,10 +50,35 @@ $env:CUSTOM_STREMIO_DOWNLOAD_DIR = 'C:\Temp\Custom Stremio Downloads'
 npm start
 ```
 
+## Persistent Download Records
+
+Download metadata is stored separately from media files at:
+
+`%LOCALAPPDATA%\Custom Stremio\download-records.json`
+
+On systems without `LOCALAPPDATA`, the fallback is `~/.custom-stremio/download-records.json`.
+
+Override the metadata directory with:
+
+```powershell
+$env:CUSTOM_STREMIO_DATA_DIR = 'C:\Temp\Custom Stremio Data'
+npm start
+```
+
+The backend writes a versioned JSON document through an atomic temporary-file replacement. Rapid progress updates are coalesced to avoid rewriting the file for every network chunk.
+
+Restart behavior:
+
+- Completed, failed, and canceled records are restored.
+- Restored completed records remain playable when their media file still exists.
+- Queued, downloading, or paused records from an interrupted process are restored as `failed` with an interruption message; automatic transfer resume is not implemented.
+- Removed records stay removed. Removing a record does not delete its media file.
+- If the metadata document is malformed or uses an unsupported version, startup stops instead of silently overwriting the stored data.
+
 ## Current Download Behavior
 
 - `POST /downloads` returns immediately with a queued record, then starts a background download.
-- Records update in memory as the download moves through `queued`, `downloading`, `completed`, `failed`, or `canceled`.
+- Records update in memory and are persisted as the download moves through `queued`, `downloading`, `completed`, `failed`, or `canceled`.
 - Duplicate prevention still applies before a new download starts.
 - Only `http` and `https` source URLs are accepted.
 
@@ -158,8 +183,9 @@ Invoke-RestMethod -Uri 'http://127.0.0.1:5577/downloads' -Method Post -ContentTy
 
 ## Notes
 
-- Records are still in memory only.
-- Backend restarts lose records and active progress.
+- Download records persist across backend restarts.
+- The first restart after upgrading from the older in-memory backend cannot recover records that were never written by that older process; their media files remain on disk.
+- Interrupted active transfers are marked `failed` on the next startup; automatic resume is still deferred.
 - Real file downloading is implemented only for direct `http`/`https` URLs in this milestone.
 - Pause/resume are not implemented yet.
 - Completed records can be opened through `POST /play` when `CUSTOM_STREMIO_PLAYER_PATH` points to a valid player executable.

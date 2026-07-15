@@ -59,7 +59,7 @@ Notes:
 - `4. Add placeholder Download / Play Download buttons`: In progress (`Milestone 4A` implemented)
 - `5. Create local backend prototype`: In progress (`Milestone 5B` backend skeleton created)
 - `7. Add title-specific downloads panel`: In progress (`Milestone 7A` implemented)
-- `6. Implement real download manager`: In progress (`Milestone 6A` implemented)
+- `6. Implement real download manager`: In progress (`Milestones 6A-6B` real downloads and persistent records implemented)
 - `8. Add global downloads page`: Not started
 - `9. Add MPC-HC launch support`: In progress (`Milestones 9A-9B` panel and stream-row playback implemented)
 - `10. Add watched/unwatched integration`: Not started
@@ -78,7 +78,32 @@ Notes:
 
 ## Next Recommended Step
 
-Persist download records across local-backend restarts so completed downloads remain visible and actionable after relaunch.
+Add the global downloads page using the now-persistent backend records.
+
+## Milestone 6B Findings: Persistent Download Records
+
+- Files changed:
+  - `local-backend/downloadRecordStore.js`
+  - `local-backend/server.js`
+  - `local-backend/README.md`
+  - `tests/downloadRecordStore.spec.js`
+  - `docs/CUSTOM_STREMIO_BACKEND_API.md`
+  - `docs/CUSTOM_STREMIO_PROJECT.md`
+- Storage behavior:
+  - Download metadata is stored in a versioned JSON document under `%LOCALAPPDATA%\Custom Stremio` by default.
+  - `CUSTOM_STREMIO_DATA_DIR` can override the metadata directory without changing the media download folder.
+  - Writes use atomic temporary-file replacement and debounce frequent progress updates.
+  - New queued records are persisted before their background transfer begins.
+- Restart recovery:
+  - Completed, failed, and canceled records are restored and remain visible after backend restart.
+  - Completed records remain available to both panel and stream-row Play actions when the media file exists.
+  - Interrupted queued/downloading/paused records are restored as `failed` with an explicit interruption error because resume is not implemented.
+  - Removed records are omitted from persistent storage while their media files remain untouched.
+  - Invalid or unsupported metadata documents stop startup instead of being silently overwritten.
+- Upgrade note:
+  - The first restart from the old in-memory backend cannot recover records that the old process never wrote; persistence applies to records created or visible after the updated backend starts.
+- Deferred behavior:
+  - Automatic resume, partial-file cleanup, global downloads UI, open folder, watched integration, and debrid/hash availability remain deferred.
 
 ## Milestone 9B Findings: Play Completed Downloads from Stream Rows
 

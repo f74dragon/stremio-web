@@ -1,7 +1,10 @@
+/* eslint-disable no-console */
+
 const express = require('express');
 const cors = require('cors');
 const { startDownload, cancelDownload, isDownloadActive, isSupportedSourceUrl } = require('./downloadManager');
 const { launchMediaFile } = require('./playerLauncher');
+const { DownloadRecordStore, recoverInterruptedDownloadRecords } = require('./downloadRecordStore');
 
 const HOST = '127.0.0.1';
 const PORT = Number(process.env.PORT) || 5577;
@@ -11,7 +14,12 @@ const ACTIVE_DUPLICATE_STATUSES = new Set(['queued', 'downloading', 'paused', 'c
 
 const app = express();
 const downloads = new Map();
+const recordStore = new DownloadRecordStore({
+    onError: (error) => console.error('Could not persist download records:', error)
+});
 let downloadCounter = 0;
+let httpServer = null;
+let shuttingDown = false;
 
 const getNowIso = () => new Date().toISOString();
 
@@ -65,6 +73,14 @@ const createDownloadRecord = (payload) => {
     };
 };
 
+const getPersistableDownloadRecords = () => Array.from(downloads.values()).filter((record) => record.status !== 'deleted');
+
+const scheduleDownloadRecordsPersistence = () => {
+    recordStore.schedule(getPersistableDownloadRecords());
+};
+
+const persistDownloadRecordsNow = () => recordStore.flush(getPersistableDownloadRecords());
+
 const getPayloadVideoId = (payload) => {
     return typeof payload?.videoId === 'string' && payload.videoId.length > 0 ? payload.videoId : null;
 };
@@ -99,6 +115,7 @@ const updateDownloadRecord = (record, updates) => {
     };
 
     downloads.set(record.id, nextRecord);
+    scheduleDownloadRecordsPersistence();
     return nextRecord;
 };
 
@@ -125,18 +142,26 @@ const getDownloadRecordOrSend404 = (id, response) => {
 };
 
 const startBackgroundDownload = (record) => {
-    startDownload(record, updateDownloadRecordById).catch((error) => {
-        const nextRecord = downloads.get(record.id);
-        if (nextRecord && nextRecord.status !== 'failed' && nextRecord.status !== 'canceled') {
-            updateDownloadRecord(nextRecord, {
-                status: 'failed',
-                error: error?.message || 'Download failed',
-                completedAt: null,
-                speedBytesPerSecond: 0,
-                etaSeconds: null
+    (async () => {
+        try {
+            await startDownload(record, updateDownloadRecordById);
+        } catch (error) {
+            const nextRecord = downloads.get(record.id);
+            if (nextRecord && nextRecord.status !== 'failed' && nextRecord.status !== 'canceled') {
+                updateDownloadRecord(nextRecord, {
+                    status: 'failed',
+                    error: error?.message || 'Download failed',
+                    completedAt: null,
+                    speedBytesPerSecond: 0,
+                    etaSeconds: null
+                });
+            }
+        } finally {
+            await persistDownloadRecordsNow().catch((error) => {
+                console.error('Could not persist final download state:', error);
             });
         }
-    });
+    })();
 };
 
 app.use(cors());
@@ -156,7 +181,7 @@ app.get('/health', (request, response) => {
     });
 });
 
-app.post('/downloads', (request, response) => {
+app.post('/downloads', async (request, response) => {
     const payload = request.body;
 
     if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
@@ -195,6 +220,18 @@ app.post('/downloads', (request, response) => {
 
     const record = createDownloadRecord(payload);
     downloads.set(record.id, record);
+    try {
+        await persistDownloadRecordsNow();
+    } catch (error) {
+        downloads.delete(record.id);
+        console.error('Could not persist new download record:', error);
+        response.status(500).json({
+            ok: false,
+            error: 'Could not save the new download record'
+        });
+        return;
+    }
+
     startBackgroundDownload(record);
     response.status(201).json({
         ...record,
@@ -260,17 +297,38 @@ app.post('/downloads/:id/cancel', async (request, response) => {
 
     if (isDownloadActive(record.id)) {
         await cancelDownload(record.id);
+        try {
+            await persistDownloadRecordsNow();
+        } catch (error) {
+            console.error('Could not persist canceled download record:', error);
+            response.status(500).json({
+                ok: false,
+                error: 'Download was canceled but its saved record could not be updated'
+            });
+            return;
+        }
         response.json(downloads.get(record.id) || record);
         return;
     }
 
     if (record.status === 'queued') {
-        response.json(updateDownloadRecord(record, {
+        const canceledRecord = updateDownloadRecord(record, {
             status: 'canceled',
             speedBytesPerSecond: 0,
             etaSeconds: null,
             error: null
-        }));
+        });
+        try {
+            await persistDownloadRecordsNow();
+        } catch (error) {
+            console.error('Could not persist canceled download record:', error);
+            response.status(500).json({
+                ok: false,
+                error: 'Download was canceled but its saved record could not be updated'
+            });
+            return;
+        }
+        response.json(canceledRecord);
         return;
     }
 
@@ -288,15 +346,24 @@ app.delete('/downloads/:id', async (request, response) => {
     }
 
     const latestRecord = downloads.get(record.id) || record;
-    const deletedRecord = updateDownloadRecord(latestRecord, {
-        status: 'deleted',
-        speedBytesPerSecond: 0,
-        etaSeconds: null
-    });
+    downloads.delete(record.id);
+
+    try {
+        await persistDownloadRecordsNow();
+    } catch (error) {
+        downloads.set(latestRecord.id, latestRecord);
+        console.error('Could not persist removed download record:', error);
+        response.status(500).json({
+            ok: false,
+            error: 'Could not remove the saved download record'
+        });
+        return;
+    }
+
     response.json({
         ok: true,
-        id: deletedRecord.id,
-        status: deletedRecord.status
+        id: latestRecord.id,
+        status: 'deleted'
     });
 });
 
@@ -344,6 +411,51 @@ app.post('/play', async (request, response) => {
     }
 });
 
-app.listen(PORT, HOST, () => {
-    console.log(`${SERVICE_NAME} listening on http://${HOST}:${PORT}`);
+const shutdown = async (signal) => {
+    if (shuttingDown) {
+        return;
+    }
+
+    shuttingDown = true;
+    console.log(`${signal} received; saving download records before shutdown.`);
+
+    if (httpServer !== null) {
+        await new Promise((resolve) => httpServer.close(resolve));
+    }
+
+    try {
+        await persistDownloadRecordsNow();
+        process.exit(0);
+    } catch (error) {
+        console.error('Could not persist download records during shutdown:', error);
+        process.exit(1);
+    }
+};
+
+const startServer = async () => {
+    const storedRecords = await recordStore.load();
+    const recovery = recoverInterruptedDownloadRecords(storedRecords);
+    recovery.records.forEach((record) => downloads.set(record.id, record));
+
+    if (recovery.recoveredCount > 0) {
+        await persistDownloadRecordsNow();
+        console.log(`Recovered ${recovery.recoveredCount} interrupted download record(s) as failed.`);
+    }
+
+    httpServer = app.listen(PORT, HOST, () => {
+        console.log(`${SERVICE_NAME} listening on http://${HOST}:${PORT}`);
+        console.log(`Download records: ${recordStore.filePath}`);
+    });
+
+    process.once('SIGINT', () => {
+        shutdown('SIGINT');
+    });
+    process.once('SIGTERM', () => {
+        shutdown('SIGTERM');
+    });
+};
+
+startServer().catch((error) => {
+    console.error('Could not start the local backend:', error);
+    process.exitCode = 1;
 });

@@ -142,6 +142,7 @@ Response shape:
 
 Runtime behavior:
 - New records start a real background direct-file download immediately after record creation.
+- The queued record is durably stored before the background transfer starts.
 - The response returns before the file transfer completes.
 - Frontend polling or refresh should read progress from later `GET /downloads` or `GET /downloads/:id` responses.
 
@@ -149,6 +150,7 @@ Runtime behavior:
 
 Purpose:
 - List download jobs.
+- Includes records restored from local metadata storage after a backend restart.
 
 Optional query:
 - `metaId`
@@ -225,6 +227,7 @@ Response shape:
 Behavior notes:
 - If the download is actively running, the backend aborts the active transfer and updates the record to `canceled`.
 - Partial files may remain on disk for now.
+- The canceled state is persisted across backend restarts.
 
 ### 8. `DELETE /downloads/:id`
 
@@ -243,6 +246,10 @@ Response shape:
   "status": "deleted"
 }
 ```
+
+Behavior notes:
+- The record is removed from persistent metadata.
+- The downloaded or partial media file remains on disk.
 
 ### 9. `POST /play`
 
@@ -292,6 +299,17 @@ Notes:
 - `completedAt` is set when a download finishes successfully.
 - `localPath` is set to the final target file path once the backend resolves the destination.
 
+## Persistent Record Storage
+
+- Records are stored in a versioned JSON document outside the media download directory.
+- Default Windows path: `%LOCALAPPDATA%\Custom Stremio\download-records.json`
+- `CUSTOM_STREMIO_DATA_DIR` overrides the metadata directory.
+- Writes use an atomic temporary-file replacement, and frequent progress changes are coalesced.
+- `completed`, `failed`, and `canceled` records are restored unchanged after restart.
+- Restored `queued`, `downloading`, or `paused` records become `failed` with an interruption error because transfer resume is not implemented.
+- `deleted` records are omitted from storage.
+- Invalid or unsupported metadata documents stop backend startup rather than being silently overwritten.
+
 ## File Organization Rule
 
 Intended default structure:
@@ -328,7 +346,7 @@ Current implementation notes:
 
 ## Future Notes
 
-- SQLite persistence later
+- SQLite remains an option if future global-library/query requirements outgrow the current single-file record store
 - WebSocket/SSE progress updates later
 - Settings page later for download folder and MPC-HC path
 - final desktop packaging later
