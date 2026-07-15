@@ -61,7 +61,7 @@ Notes:
 - `7. Add title-specific downloads panel`: In progress (`Milestone 7A` implemented)
 - `6. Implement real download manager`: In progress (`Milestone 6A` implemented)
 - `8. Add global downloads page`: Not started
-- `9. Add MPC-HC launch support`: In progress (`Milestone 9A` panel playback implemented)
+- `9. Add MPC-HC launch support`: In progress (`Milestones 9A-9B` panel and stream-row playback implemented)
 - `10. Add watched/unwatched integration`: Not started
 - `11. Package as Windows app`: Not started
 
@@ -78,7 +78,27 @@ Notes:
 
 ## Next Recommended Step
 
-Turn completed stream-row `Downloaded` buttons into Play Download controls using the existing backend playback action.
+Persist download records across local-backend restarts so completed downloads remain visible and actionable after relaunch.
+
+## Milestone 9B Findings: Play Completed Downloads from Stream Rows
+
+- Files changed:
+  - `src/routes/MetaDetails/MetaDetails.js`
+  - `src/routes/MetaDetails/StreamsList/StreamsList.js`
+  - `src/routes/MetaDetails/StreamsList/Stream/Stream.js`
+  - `src/routes/MetaDetails/StreamsList/Stream/styles.less`
+  - `docs/CUSTOM_STREMIO_PROJECT.md`
+- Completed stream behavior:
+  - A matching completed download now shows a prominent `Play Download` control instead of a passive `Downloaded` state.
+  - Selecting it uses the same verified backend `/play` action and configured MPC-HC path as the title downloads panel.
+  - The control shows `Opening...` and becomes temporarily unavailable while the launch request is active.
+  - Playback failures appear inline on the affected stream row and remain visible in the downloads panel through shared per-record error state.
+- Interaction safety:
+  - The download/play control prevents the parent stream row click, so launching the local file does not also open the original remote stream.
+  - Panel and stream-row controls share one per-record action lock, preventing concurrent play/remove actions for the same record.
+  - Queued, downloading, and paused rows remain status-only controls; new streams retain the existing Download behavior.
+- Deferred behavior:
+  - Persistent records, global downloads, open folder, watched integration, and debrid/hash availability remain deferred.
 
 ## Milestone 9A Findings: Play Completed Downloads from the Panel
 

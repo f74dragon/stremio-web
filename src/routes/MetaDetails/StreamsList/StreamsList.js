@@ -20,7 +20,20 @@ const PREFERRED_ADDON_STORAGE_KEY = 'customStremio.preferredAddon';
 
 const normalizeAddonName = (value) => String(value ?? '').trim().toLowerCase();
 
-const StreamsList = ({ className, metaId, parentTitle, downloadRecords = [], video, type, onEpisodeSearch, onDownloadCreated, ...props }) => {
+const StreamsList = ({
+    className,
+    metaId,
+    parentTitle,
+    downloadRecords = [],
+    downloadActionStates = {},
+    downloadActionErrors = {},
+    video,
+    type,
+    onEpisodeSearch,
+    onDownloadCreated,
+    onPlayDownload,
+    ...props
+}) => {
     const { t } = useTranslation();
     const core = useCore();
     const platform = usePlatform();
@@ -390,6 +403,8 @@ const StreamsList = ({ className, metaId, parentTitle, downloadRecords = [], vid
                                             stream
                                         });
                                         const downloadRecord = findMatchingDownloadRecord(downloadRecords, downloadPayload);
+                                        const activeDownloadRecord = isActiveDownloadRecord(downloadRecord) ? downloadRecord : null;
+                                        const downloadRecordId = activeDownloadRecord?.id;
                                         const pendingDownloadKey = getPendingDownloadKey(downloadPayload);
                                         const isDownloadPending = pendingDownloadKey ? pendingDownloadKeys[pendingDownloadKey] === true : false;
 
@@ -405,9 +420,12 @@ const StreamsList = ({ className, metaId, parentTitle, downloadRecords = [], vid
                                                 progress={stream.progress}
                                                 deepLinks={stream.deepLinks}
                                                 downloadPayload={downloadPayload}
-                                                downloadRecord={isActiveDownloadRecord(downloadRecord) ? downloadRecord : null}
+                                                downloadRecord={activeDownloadRecord}
+                                                downloadAction={downloadRecordId ? downloadActionStates[downloadRecordId] : null}
+                                                downloadActionError={downloadRecordId ? downloadActionErrors[downloadRecordId] : null}
                                                 isDownloadPending={isDownloadPending}
                                                 onDownloadPlaceholder={onDownloadPlaceholder}
+                                                onPlayDownload={onPlayDownload}
                                                 onClick={stream.onClick}
                                             />
                                         );
@@ -445,10 +463,13 @@ StreamsList.propTypes = {
     parentTitle: PropTypes.string,
     streams: PropTypes.arrayOf(PropTypes.object).isRequired,
     downloadRecords: PropTypes.arrayOf(PropTypes.object),
+    downloadActionStates: PropTypes.objectOf(PropTypes.oneOf(['cancel', 'play', 'remove'])),
+    downloadActionErrors: PropTypes.objectOf(PropTypes.string),
     video: PropTypes.object,
     type: PropTypes.string,
     onEpisodeSearch: PropTypes.func,
-    onDownloadCreated: PropTypes.func
+    onDownloadCreated: PropTypes.func,
+    onPlayDownload: PropTypes.func
 };
 
 module.exports = StreamsList;

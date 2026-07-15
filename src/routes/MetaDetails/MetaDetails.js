@@ -533,10 +533,13 @@ const MetaDetails = ({ urlParams, queryParams }) => {
                                 parentTitle={metaItemContent?.name ?? video?.title ?? null}
                                 streams={metaDetails.streams}
                                 downloadRecords={titleDownloadRecords}
+                                downloadActionStates={titleDownloadActions}
+                                downloadActionErrors={titleDownloadActionErrors}
                                 video={video}
                                 type={streamPath.type}
                                 onEpisodeSearch={handleEpisodeSearch}
                                 onDownloadCreated={handleDownloadCreated}
+                                onPlayDownload={handlePlayDownload}
                             />
                         </div>
                         :

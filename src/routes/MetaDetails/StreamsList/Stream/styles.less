@@ -133,6 +133,15 @@
         opacity: 0.92;
     }
 
+    .download-button-playable {
+        background-color: var(--secondary-accent-color);
+        box-shadow: 0 0.45rem 1rem rgba(0, 0, 0, 0.18);
+
+        &:hover, &:focus {
+            background-color: var(--primary-accent-color);
+        }
+    }
+
     .download-button-queued,
     .download-button-downloading,
     .download-button-paused,
@@ -149,7 +158,15 @@
     }
 
     .download-button-completed {
-        background-color: rgba(66, 127, 188, 0.28);
+        background-color: var(--secondary-accent-color);
+    }
+
+    .download-action-error {
+        flex: 1 0 100%;
+        padding-left: 9rem;
+        color: var(--danger-accent-color);
+        font-size: 0.85rem;
+        line-height: 1.35;
     }
     
     .icon {
@@ -225,6 +242,10 @@
 
 @media only screen and (max-width: @minimum) {
     .stream-container {
+        .download-action-error {
+            padding-left: 0;
+        }
+
         .info-container {
             .addon-name {
                 font-weight: 500;

@@ -12,9 +12,13 @@ const { useRouteFocused } = require('stremio-router');
 const StreamPlaceholder = require('./StreamPlaceholder');
 const styles = require('./styles');
 
-const getDownloadButtonLabel = (downloadRecord, isDownloadPending) => {
+const getDownloadButtonLabel = (downloadRecord, isDownloadPending, downloadAction) => {
     if (isDownloadPending) {
         return 'Adding...';
+    }
+
+    if (downloadAction === 'play') {
+        return 'Opening...';
     }
 
     switch (downloadRecord?.status) {
@@ -25,13 +29,31 @@ const getDownloadButtonLabel = (downloadRecord, isDownloadPending) => {
         case 'paused':
             return 'Paused';
         case 'completed':
-            return 'Downloaded';
+            return 'Play Download';
         default:
             return 'Download';
     }
 };
 
-const Stream = ({ className, videoId, videoReleased, addonName, name, description, thumbnail, progress, deepLinks, downloadPayload, downloadRecord, isDownloadPending, onDownloadPlaceholder, ...props }) => {
+const Stream = ({
+    className,
+    videoId,
+    videoReleased,
+    addonName,
+    name,
+    description,
+    thumbnail,
+    progress,
+    deepLinks,
+    downloadPayload,
+    downloadRecord,
+    downloadAction,
+    downloadActionError,
+    isDownloadPending,
+    onDownloadPlaceholder,
+    onPlayDownload,
+    ...props
+}) => {
     const profile = useProfile();
     const toast = useToast();
     const platform = usePlatform();
@@ -218,13 +240,20 @@ const Stream = ({ className, videoId, videoReleased, addonName, name, descriptio
         event.nativeEvent.togglePopupPrevented = true;
         event.nativeEvent.buttonClickPrevented = true;
 
-        if (!downloadRecord && !isDownloadPending && typeof onDownloadPlaceholder === 'function') {
+        if (downloadRecord?.status === 'completed' && downloadRecord.id && !downloadAction && typeof onPlayDownload === 'function') {
+            onPlayDownload(downloadRecord.id);
+        } else if (!downloadRecord && !isDownloadPending && typeof onDownloadPlaceholder === 'function') {
             onDownloadPlaceholder(downloadPayload);
         }
-    }, [downloadPayload, downloadRecord, isDownloadPending, onDownloadPlaceholder]);
+    }, [downloadPayload, downloadRecord, downloadAction, isDownloadPending, onDownloadPlaceholder, onPlayDownload]);
 
-    const downloadButtonLabel = React.useMemo(() => getDownloadButtonLabel(downloadRecord, isDownloadPending), [downloadRecord, isDownloadPending]);
-    const downloadButtonDisabled = downloadRecord !== null || isDownloadPending;
+    const downloadButtonLabel = React.useMemo(
+        () => getDownloadButtonLabel(downloadRecord, isDownloadPending, downloadAction),
+        [downloadRecord, isDownloadPending, downloadAction]
+    );
+    const downloadButtonIsPlayable = downloadRecord?.status === 'completed' && Boolean(downloadRecord.id);
+    const hasNonPlayableDownloadRecord = Boolean(downloadRecord) && !downloadButtonIsPlayable;
+    const downloadButtonDisabled = isDownloadPending || Boolean(downloadAction) || hasNonPlayableDownloadRecord;
 
     const renderThumbnailFallback = React.useCallback(() => (
         <Icon className={styles['placeholder-icon']} name={'ic_broken_link'} />
@@ -264,20 +293,31 @@ const Stream = ({ className, videoId, videoReleased, addonName, name, descriptio
                     className={classnames(
                         styles['download-button-container'],
                         downloadButtonDisabled ? styles['download-button-disabled'] : null,
+                        downloadButtonIsPlayable ? styles['download-button-playable'] : null,
                         downloadRecord?.status ? styles[`download-button-${downloadRecord.status}`] : null
                     )}
                     title={downloadButtonLabel}
+                    aria-label={downloadButtonLabel}
+                    aria-busy={downloadAction === 'play'}
+                    aria-disabled={downloadButtonDisabled}
+                    disabled={downloadButtonDisabled}
                     tabIndex={-1}
                     onClick={downloadButtonOnClick}
                 >
-                    <Icon className={styles['download-icon']} name={'download'} />
+                    <Icon className={styles['download-icon']} name={downloadButtonIsPlayable ? 'play' : 'download'} />
                     <div className={styles['download-label']}>{downloadButtonLabel}</div>
                 </Button>
+                {
+                    downloadActionError ?
+                        <div className={styles['download-action-error']} role={'alert'}>{downloadActionError}</div>
+                        :
+                        null
+                }
                 <Icon className={styles['icon']} name={'play'} />
                 {children}
             </Button>
         );
-    }, [thumbnail, progress, addonName, name, description, href, target, download, onClick, downloadButtonOnClick]);
+    }, [thumbnail, progress, addonName, name, description, href, target, download, onClick, downloadButtonOnClick, downloadButtonDisabled, downloadButtonIsPlayable, downloadButtonLabel, downloadAction, downloadActionError]);
 
     const renderMenu = React.useMemo(() => function renderMenu() {
         return (
@@ -365,8 +405,11 @@ Stream.propTypes = {
     }),
     downloadPayload: PropTypes.object,
     downloadRecord: PropTypes.object,
+    downloadAction: PropTypes.oneOf(['cancel', 'play', 'remove']),
+    downloadActionError: PropTypes.string,
     isDownloadPending: PropTypes.bool,
     onDownloadPlaceholder: PropTypes.func,
+    onPlayDownload: PropTypes.func,
     onClick: PropTypes.func
 };
 
