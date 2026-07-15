@@ -78,7 +78,26 @@ Notes:
 
 ## Next Recommended Step
 
-Commit backend download milestone, then add frontend cancel/delete/play controls for real download records.
+Implement local playback for completed records through backend `POST /play`, then turn completed stream buttons into Play Download controls.
+
+## Milestone 6A.3 Findings: Download Record Controls
+
+- Files changed:
+  - `src/customStremio/components/TitleDownloadsPanel.js`
+  - `src/customStremio/components/TitleDownloadsPanel.less`
+  - `src/routes/MetaDetails/MetaDetails.js`
+  - `docs/CUSTOM_STREMIO_PROJECT.md`
+- Record controls:
+  - Active `queued`, `downloading`, and `paused` records expose a `Cancel` action.
+  - Terminal `completed`, `failed`, and `canceled` records expose a `Remove record` action.
+  - Removing a record only removes it from the backend's in-memory list; downloaded files remain on disk.
+- Interaction behavior:
+  - Actions use the existing local backend cancel/delete endpoints and keep the current list rendered while requests run.
+  - Each record gets its own `Canceling...` or `Removing...` busy state so unrelated records remain interactive.
+  - Action failures appear inline on the affected record without replacing the downloads panel or interrupting polling.
+  - Successful actions update the shared record snapshot immediately and then perform a silent refresh so the panel and stream-row button states remain synchronized.
+- Deferred behavior:
+  - No playback, open-folder, persistence, pause/resume, file deletion, or debrid availability behavior was added in this milestone.
 
 ## Milestone 6A.2 Findings: Smooth Download Polling UI
 

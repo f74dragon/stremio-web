@@ -7,7 +7,7 @@ const classnames = require('classnames');
 const { useCore } = require('stremio/core');
 const { useContentGamepadNavigation } = require('stremio/services/GamepadNavigation');
 const { withCoreSuspender } = require('stremio/common');
-const { listDownloads } = require('stremio/customStremio/localBackendClient');
+const { listDownloads, cancelDownload, deleteDownload } = require('stremio/customStremio/localBackendClient');
 const { VerticalNavBar, HorizontalNavBar, DelayedRenderer, Image, MetaPreview, ModalDialog } = require('stremio/components');
 const StreamsList = require('./StreamsList');
 const VideosList = require('./VideosList');
@@ -37,6 +37,7 @@ const MetaDetails = ({ urlParams, queryParams }) => {
     const sidebarResizeStateRef = React.useRef(null);
     const titleDownloadsLoadedRef = React.useRef(false);
     const titleDownloadsSnapshotRef = React.useRef('');
+    const titleDownloadActionsRef = React.useRef({});
     const { t } = useTranslation();
     const core = useCore();
     const metaDetails = useMetaDetails(urlParams);
@@ -45,6 +46,8 @@ const MetaDetails = ({ urlParams, queryParams }) => {
     const [titleDownloadsInitialLoading, setTitleDownloadsInitialLoading] = React.useState(false);
     const [titleDownloadsRefreshing, setTitleDownloadsRefreshing] = React.useState(false);
     const [titleDownloadsError, setTitleDownloadsError] = React.useState('');
+    const [titleDownloadActions, setTitleDownloadActions] = React.useState({});
+    const [titleDownloadActionErrors, setTitleDownloadActionErrors] = React.useState({});
     const [streamsSidebarWidth, setStreamsSidebarWidth] = React.useState(() => {
         try {
             if (typeof window === 'undefined' || !window.localStorage) {
@@ -191,6 +194,85 @@ const MetaDetails = ({ urlParams, queryParams }) => {
             setTitleDownloadsRefreshing(false);
         }
     }, [titleDownloadsMetaId, titleDownloadRecords]);
+    const clearTitleDownloadActionError = React.useCallback((recordId) => {
+        setTitleDownloadActionErrors((currentErrors) => {
+            if (!Object.prototype.hasOwnProperty.call(currentErrors, recordId)) {
+                return currentErrors;
+            }
+
+            const nextErrors = { ...currentErrors };
+            delete nextErrors[recordId];
+            return nextErrors;
+        });
+    }, []);
+    const setTitleDownloadAction = React.useCallback((recordId, action) => {
+        const nextActions = { ...titleDownloadActionsRef.current };
+
+        if (action === null) {
+            delete nextActions[recordId];
+        } else {
+            nextActions[recordId] = action;
+        }
+
+        titleDownloadActionsRef.current = nextActions;
+        setTitleDownloadActions((currentActions) => {
+            return JSON.stringify(currentActions) === JSON.stringify(nextActions) ? currentActions : nextActions;
+        });
+    }, []);
+    const handleCancelDownload = React.useCallback(async (recordId) => {
+        if (!recordId || titleDownloadActionsRef.current[recordId]) {
+            return;
+        }
+
+        clearTitleDownloadActionError(recordId);
+        setTitleDownloadAction(recordId, 'cancel');
+
+        try {
+            const canceledRecord = await cancelDownload(recordId);
+            setTitleDownloadRecords((currentRecords) => {
+                const nextRecords = currentRecords.map((record) => record?.id === recordId ?
+                    { ...record, ...canceledRecord }
+                    :
+                    record
+                );
+                titleDownloadsSnapshotRef.current = JSON.stringify(nextRecords);
+                return nextRecords;
+            });
+            await loadTitleDownloads({ silent: true });
+        } catch (requestError) {
+            setTitleDownloadActionErrors((currentErrors) => ({
+                ...currentErrors,
+                [recordId]: requestError?.backendError || 'Could not cancel this download. Check that the local backend is running.'
+            }));
+        } finally {
+            setTitleDownloadAction(recordId, null);
+        }
+    }, [clearTitleDownloadActionError, loadTitleDownloads, setTitleDownloadAction]);
+    const handleRemoveDownloadRecord = React.useCallback(async (recordId) => {
+        if (!recordId || titleDownloadActionsRef.current[recordId]) {
+            return;
+        }
+
+        clearTitleDownloadActionError(recordId);
+        setTitleDownloadAction(recordId, 'remove');
+
+        try {
+            await deleteDownload(recordId);
+            setTitleDownloadRecords((currentRecords) => {
+                const nextRecords = currentRecords.filter((record) => record?.id !== recordId);
+                titleDownloadsSnapshotRef.current = JSON.stringify(nextRecords);
+                return nextRecords;
+            });
+            await loadTitleDownloads({ silent: true });
+        } catch (requestError) {
+            setTitleDownloadActionErrors((currentErrors) => ({
+                ...currentErrors,
+                [recordId]: requestError?.backendError || 'Could not remove this record. Check that the local backend is running.'
+            }));
+        } finally {
+            setTitleDownloadAction(recordId, null);
+        }
+    }, [clearTitleDownloadActionError, loadTitleDownloads, setTitleDownloadAction]);
     const handleEpisodeSearch = React.useCallback((season, episode) => {
         const searchVideoHash = encodeURIComponent(`${urlParams.id}:${season}:${episode}`);
         const url = window.location.hash;
@@ -278,6 +360,9 @@ const MetaDetails = ({ urlParams, queryParams }) => {
             setTitleDownloadsError('');
             setTitleDownloadsInitialLoading(false);
             setTitleDownloadsRefreshing(false);
+            setTitleDownloadActions({});
+            setTitleDownloadActionErrors({});
+            titleDownloadActionsRef.current = {};
             titleDownloadsLoadedRef.current = false;
             titleDownloadsSnapshotRef.current = '';
             return;
@@ -397,7 +482,11 @@ const MetaDetails = ({ urlParams, queryParams }) => {
                                                             initialLoading={titleDownloadsInitialLoading}
                                                             refreshing={titleDownloadsRefreshing}
                                                             error={titleDownloadsError}
+                                                            actionStates={titleDownloadActions}
+                                                            actionErrors={titleDownloadActionErrors}
                                                             onRefresh={loadTitleDownloads}
+                                                            onCancel={handleCancelDownload}
+                                                            onRemove={handleRemoveDownloadRecord}
                                                         />
                                                     )
                                                     :
