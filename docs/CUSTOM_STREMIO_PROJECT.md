@@ -80,6 +80,14 @@ Notes:
 
 Implement local playback for completed records through backend `POST /play`, then turn completed stream buttons into Play Download controls.
 
+## Development Environment Cleanup: Portable Local HTTPS
+
+- `webpack.config.js` remains a tracked project file and no longer has unrelated whole-file formatting churn.
+- The development server uses the ignored `localhost+2-key.pem` and `localhost+2.pem` trusted certificate pair when both files are available.
+- Fresh clones without the local certificate pair fall back to webpack-dev-server's generated HTTPS certificate instead of failing to start.
+- The certificate and private-key files remain ignored and must not be committed.
+- Removed the ineffective `webpack.config.js` entry from `.gitignore`; tracked build configuration should stay versioned.
+
 ## Milestone 6A.3 Findings: Download Record Controls
 
 - Files changed:

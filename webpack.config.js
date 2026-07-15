@@ -1,5 +1,6 @@
 // Copyright (C) 2017-2023 Smart code 203358507
 
+const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { execSync } = require('child_process');
@@ -13,6 +14,18 @@ const TerserPlugin = require('terser-webpack-plugin');
 const packageJson = require('./package.json');
 
 const COMMIT_HASH = execSync('git rev-parse HEAD').toString().trim();
+const LOCAL_HTTPS_KEY_PATH = path.join(__dirname, 'localhost+2-key.pem');
+const LOCAL_HTTPS_CERT_PATH = path.join(__dirname, 'localhost+2.pem');
+const DEV_SERVER_HTTPS = fs.existsSync(LOCAL_HTTPS_KEY_PATH) && fs.existsSync(LOCAL_HTTPS_CERT_PATH) ?
+    {
+        type: 'https',
+        options: {
+            key: LOCAL_HTTPS_KEY_PATH,
+            cert: LOCAL_HTTPS_CERT_PATH
+        }
+    }
+    :
+    'https';
 
 const THREAD_LOADER = {
     loader: 'thread-loader',
@@ -185,7 +198,7 @@ module.exports = (env, argv) => ({
         host: '0.0.0.0',
         static: false,
         hot: false,
-        server: 'https',
+        server: DEV_SERVER_HTTPS,
         liveReload: false
     },
     optimization: {
