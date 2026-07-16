@@ -52,6 +52,7 @@ The backend will generate and maintain these backend-only fields later:
 - `id`
 - `status`
 - `localPath`
+- `partialPath`
 - `bytesDownloaded`
 - `bytesTotal`
 - `progress`
@@ -63,6 +64,9 @@ The backend will generate and maintain these backend-only fields later:
 - `error`
 - `attemptCount`
 - `lastAttemptAt`
+- `resumeSupported`
+- `sourceEtag`
+- `sourceLastModified`
 
 Example combined download record shape:
 
@@ -99,6 +103,7 @@ Example combined download record shape:
   "streamingUrl": "http://127.0.0.1:11470/stream/...",
   "status": "queued",
   "localPath": null,
+  "partialPath": null,
   "bytesDownloaded": 0,
   "bytesTotal": null,
   "progress": 0,
@@ -110,6 +115,9 @@ Example combined download record shape:
   "error": null,
   "attemptCount": 1,
   "lastAttemptAt": "2026-05-23T12:00:00.000Z",
+  "resumeSupported": null,
+  "sourceEtag": null,
+  "sourceLastModified": null,
   "duplicate": false
 }
 ```
@@ -205,20 +213,18 @@ Response shape:
 ### 5. `POST /downloads/:id/pause`
 
 Purpose:
-- Pause an active download if supported by the downloader.
+- Pause a queued or active download while preserving its partial media file.
 
 Request body:
 - none
 
 Response shape:
-- Current milestone limitation: HTTP `501`
+- HTTP `200` with the full record in `paused` state.
 
-```json
-{
-  "ok": false,
-  "error": "Pause is not implemented yet"
-}
-```
+Behavior notes:
+- Only `queued` and `downloading` records can transition to `paused`; incompatible states return HTTP `409`.
+- An active request and file stream are stopped before the response is returned.
+- The `.part` file, trusted byte count, remote range capability, and available response validators remain on the record for a later resume.
 
 ### 6. `POST /downloads/:id/resume`
 
@@ -229,14 +235,14 @@ Request body:
 - none
 
 Response shape:
-- Current milestone limitation: HTTP `501`
+- HTTP `202` with the same full record reset to `queued` before the background transfer restarts.
 
-```json
-{
-  "ok": false,
-  "error": "Resume is not implemented yet"
-}
-```
+Behavior notes:
+- Only inactive `paused` records can resume; incompatible states return HTTP `409`.
+- The destination and `.part` path are derived from trusted stored metadata. The actual partial-file size is the resume offset; caller-supplied paths and offsets are not accepted.
+- A non-zero resume sends `Range: bytes=<offset>-` and sends `If-Range` when a strong `ETag` or `Last-Modified` validator was captured.
+- The remote response must be `206 Partial Content` with a matching `Content-Range` start. A source that returns a full `200` response fails the record safely and preserves the partial bytes for inspection or Retry.
+- A missing, invalid, or unexpectedly oversized partial file rejects the resume without starting a transfer.
 
 ### 7. `POST /downloads/:id/retry`
 
@@ -253,7 +259,7 @@ Behavior notes:
 - Only `failed` and `canceled` records are accepted; other statuses return HTTP `409`.
 - The backend requires the stored record to retain a supported HTTP/HTTPS `sourceUrl`.
 - The destination is derived again from trusted record metadata. The API does not accept a caller-supplied path.
-- Any file at that derived destination is removed before restarting so stale partial bytes cannot be mistaken for completed media.
+- Any final file and `.part` file at the derived destination are removed before restarting so stale bytes cannot be mistaken for completed media.
 - Progress, byte totals, speed, ETA, completion time, and error state are reset.
 - `attemptCount` increments and `lastAttemptAt` records the retry time. Legacy records without attempt metadata begin their retry as attempt `2`.
 - The queued retry is persisted before its background transfer starts.
@@ -271,7 +277,7 @@ Response shape:
 
 Behavior notes:
 - If the download is actively running, the backend aborts the active transfer and updates the record to `canceled`.
-- Partial files may remain on disk until the record is retried or removed manually. Retry removes the derived partial artifact before starting again.
+- Partial `.part` files remain on disk until the record is resumed, retried, or removed manually. Retry removes the derived artifacts before starting again.
 - The canceled state is persisted across backend restarts.
 
 ### 9. `DELETE /downloads/:id`
@@ -351,12 +357,15 @@ Notes:
 ## Progress Field Notes
 
 - `bytesDownloaded` increases during active downloads.
-- `bytesTotal` comes from `Content-Length` when the remote server provides it.
+- `bytesTotal` comes from `Content-Length` for full responses or the complete length in `Content-Range` for resumed responses.
 - `progress` is a percentage when `bytesTotal` is known.
 - If `Content-Length` is missing, `bytesTotal` remains `null` and `progress` stays `0` safely until completion.
 - `speedBytesPerSecond` and `etaSeconds` are derived from current transfer progress.
+- Resumed speed is calculated from bytes transferred in the current request rather than treating previously downloaded bytes as new throughput.
 - `completedAt` is set when a download finishes successfully.
 - `localPath` is set to the final target file path once the backend resolves the destination.
+- `partialPath` points to the working `.part` file while bytes remain incomplete and becomes `null` after finalization.
+- `resumeSupported` records observed byte-range support. A rejected range resume sets it to `false` and leaves the record failed so Retry can restart cleanly.
 
 ## Persistent Record Storage
 
@@ -364,8 +373,8 @@ Notes:
 - Default Windows path: `%LOCALAPPDATA%\Custom Stremio\download-records.json`
 - `CUSTOM_STREMIO_DATA_DIR` overrides the metadata directory.
 - Writes use an atomic temporary-file replacement, and frequent progress changes are coalesced.
-- `completed`, `failed`, and `canceled` records are restored unchanged after restart.
-- Restored `queued`, `downloading`, or `paused` records become `failed` with an interruption error because transfer resume is not implemented.
+- `completed`, `failed`, `canceled`, and already `paused` records are restored unchanged after restart.
+- Restored `queued` or `downloading` records become `paused` with an interruption note and can be resumed explicitly.
 - `deleted` records are omitted from storage.
 - Invalid or unsupported metadata documents stop backend startup rather than being silently overwritten.
 

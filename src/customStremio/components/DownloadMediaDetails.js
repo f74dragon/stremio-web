@@ -50,6 +50,8 @@ const DownloadMediaDetails = ({
     actionStates,
     actionErrors,
     onBack,
+    onPause,
+    onResume,
     onCancel,
     onRetry,
     onPlay,
@@ -243,6 +245,8 @@ const DownloadMediaDetails = ({
                                     variant={'library'}
                                     action={record.id ? actionStates[record.id] : null}
                                     actionError={record.id ? actionErrors[record.id] : null}
+                                    onPause={onPause}
+                                    onResume={onResume}
                                     onCancel={onCancel}
                                     onRetry={onRetry}
                                     onPlay={onPlay}
@@ -283,6 +287,8 @@ DownloadMediaDetails.propTypes = {
     actionStates: PropTypes.object.isRequired,
     actionErrors: PropTypes.object.isRequired,
     onBack: PropTypes.func.isRequired,
+    onPause: PropTypes.func,
+    onResume: PropTypes.func,
     onCancel: PropTypes.func,
     onRetry: PropTypes.func,
     onPlay: PropTypes.func,

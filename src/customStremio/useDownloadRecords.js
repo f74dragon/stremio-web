@@ -1,13 +1,15 @@
 const React = require('react');
 const {
     listDownloads,
+    pauseDownload,
+    resumeDownload,
     cancelDownload,
     retryDownload,
     deleteDownload,
     playDownload,
     openDownloadLocation
 } = require('./localBackendClient');
-const { ACTIVE_DOWNLOAD_STATUSES } = require('./downloadRecordPresentation');
+const { ACTIVE_DOWNLOAD_STATUSES, POLLING_DOWNLOAD_STATUSES } = require('./downloadRecordPresentation');
 
 const DEFAULT_POLL_INTERVAL = 1500;
 
@@ -127,6 +129,56 @@ const useDownloadRecords = ({ metaId, enabled = true, pollInterval = DEFAULT_POL
         return replaceItems(updater(recordsRef.current));
     }, [replaceItems]);
 
+    const pause = React.useCallback(async (recordId) => {
+        if (!recordId || actionsRef.current[recordId]) {
+            return;
+        }
+
+        clearActionError(recordId);
+        setAction(recordId, 'pause');
+        try {
+            const pausedRecord = await pauseDownload(recordId);
+            updateItems((currentItems) => currentItems.map((record) => record?.id === recordId ?
+                { ...record, ...pausedRecord }
+                :
+                record
+            ));
+            await load({ silent: true });
+        } catch (requestError) {
+            setActionErrors((currentErrors) => ({
+                ...currentErrors,
+                [recordId]: requestError?.backendError || 'Could not pause this download. Check that the local backend is running.'
+            }));
+        } finally {
+            setAction(recordId, null);
+        }
+    }, [clearActionError, load, setAction, updateItems]);
+
+    const resume = React.useCallback(async (recordId) => {
+        if (!recordId || actionsRef.current[recordId]) {
+            return;
+        }
+
+        clearActionError(recordId);
+        setAction(recordId, 'resume');
+        try {
+            const resumedRecord = await resumeDownload(recordId);
+            updateItems((currentItems) => currentItems.map((record) => record?.id === recordId ?
+                { ...record, ...resumedRecord }
+                :
+                record
+            ));
+            await load({ silent: true });
+        } catch (requestError) {
+            setActionErrors((currentErrors) => ({
+                ...currentErrors,
+                [recordId]: requestError?.backendError || 'Could not resume this download. Retry it from the beginning if the source no longer supports byte ranges.'
+            }));
+        } finally {
+            setAction(recordId, null);
+        }
+    }, [clearActionError, load, setAction, updateItems]);
+
     const cancel = React.useCallback(async (recordId) => {
         if (!recordId || actionsRef.current[recordId]) {
             return;
@@ -239,6 +291,9 @@ const useDownloadRecords = ({ metaId, enabled = true, pollInterval = DEFAULT_POL
     const hasActiveRecords = React.useMemo(() => {
         return items.some((record) => ACTIVE_DOWNLOAD_STATUSES.has(record?.status));
     }, [items]);
+    const hasPollingRecords = React.useMemo(() => {
+        return items.some((record) => POLLING_DOWNLOAD_STATUSES.has(record?.status));
+    }, [items]);
     const onDownloadCreated = React.useCallback(() => load({ silent: true }), [load]);
 
     React.useEffect(() => {
@@ -249,7 +304,7 @@ const useDownloadRecords = ({ metaId, enabled = true, pollInterval = DEFAULT_POL
     }, [enabled, load, queryKey, reset]);
 
     React.useEffect(() => {
-        if (!enabled || !hasActiveRecords || error) {
+        if (!enabled || !hasPollingRecords || error) {
             return undefined;
         }
 
@@ -258,7 +313,7 @@ const useDownloadRecords = ({ metaId, enabled = true, pollInterval = DEFAULT_POL
         }, pollInterval);
 
         return () => window.clearInterval(intervalId);
-    }, [enabled, error, hasActiveRecords, load, pollInterval]);
+    }, [enabled, error, hasPollingRecords, load, pollInterval]);
 
     return {
         items,
@@ -268,8 +323,11 @@ const useDownloadRecords = ({ metaId, enabled = true, pollInterval = DEFAULT_POL
         actionStates,
         actionErrors,
         hasActiveRecords,
+        hasPollingRecords,
         refresh: load,
         onDownloadCreated,
+        pause,
+        resume,
         cancel,
         retry,
         play,

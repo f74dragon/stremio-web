@@ -1,5 +1,5 @@
 const fs = require('fs');
-const { deriveLocalPath } = require('./fileUtils');
+const { deriveLocalPath, derivePartialPath } = require('./fileUtils');
 
 const RETRYABLE_DOWNLOAD_STATUSES = new Set(['failed', 'canceled']);
 const TRANSIENT_FILE_LOCK_CODES = new Set(['EBUSY', 'EACCES', 'EPERM']);
@@ -48,7 +48,9 @@ const prepareDownloadRetry = async (record, now = new Date().toISOString()) => {
     }
 
     const localPath = deriveLocalPath(record);
+    const partialPath = derivePartialPath(localPath);
     try {
+        await removePartialFile(partialPath);
         await removePartialFile(localPath);
     } catch (error) {
         throw new DownloadRetryError(
@@ -62,6 +64,7 @@ const prepareDownloadRetry = async (record, now = new Date().toISOString()) => {
         ...record,
         status: 'queued',
         localPath,
+        partialPath,
         bytesDownloaded: 0,
         bytesTotal: null,
         progress: 0,
@@ -70,6 +73,9 @@ const prepareDownloadRetry = async (record, now = new Date().toISOString()) => {
         updatedAt: now,
         completedAt: null,
         error: null,
+        resumeSupported: null,
+        sourceEtag: null,
+        sourceLastModified: null,
         attemptCount: getNextAttemptCount(record),
         lastAttemptAt: now
     };

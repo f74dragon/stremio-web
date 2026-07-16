@@ -24,6 +24,8 @@ const Downloads = () => {
         actionStates,
         actionErrors,
         refresh,
+        pause,
+        resume,
         cancel,
         retry,
         play,
@@ -75,6 +77,8 @@ const Downloads = () => {
                                 records={items}
                                 actionStates={actionStates}
                                 actionErrors={actionErrors}
+                                onPause={pause}
+                                onResume={resume}
                                 onCancel={cancel}
                             />
                             <DownloadMediaDetails
@@ -84,6 +88,8 @@ const Downloads = () => {
                                 actionStates={actionStates}
                                 actionErrors={actionErrors}
                                 onBack={handleBackToLibrary}
+                                onPause={pause}
+                                onResume={resume}
                                 onCancel={cancel}
                                 onRetry={retry}
                                 onPlay={play}
@@ -120,6 +126,8 @@ const Downloads = () => {
                                 records={items}
                                 actionStates={actionStates}
                                 actionErrors={actionErrors}
+                                onPause={pause}
+                                onResume={resume}
                                 onCancel={cancel}
                             />
 

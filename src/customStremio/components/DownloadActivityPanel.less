@@ -212,6 +212,15 @@
     white-space: nowrap;
 }
 
+.record-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex: none;
+}
+
+.pause-button,
+.resume-button,
 .cancel-button {
     flex: none;
     padding: 0.3rem 0.7rem;
@@ -223,13 +232,32 @@
 
     &:hover,
     &:focus {
-        border-color: rgba(255, 139, 139, 0.42);
-        background-color: rgba(170, 57, 72, 0.18);
+        border-color: rgba(255, 255, 255, 0.3);
+        background-color: rgba(255, 255, 255, 0.14);
     }
 
     &:global(.disabled) {
         cursor: wait;
         opacity: 0.55;
+    }
+}
+
+.cancel-button {
+    &:hover,
+    &:focus {
+        border-color: rgba(255, 139, 139, 0.42);
+        background-color: rgba(170, 57, 72, 0.18);
+    }
+}
+
+.resume-button {
+    border-color: rgba(155, 140, 255, 0.48);
+    background-color: rgba(112, 86, 241, 0.22);
+
+    &:hover,
+    &:focus {
+        border-color: rgba(175, 162, 255, 0.72);
+        background-color: rgba(112, 86, 241, 0.38);
     }
 }
 

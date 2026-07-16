@@ -1,4 +1,5 @@
 const ACTIVE_DOWNLOAD_STATUSES = new Set(['queued', 'downloading', 'paused']);
+const POLLING_DOWNLOAD_STATUSES = new Set(['queued', 'downloading']);
 
 const getTimestamp = (record) => {
     const value = record?.completedAt || record?.updatedAt || record?.createdAt;
@@ -105,6 +106,7 @@ const getDownloadActivitySummary = (records) => {
     return {
         records: activeRecords,
         count: activeRecords.length,
+        pausedCount: activeRecords.filter((record) => record?.status === 'paused').length,
         bytesDownloaded,
         bytesTotal,
         speedBytesPerSecond,
@@ -232,6 +234,7 @@ const getDownloadDetailsHref = (record) => {
 
 module.exports = {
     ACTIVE_DOWNLOAD_STATUSES,
+    POLLING_DOWNLOAD_STATUSES,
     sortDownloadRecordsNewestFirst,
     getLatestCompletedRecord,
     groupDownloadRecords,

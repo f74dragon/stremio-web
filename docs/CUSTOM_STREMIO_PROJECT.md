@@ -59,7 +59,7 @@ Notes:
 - `4. Add placeholder Download / Play Download buttons`: In progress (`Milestone 4A` implemented)
 - `5. Create local backend prototype`: In progress (`Milestone 5B` backend skeleton created)
 - `7. Add title-specific downloads panel`: In progress (`Milestone 7A` implemented)
-- `6. Implement real download manager`: In progress (`Milestones 6A-6C.1` real downloads, persistence, and retry implemented)
+- `6. Implement real download manager`: In progress (`Milestones 6A-6D` real downloads, persistence, retry, and resumable partial transfers implemented)
 - `8. Add global downloads page`: In progress (`Milestones 8A-8C.2` implemented)
 - `9. Add MPC-HC launch support`: In progress (`Milestones 9A-9B` panel and stream-row playback implemented)
 - `10. Add watched/unwatched integration`: Not started
@@ -78,7 +78,31 @@ Notes:
 
 ## Next Recommended Step
 
-Design the real HTTP Range-based Pause/Resume and partial-file recovery pass. Queue ordering and configurable concurrency should follow after transfer resumption is reliable. Debrid/hash availability remains the next discovery/availability feature after download lifecycle controls are stable.
+Add explicit queue ordering and a configurable download concurrency limit. Debrid/hash availability remains the next discovery/availability feature after download scheduling is stable.
+
+## Milestone 6D Findings: Pause, Resume, and Partial-File Recovery
+
+- Resumable transfer engine:
+  - New transfers write to a sibling `.part` file and move that file to the final media path only after the response completes successfully.
+  - Pausing preserves the partial file and its trusted byte count. Resuming derives the path from stored media metadata, measures the actual partial file, and requests the remaining bytes with an HTTP `Range` header.
+  - Non-zero resumes require a `206 Partial Content` response whose `Content-Range` starts at the requested byte. A source that ignores the range and returns `200` fails safely without appending duplicate data.
+  - Strong `ETag` or `Last-Modified` validators are retained when available and sent with `If-Range` so a changed remote representation is not silently joined to old partial bytes.
+  - A valid `416` response whose complete length exactly matches the existing partial file can finalize the transfer safely.
+- Backend lifecycle and persistence:
+  - `POST /downloads/:id/pause` now pauses queued/downloading records; `POST /downloads/:id/resume` validates and restarts paused records from the measured partial-file offset.
+  - Cancel works for paused records and preserves the partial artifact. Retry remains the explicit restart-from-zero path and removes both the derived final file and `.part` artifact first.
+  - Records interrupted by backend shutdown are restored as `paused`, not `failed`, so the user can explicitly resume them after restart. Existing paused records remain paused.
+  - Transfer progress after resume uses session bytes for speed calculation while preserving total downloaded bytes and overall progress.
+- Frontend controls:
+  - Title download rows, focused Downloads details, and the global activity panel now expose Pause or Resume according to record state, alongside existing Cancel/Retry actions.
+  - Paused records remain visible as active work but do not keep background polling alive when no transfer is currently running.
+  - Action locking and inline errors use the existing lifecycle-control treatment so repeated clicks cannot launch conflicting operations.
+- Validation and remaining work:
+  - Added unit coverage for resume eligibility, trusted partial-file sizing, range parsing, and resumed progress calculations.
+  - Added backend integration coverage for pause/resume byte integrity, `Range` plus `If-Range`, successful completion, and safe failure when a source ignores byte ranges.
+  - Backend syntax checks and ESLint pass, all 110 Jest tests pass, and the production webpack build completes with only the existing bundle-size warnings.
+  - Queue ordering and configurable concurrency are the next lifecycle pass. Multi-file selection can build on that scheduler.
+  - Debrid/hash availability, watched progress, filesystem discovery, metadata backfill, and media-file deletion remain tracked for later passes.
 
 ## Milestone 6C.1 Findings: Retry Failed and Canceled Downloads
 

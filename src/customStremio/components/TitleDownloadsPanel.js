@@ -14,6 +14,8 @@ const TitleDownloadsPanel = ({
     actionStates = {},
     actionErrors = {},
     onRefresh,
+    onPause,
+    onResume,
     onCancel,
     onRetry,
     onPlay,
@@ -84,6 +86,8 @@ const TitleDownloadsPanel = ({
                                             record={record}
                                             action={recordId ? actionStates[recordId] : null}
                                             actionError={recordId ? actionErrors[recordId] : null}
+                                            onPause={onPause}
+                                            onResume={onResume}
                                             onCancel={onCancel}
                                             onRetry={onRetry}
                                             onPlay={onPlay}
@@ -103,9 +107,11 @@ TitleDownloadsPanel.propTypes = {
     initialLoading: PropTypes.bool,
     refreshing: PropTypes.bool,
     error: PropTypes.string,
-    actionStates: PropTypes.objectOf(PropTypes.oneOf(['cancel', 'retry', 'play', 'remove'])),
+    actionStates: PropTypes.objectOf(PropTypes.oneOf(['pause', 'resume', 'cancel', 'retry', 'play', 'remove'])),
     actionErrors: PropTypes.objectOf(PropTypes.string),
     onRefresh: PropTypes.func,
+    onPause: PropTypes.func,
+    onResume: PropTypes.func,
     onCancel: PropTypes.func,
     onRetry: PropTypes.func,
     onPlay: PropTypes.func,

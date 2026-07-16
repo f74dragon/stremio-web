@@ -97,10 +97,27 @@ const ensureParentDirectory = async (filePath) => {
     await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
 };
 
+const derivePartialPath = (localPath) => `${localPath}.part`;
+
+const finalizePartialDownload = async (partialPath, localPath, expectedBytes) => {
+    const partialStats = await fs.promises.stat(partialPath);
+    if (!partialStats.isFile()) {
+        throw new Error(`The completed download is not a regular file: ${partialPath}`);
+    }
+    if (Number.isSafeInteger(expectedBytes) && partialStats.size !== expectedBytes) {
+        throw new Error(`The completed download contains ${partialStats.size} of ${expectedBytes} expected bytes`);
+    }
+
+    await fs.promises.rm(localPath, { force: true });
+    await fs.promises.rename(partialPath, localPath);
+};
+
 module.exports = {
     SUPPORTED_VIDEO_EXTENSIONS,
     sanitizeWindowsName,
     getDefaultDownloadsRoot,
     deriveLocalPath,
-    ensureParentDirectory
+    ensureParentDirectory,
+    derivePartialPath,
+    finalizePartialDownload
 };

@@ -3,7 +3,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { deriveLocalPath, ensureParentDirectory } = require('../local-backend/fileUtils');
+const { deriveLocalPath, derivePartialPath, ensureParentDirectory } = require('../local-backend/fileUtils');
 const {
     isDownloadRetryable,
     prepareDownloadRetry
@@ -58,16 +58,20 @@ describe('downloadRetry', () => {
             poster: 'https://images.example/poster.jpg'
         };
         const derivedPath = deriveLocalPath(record);
-        await ensureParentDirectory(derivedPath);
-        fs.writeFileSync(derivedPath, 'partial bytes');
+        const partialPath = derivePartialPath(derivedPath);
+        await ensureParentDirectory(partialPath);
+        fs.writeFileSync(derivedPath, 'stale final bytes');
+        fs.writeFileSync(partialPath, 'partial bytes');
 
         const retriedRecord = await prepareDownloadRetry(record, '2026-07-16T12:00:00.000Z');
 
+        expect(fs.existsSync(partialPath)).toBe(false);
         expect(fs.existsSync(derivedPath)).toBe(false);
         expect(retriedRecord).toEqual({
             ...record,
             status: 'queued',
             localPath: derivedPath,
+            partialPath,
             bytesDownloaded: 0,
             bytesTotal: null,
             progress: 0,
@@ -76,6 +80,9 @@ describe('downloadRetry', () => {
             updatedAt: '2026-07-16T12:00:00.000Z',
             completedAt: null,
             error: null,
+            resumeSupported: null,
+            sourceEtag: null,
+            sourceLastModified: null,
             attemptCount: 3,
             lastAttemptAt: '2026-07-16T12:00:00.000Z'
         });

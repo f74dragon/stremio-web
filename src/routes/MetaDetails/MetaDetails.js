@@ -84,6 +84,8 @@ const MetaDetails = ({ urlParams, queryParams }) => {
         actionErrors: titleDownloadActionErrors,
         refresh: loadTitleDownloads,
         onDownloadCreated: handleDownloadCreated,
+        pause: handlePauseDownload,
+        resume: handleResumeDownload,
         cancel: handleCancelDownload,
         retry: handleRetryDownload,
         play: handlePlayDownload,
@@ -326,6 +328,8 @@ const MetaDetails = ({ urlParams, queryParams }) => {
                                                             actionStates={titleDownloadActions}
                                                             actionErrors={titleDownloadActionErrors}
                                                             onRefresh={loadTitleDownloads}
+                                                            onPause={handlePauseDownload}
+                                                            onResume={handleResumeDownload}
                                                             onCancel={handleCancelDownload}
                                                             onRetry={handleRetryDownload}
                                                             onPlay={handlePlayDownload}

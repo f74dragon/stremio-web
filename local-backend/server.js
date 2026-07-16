@@ -2,8 +2,9 @@
 
 const express = require('express');
 const cors = require('cors');
-const { startDownload, cancelDownload, isDownloadActive, isSupportedSourceUrl } = require('./downloadManager');
+const { startDownload, pauseDownload, cancelDownload, isDownloadActive, isSupportedSourceUrl } = require('./downloadManager');
 const { isDownloadRetryable, prepareDownloadRetry } = require('./downloadRetry');
+const { isDownloadResumable, prepareDownloadResume } = require('./downloadResume');
 const { launchMediaFile } = require('./playerLauncher');
 const { openDownloadLocation } = require('./fileExplorerLauncher');
 const { DownloadRecordStore, recoverInterruptedDownloadRecords } = require('./downloadRecordStore');
@@ -72,6 +73,7 @@ const createDownloadRecord = (payload) => {
         sourceUrl,
         status: 'queued',
         localPath: null,
+        partialPath: null,
         bytesDownloaded: 0,
         bytesTotal: null,
         progress: 0,
@@ -81,6 +83,9 @@ const createDownloadRecord = (payload) => {
         updatedAt: now,
         completedAt: null,
         error: null,
+        resumeSupported: null,
+        sourceEtag: null,
+        sourceLastModified: null,
         attemptCount: 1,
         lastAttemptAt: now
     };
@@ -154,10 +159,10 @@ const getDownloadRecordOrSend404 = (id, response) => {
     return record;
 };
 
-const startBackgroundDownload = (record) => {
+const startBackgroundDownload = (record, options) => {
     (async () => {
         try {
-            await startDownload(record, updateDownloadRecordById);
+            await startDownload(record, updateDownloadRecordById, options);
         } catch (error) {
             const nextRecord = downloads.get(record.id);
             if (nextRecord && nextRecord.status !== 'failed' && nextRecord.status !== 'canceled') {
@@ -278,28 +283,104 @@ app.get('/downloads/:id', (request, response) => {
     response.json(record);
 });
 
-app.post('/downloads/:id/pause', (request, response) => {
+app.post('/downloads/:id/pause', async (request, response) => {
     const record = getDownloadRecordOrSend404(request.params.id, response);
     if (!record) {
         return;
     }
 
-    response.status(501).json({
-        ok: false,
-        error: 'Pause is not implemented yet'
-    });
+    if (record.status === 'paused') {
+        response.json(record);
+        return;
+    }
+
+    if (isDownloadActive(record.id)) {
+        await pauseDownload(record.id);
+    } else if (record.status === 'queued' || record.status === 'downloading') {
+        updateDownloadRecord(record, {
+            status: 'paused',
+            speedBytesPerSecond: 0,
+            etaSeconds: null,
+            completedAt: null,
+            error: null
+        });
+    } else {
+        response.status(409).json({
+            ok: false,
+            error: 'Only queued or downloading records can be paused'
+        });
+        return;
+    }
+
+    try {
+        await persistDownloadRecordsNow();
+    } catch (error) {
+        console.error('Could not persist paused download record:', error);
+        response.status(500).json({
+            ok: false,
+            error: 'Download was paused but its saved record could not be updated'
+        });
+        return;
+    }
+
+    response.json(downloads.get(record.id) || record);
 });
 
-app.post('/downloads/:id/resume', (request, response) => {
+app.post('/downloads/:id/resume', async (request, response) => {
     const record = getDownloadRecordOrSend404(request.params.id, response);
     if (!record) {
         return;
     }
 
-    response.status(501).json({
-        ok: false,
-        error: 'Resume is not implemented yet'
-    });
+    if (!isDownloadResumable(record) || isDownloadActive(record.id)) {
+        response.status(409).json({
+            ok: false,
+            error: 'Only inactive paused downloads can be resumed'
+        });
+        return;
+    }
+    if (!isSupportedSourceUrl(record.sourceUrl)) {
+        response.status(409).json({
+            ok: false,
+            error: 'This download no longer has a usable HTTP or HTTPS source URL'
+        });
+        return;
+    }
+
+    let resumePreparation;
+    try {
+        resumePreparation = await prepareDownloadResume(record, getNowIso());
+    } catch (error) {
+        const conflictCodes = new Set([
+            'DOWNLOAD_NOT_RESUMABLE',
+            'DOWNLOAD_PARTIAL_FILE_MISSING',
+            'DOWNLOAD_PARTIAL_FILE_INVALID',
+            'DOWNLOAD_PARTIAL_FILE_TOO_LARGE'
+        ]);
+        response.status(conflictCodes.has(error?.code) ? 409 : 500).json({
+            ok: false,
+            errorCode: error?.code || 'DOWNLOAD_RESUME_PREPARATION_FAILED',
+            error: error?.message || 'Could not prepare the download to resume'
+        });
+        return;
+    }
+
+    downloads.set(record.id, resumePreparation.record);
+    try {
+        await persistDownloadRecordsNow();
+    } catch (error) {
+        downloads.set(record.id, record);
+        scheduleDownloadRecordsPersistence();
+        console.error('Could not persist resumed download record:', error);
+        response.status(500).json({
+            ok: false,
+            error: 'Could not save the resumed download record'
+        });
+        return;
+    }
+
+    startBackgroundDownload(resumePreparation.record, { resumeOffset: resumePreparation.resumeOffset });
+    response.status(202).json(resumePreparation.record);
 });
 
 app.post('/downloads/:id/retry', async (request, response) => {
@@ -377,7 +458,7 @@ app.post('/downloads/:id/cancel', async (request, response) => {
         return;
     }
 
-    if (record.status === 'queued') {
+    if (record.status === 'queued' || record.status === 'paused') {
         const canceledRecord = updateDownloadRecord(record, {
             status: 'canceled',
             speedBytesPerSecond: 0,
@@ -537,7 +618,7 @@ const startServer = async () => {
 
     if (recovery.recoveredCount > 0) {
         await persistDownloadRecordsNow();
-        console.log(`Recovered ${recovery.recoveredCount} interrupted download record(s) as failed.`);
+        console.log(`Recovered ${recovery.recoveredCount} interrupted download record(s) as paused.`);
     }
 
     httpServer = app.listen(PORT, HOST, () => {

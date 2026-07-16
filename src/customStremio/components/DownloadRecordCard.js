@@ -7,6 +7,7 @@ const { getDownloadDetailsHref } = require('../downloadRecordPresentation');
 const styles = require('./DownloadRecordCard.less');
 
 const CANCELABLE_STATUSES = new Set(['queued', 'downloading', 'paused']);
+const PAUSABLE_STATUSES = new Set(['queued', 'downloading']);
 const REMOVABLE_STATUSES = new Set(['completed', 'failed', 'canceled']);
 const RETRYABLE_STATUSES = new Set(['failed', 'canceled']);
 
@@ -77,6 +78,8 @@ const DownloadRecordCard = ({
     variant = 'compact',
     action,
     actionError,
+    onPause,
+    onResume,
     onCancel,
     onRetry,
     onPlay,
@@ -92,6 +95,8 @@ const DownloadRecordCard = ({
     const fileSize = formatBytes(record?.bytesTotal ?? record?.bytesDownloaded);
     const actionInProgress = typeof action === 'string';
     const canCancel = recordId && CANCELABLE_STATUSES.has(status);
+    const canPause = recordId && PAUSABLE_STATUSES.has(status);
+    const canResume = recordId && status === 'paused';
     const canPlay = recordId && status === 'completed';
     const canOpenLocation = recordId && variant === 'library' && Boolean(record?.localPath);
     const canRemove = recordId && REMOVABLE_STATUSES.has(status);
@@ -171,7 +176,7 @@ const DownloadRecordCard = ({
             }
             {actionError ? <div className={styles['record-action-error']} role={'alert'}>{actionError}</div> : null}
             {
-                canCancel || canRetry || canPlay || canOpenLocation || canRemove ?
+                canPause || canResume || canCancel || canRetry || canPlay || canOpenLocation || canRemove ?
                     <div className={styles['record-actions']}>
                         {
                             canOpenLocation ?
@@ -190,6 +195,42 @@ const DownloadRecordCard = ({
                                         t('CUSTOM_DOWNLOAD_OPENING_LOCATION', { defaultValue: 'Opening folder...' })
                                         :
                                         t('CUSTOM_DOWNLOAD_OPEN_LOCATION', { defaultValue: 'Open location' })}
+                                </Button>
+                                :
+                                null
+                        }
+                        {
+                            canPause ?
+                                <Button
+                                    className={styles['pause-button']}
+                                    title={t('CUSTOM_DOWNLOAD_PAUSE_TITLE', { defaultValue: 'Pause {{title}}', title: labels.title })}
+                                    aria-disabled={actionInProgress}
+                                    disabled={actionInProgress}
+                                    tabIndex={actionInProgress ? -1 : 0}
+                                    onClick={() => !actionInProgress && onPause?.(recordId)}
+                                >
+                                    {action === 'pause' ?
+                                        t('CUSTOM_DOWNLOAD_PAUSING', { defaultValue: 'Pausing...' })
+                                        :
+                                        t('CUSTOM_DOWNLOAD_PAUSE', { defaultValue: 'Pause' })}
+                                </Button>
+                                :
+                                null
+                        }
+                        {
+                            canResume ?
+                                <Button
+                                    className={styles['resume-button']}
+                                    title={t('CUSTOM_DOWNLOAD_RESUME_TITLE', { defaultValue: 'Resume {{title}}', title: labels.title })}
+                                    aria-disabled={actionInProgress}
+                                    disabled={actionInProgress}
+                                    tabIndex={actionInProgress ? -1 : 0}
+                                    onClick={() => !actionInProgress && onResume?.(recordId)}
+                                >
+                                    {action === 'resume' ?
+                                        t('CUSTOM_DOWNLOAD_RESUMING', { defaultValue: 'Resuming...' })
+                                        :
+                                        t('CUSTOM_DOWNLOAD_RESUME', { defaultValue: 'Resume' })}
                                 </Button>
                                 :
                                 null
@@ -295,8 +336,10 @@ const DownloadRecordCard = ({
 DownloadRecordCard.propTypes = {
     record: PropTypes.object.isRequired,
     variant: PropTypes.oneOf(['compact', 'library']),
-    action: PropTypes.oneOf(['cancel', 'retry', 'play', 'location', 'remove']),
+    action: PropTypes.oneOf(['pause', 'resume', 'cancel', 'retry', 'play', 'location', 'remove']),
     actionError: PropTypes.string,
+    onPause: PropTypes.func,
+    onResume: PropTypes.func,
     onCancel: PropTypes.func,
     onRetry: PropTypes.func,
     onPlay: PropTypes.func,

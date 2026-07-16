@@ -2,7 +2,7 @@
 
 Development-only local backend for the custom Stremio download flow.
 
-It performs real direct HTTP/HTTPS file downloads in the background, persists download records locally, updates progress fields over time, retries failed/canceled transfers, and can launch completed local files in an explicitly configured media player. Pause/resume is not implemented yet.
+It performs real direct HTTP/HTTPS file downloads in the background, persists download records locally, supports pause/resume and retry, updates progress fields over time, and can launch completed local files in an explicitly configured media player.
 
 ## Install
 
@@ -71,25 +71,28 @@ Restart behavior:
 
 - Completed, failed, and canceled records are restored.
 - Restored completed records remain playable when their media file still exists.
-- Queued, downloading, or paused records from an interrupted process are restored as `failed` with an interruption message; automatic transfer resume is not implemented.
+- Queued or downloading records from an interrupted process are restored as `paused` with an interruption note. Paused records remain paused and can be resumed explicitly.
 - Removed records stay removed. Removing a record does not delete its media file.
 - If the metadata document is malformed or uses an unsupported version, startup stops instead of silently overwriting the stored data.
 
 ## Current Download Behavior
 
 - `POST /downloads` returns immediately with a queued record, then starts a background download.
-- Records update in memory and are persisted as the download moves through `queued`, `downloading`, `completed`, `failed`, or `canceled`.
+- Records update in memory and are persisted as the download moves through `queued`, `downloading`, `paused`, `completed`, `failed`, or `canceled`.
 - Duplicate prevention still applies before a new download starts.
 - Only `http` and `https` source URLs are accepted.
 
 ## Cancel / Retry / Pause / Resume
 
 - `POST /downloads/:id/cancel` stops an active download and marks the record `canceled`.
+- `POST /downloads/:id/pause` stops a queued/downloading transfer, preserves its `.part` file, and marks the record `paused`.
+- `POST /downloads/:id/resume` measures the trusted `.part` file and requests the remaining bytes with HTTP Range semantics.
+- Non-zero resumes require a matching `206 Partial Content` response. When a strong `ETag` or `Last-Modified` value is available, the backend also sends `If-Range` to protect against joining bytes from a changed source file.
+- If a server ignores the Range request, the record becomes `failed` without appending a full response to the partial file. Use Retry to restart safely from byte zero.
 - `POST /downloads/:id/retry` resets an inactive `failed` or `canceled` record and starts it again from byte zero.
 - Retry reuses the same record id, preserves its media metadata, increments `attemptCount`, and persists `queued` before restarting the background transfer.
-- Retry derives the destination from stored record metadata and removes that derived partial file first; callers cannot supply a filesystem path.
-- Partial files may remain after cancel or failure until the record is retried or removed manually.
-- `POST /downloads/:id/pause` and `POST /downloads/:id/resume` currently return `501 Not Implemented`.
+- Retry derives the destination from stored record metadata and removes both its derived final file and `.part` file first; callers cannot supply a filesystem path.
+- Partial files may remain after pause, cancel, or failure until the record is resumed, retried, or removed manually.
 
 ## PowerShell Test: Health
 
@@ -171,6 +174,24 @@ Expected:
 Invoke-RestMethod -Uri ("http://127.0.0.1:5577/downloads/{0}/cancel" -f $created.id) -Method Post | ConvertTo-Json -Depth 8
 ```
 
+## PowerShell Test: Pause and Resume
+
+Pause while a sufficiently large download is active, then resume the same record:
+
+```powershell
+$paused = Invoke-RestMethod -Uri ("http://127.0.0.1:5577/downloads/{0}/pause" -f $created.id) -Method Post
+$paused | ConvertTo-Json -Depth 8
+
+$resumed = Invoke-RestMethod -Uri ("http://127.0.0.1:5577/downloads/{0}/resume" -f $created.id) -Method Post
+$resumed | ConvertTo-Json -Depth 8
+```
+
+Expected:
+
+- Pause returns `status: paused` and retains a `.part` path.
+- Resume returns `status: queued`, then progresses through `downloading` to `completed` when the source supports byte ranges.
+- A backend restart during an active transfer restores the record as `paused`; resuming is a deliberate user action.
+
 ## PowerShell Test: Retry a Failed or Canceled Download
 
 ```powershell
@@ -216,7 +237,7 @@ Invoke-RestMethod -Uri 'http://127.0.0.1:5577/downloads' -Method Post -ContentTy
 - New records preserve optional title posters/backgrounds, logos, summaries, runtime/release information, metadata links, and episode thumbnails for the media-first Downloads Library. Older records without rich metadata remain valid and use frontend fallbacks.
 - `POST /downloads/:id/open-location` opens only locations derived from stored records; it does not accept caller-supplied paths.
 - The first restart after upgrading from the older in-memory backend cannot recover records that were never written by that older process; their media files remain on disk.
-- Interrupted active transfers are marked `failed` on the next startup; automatic resume is still deferred.
+- Interrupted active transfers are restored as `paused` on the next startup and can be resumed explicitly.
 - Real file downloading is implemented only for direct `http`/`https` URLs in this milestone.
-- Pause/resume are not implemented yet.
+- Pause/resume requires the remote direct-file source to honor HTTP byte ranges. Unsupported sources fail safely and can still use Retry from byte zero.
 - Completed records can be opened through `POST /play` when `CUSTOM_STREMIO_PLAYER_PATH` points to a valid player executable.

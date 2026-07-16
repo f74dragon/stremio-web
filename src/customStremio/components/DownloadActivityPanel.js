@@ -68,7 +68,7 @@ const getRecordProgress = (record) => {
     return Number.isFinite(value) ? Math.min(100, Math.max(0, value)) : 0;
 };
 
-const DownloadActivityPanel = ({ records, actionStates, actionErrors, onCancel }) => {
+const DownloadActivityPanel = ({ records, actionStates, actionErrors, onPause, onResume, onCancel }) => {
     const { t } = useTranslation();
     const [expanded, setExpanded] = React.useState(false);
     const summary = React.useMemo(() => getDownloadActivitySummary(records), [records]);
@@ -85,10 +85,17 @@ const DownloadActivityPanel = ({ records, actionStates, actionErrors, onCancel }
     const speedLabel = summary.speedBytesPerSecond > 0 ? `${formatBytes(summary.speedBytesPerSecond)}/s` : null;
     const etaLabel = formatDuration(summary.etaSeconds);
     const summaryMetrics = [transferredLabel, speedLabel, etaLabel ? `${etaLabel} left` : null].filter(Boolean);
-    const activityLabel = t('CUSTOM_DOWNLOADS_GLOBAL_ACTIVITY', {
-        defaultValue: summary.count === 1 ? '{{count}} active download' : '{{count}} active downloads',
-        count: summary.count
-    });
+    const allPaused = summary.pausedCount === summary.count;
+    const activityLabel = allPaused ?
+        t('CUSTOM_DOWNLOADS_PAUSED_ACTIVITY', {
+            defaultValue: summary.count === 1 ? '{{count}} paused download' : '{{count}} paused downloads',
+            count: summary.count
+        })
+        :
+        t('CUSTOM_DOWNLOADS_GLOBAL_ACTIVITY', {
+            defaultValue: summary.count === 1 ? '{{count}} active download' : '{{count}} active downloads',
+            count: summary.count
+        });
 
     return (
         <section className={styles['activity-panel']} aria-label={activityLabel}>
@@ -124,6 +131,7 @@ const DownloadActivityPanel = ({ records, actionStates, actionErrors, onCancel }
                             const recordId = record?.id;
                             const action = recordId ? actionStates[recordId] : null;
                             const actionInProgress = typeof action === 'string';
+                            const isPaused = record?.status === 'paused';
                             const recordSpeed = Number(record?.speedBytesPerSecond) > 0 ? `${formatBytes(record.speedBytesPerSecond)}/s` : null;
                             const recordEta = formatDuration(record?.etaSeconds);
                             const recordBytes = Number(record?.bytesTotal) > 0 ?
@@ -150,17 +158,30 @@ const DownloadActivityPanel = ({ records, actionStates, actionErrors, onCancel }
                                         </div>
                                         <div className={styles['record-footer']}>
                                             <span className={styles['record-metrics']}>{recordMetrics.join(' · ')}</span>
-                                            <Button
-                                                className={styles['cancel-button']}
-                                                aria-disabled={actionInProgress}
-                                                disabled={actionInProgress}
-                                                onClick={() => !actionInProgress && onCancel?.(recordId)}
-                                            >
-                                                {action === 'cancel' ?
-                                                    t('CUSTOM_DOWNLOAD_CANCELING', { defaultValue: 'Canceling...' })
-                                                    :
-                                                    t('CUSTOM_DOWNLOAD_CANCEL', { defaultValue: 'Cancel' })}
-                                            </Button>
+                                            <span className={styles['record-actions']}>
+                                                <Button
+                                                    className={isPaused ? styles['resume-button'] : styles['pause-button']}
+                                                    aria-disabled={actionInProgress}
+                                                    disabled={actionInProgress}
+                                                    onClick={() => !actionInProgress && (isPaused ? onResume?.(recordId) : onPause?.(recordId))}
+                                                >
+                                                    {isPaused ?
+                                                        (action === 'resume' ? t('CUSTOM_DOWNLOAD_RESUMING', { defaultValue: 'Resuming...' }) : t('CUSTOM_DOWNLOAD_RESUME', { defaultValue: 'Resume' }))
+                                                        :
+                                                        (action === 'pause' ? t('CUSTOM_DOWNLOAD_PAUSING', { defaultValue: 'Pausing...' }) : t('CUSTOM_DOWNLOAD_PAUSE', { defaultValue: 'Pause' }))}
+                                                </Button>
+                                                <Button
+                                                    className={styles['cancel-button']}
+                                                    aria-disabled={actionInProgress}
+                                                    disabled={actionInProgress}
+                                                    onClick={() => !actionInProgress && onCancel?.(recordId)}
+                                                >
+                                                    {action === 'cancel' ?
+                                                        t('CUSTOM_DOWNLOAD_CANCELING', { defaultValue: 'Canceling...' })
+                                                        :
+                                                        t('CUSTOM_DOWNLOAD_CANCEL', { defaultValue: 'Cancel' })}
+                                                </Button>
+                                            </span>
                                         </div>
                                         {recordId && actionErrors[recordId] ? <div className={styles['record-error']} role={'alert'}>{actionErrors[recordId]}</div> : null}
                                     </div>
@@ -179,6 +200,8 @@ DownloadActivityPanel.propTypes = {
     records: PropTypes.arrayOf(PropTypes.object).isRequired,
     actionStates: PropTypes.object.isRequired,
     actionErrors: PropTypes.object.isRequired,
+    onPause: PropTypes.func,
+    onResume: PropTypes.func,
     onCancel: PropTypes.func
 };
 
