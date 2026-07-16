@@ -59,7 +59,7 @@ Notes:
 - `4. Add placeholder Download / Play Download buttons`: In progress (`Milestone 4A` implemented)
 - `5. Create local backend prototype`: In progress (`Milestone 5B` backend skeleton created)
 - `7. Add title-specific downloads panel`: In progress (`Milestone 7A` implemented)
-- `6. Implement real download manager`: In progress (`Milestones 6A-6E` real downloads, persistence, retry, resumable partial transfers, and FIFO scheduling implemented)
+- `6. Implement real download manager`: In progress (`Milestones 6A-6F` real downloads, persistence, retry, resumable transfers, FIFO scheduling, and in-app concurrency settings implemented)
 - `8. Add global downloads page`: In progress (`Milestones 8A-8C.2` implemented)
 - `9. Add MPC-HC launch support`: In progress (`Milestones 9A-9B` panel and stream-row playback implemented)
 - `10. Add watched/unwatched integration`: Not started
@@ -78,13 +78,36 @@ Notes:
 
 ## Next Recommended Step
 
-Expose the concurrency limit in the frontend Settings experience and add clear queue-position treatment for waiting downloads. Queue reordering and multi-title/episode batch selection can follow that UI foundation. Debrid/hash availability remains the next discovery/availability feature after download scheduling UX is stable.
+Add clear queue-position treatment for waiting downloads in the global activity panel and download detail rows. Manual queue reordering and multi-title/episode batch selection can follow that presentation foundation. Debrid/hash availability remains the next discovery/availability feature after download scheduling UX is stable.
+
+## Milestone 6F Findings: Download-Manager Concurrency Setting
+
+- Persistent backend settings:
+  - Added a separate versioned `backend-settings.json` store under the existing local backend data directory, using atomic temporary-file replacement.
+  - The saved `downloads.maxConcurrentDownloads` value overrides the environment fallback on future starts. `CUSTOM_STREMIO_MAX_CONCURRENT_DOWNLOADS` remains useful only when no saved choice exists yet.
+  - Invalid or unsupported settings documents stop backend startup instead of silently discarding a user's configuration.
+- Runtime settings API:
+  - Added `GET /settings` and `PATCH /settings` for the local download concurrency value and its accepted limits.
+  - The backend accepts any positive safe integer plus the explicit `unlimited` mode, saves the new setting before applying it, and leaves the active scheduler unchanged if persistence fails.
+  - Raising the limit immediately dispatches additional queued work. Lowering it does not pause or cancel existing transfers; new work waits until the active count falls below the new limit.
+- Download manager experience:
+  - Added a manager-local Download options panel to the global Downloads page, keeping custom download controls separate from Stremio's original Settings experience.
+  - The manager offers quick choices for `1`, `2`, `3`, or `4` downloads, a validated Custom whole-number field, and an explicit Unlimited option with a resource-usage warning.
+  - The control loads only when opened, saves without requiring a restart, shows an in-progress state, preserves the previous selection on failure, and offers an explicit Retry state when the backend is offline during initial load.
+  - Fixed the initial UI implementation's React development lifecycle guard, which allowed `GET /settings` to finish but ignored its result and left the control stuck on Loading.
+  - The UI explains that changes apply immediately without interrupting active transfers.
+- Tests and remaining work:
+  - Added settings-store coverage for fallback, persistence, malformed documents, and invalid values.
+  - Added scheduler coverage for increasing and decreasing live concurrency plus API integration coverage for immediate dispatch and saved-value restoration after restart.
+  - Backend syntax checks pass and all 129 Jest tests pass. ESLint and the production webpack build pass with only the existing bundle-size warnings.
+  - Visible queue positions are the next focused UI pass. Manual reordering, batch downloads, and broader download-folder/player settings remain separate work.
+  - Debrid/hash availability, watched progress, filesystem discovery, metadata backfill, and media-file deletion remain tracked for later passes.
 
 ## Milestone 6E Findings: FIFO Download Queue and Concurrency Control
 
 - Scheduler foundation:
   - Added an isolated backend scheduler that dispatches download tasks in first-in, first-out order without changing the downloader's byte-transfer responsibilities.
-  - The backend runs at most two transfers concurrently by default. `CUSTOM_STREMIO_MAX_CONCURRENT_DOWNLOADS` accepts an integer from `1` through `16`; missing or invalid values safely use the default.
+  - The backend runs at most two transfers concurrently by default. `CUSTOM_STREMIO_MAX_CONCURRENT_DOWNLOADS` accepts a positive integer or `unlimited`; missing or invalid values safely use the default.
   - `GET /health` now reports the configured limit plus current active and queued counts for local diagnostics.
   - New records include `queuedAt`, and Retry/Resume refresh it when the existing record enters the back of the queue again.
 - Lifecycle integration:

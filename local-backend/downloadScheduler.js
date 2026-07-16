@@ -1,15 +1,21 @@
 const MAX_CONCURRENT_DOWNLOADS_ENV = 'CUSTOM_STREMIO_MAX_CONCURRENT_DOWNLOADS';
 const DEFAULT_MAX_CONCURRENT_DOWNLOADS = 2;
-const MAX_CONCURRENT_DOWNLOADS_LIMIT = 16;
+const UNLIMITED_CONCURRENT_DOWNLOADS = 'unlimited';
+
+const isValidMaxConcurrentDownloads = (value) => {
+    return value === UNLIMITED_CONCURRENT_DOWNLOADS || (Number.isSafeInteger(value) && value >= 1);
+};
 
 const parseMaxConcurrentDownloads = (
     value,
     fallback = DEFAULT_MAX_CONCURRENT_DOWNLOADS
 ) => {
+    if (typeof value === 'string' && value.trim().toLowerCase() === UNLIMITED_CONCURRENT_DOWNLOADS) {
+        return UNLIMITED_CONCURRENT_DOWNLOADS;
+    }
+
     const parsedValue = Number(value);
-    return Number.isInteger(parsedValue) &&
-        parsedValue >= 1 &&
-        parsedValue <= MAX_CONCURRENT_DOWNLOADS_LIMIT ?
+    return isValidMaxConcurrentDownloads(parsedValue) ?
         parsedValue
         :
         fallback;
@@ -83,6 +89,16 @@ class DownloadScheduler {
         this.stopped = true;
     }
 
+    setMaxConcurrentDownloads(value) {
+        if (!isValidMaxConcurrentDownloads(value)) {
+            throw new RangeError('Maximum concurrent downloads must be a positive safe integer or unlimited');
+        }
+
+        this.maxConcurrentDownloads = value;
+        this.pump();
+        return this.getSnapshot();
+    }
+
     getSnapshot() {
         return {
             maxConcurrentDownloads: this.maxConcurrentDownloads,
@@ -94,7 +110,11 @@ class DownloadScheduler {
     }
 
     pump() {
-        while (!this.stopped && this.active.size < this.maxConcurrentDownloads && this.queue.length > 0) {
+        const hasCapacity = () => {
+            return this.maxConcurrentDownloads === UNLIMITED_CONCURRENT_DOWNLOADS || this.active.size < this.maxConcurrentDownloads;
+        };
+
+        while (!this.stopped && hasCapacity() && this.queue.length > 0) {
             const entry = this.queue.shift();
             this.active.set(entry.id, entry);
             this.runEntry(entry);
@@ -120,7 +140,8 @@ class DownloadScheduler {
 module.exports = {
     MAX_CONCURRENT_DOWNLOADS_ENV,
     DEFAULT_MAX_CONCURRENT_DOWNLOADS,
-    MAX_CONCURRENT_DOWNLOADS_LIMIT,
+    UNLIMITED_CONCURRENT_DOWNLOADS,
+    isValidMaxConcurrentDownloads,
     parseMaxConcurrentDownloads,
     getConfiguredMaxConcurrentDownloads,
     sortQueuedDownloadRecords,

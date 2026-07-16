@@ -45,6 +45,19 @@ const requestJson = async (path, options = {}) => {
 
 const getBackendHealth = async () => requestJson('/health');
 
+const getBackendSettings = async () => requestJson('/settings');
+
+const updateBackendSettings = async (settings) => {
+    if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
+        throw new Error('updateBackendSettings requires a settings object');
+    }
+
+    return requestJson('/settings', {
+        method: 'PATCH',
+        body: settings
+    });
+};
+
 const createDownload = async (payload) => {
     if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
         throw new Error('createDownload requires a payload object');
@@ -112,6 +125,8 @@ module.exports = {
     LOCAL_BACKEND_BASE_URL,
     requestJson,
     getBackendHealth,
+    getBackendSettings,
+    updateBackendSettings,
     createDownload,
     listDownloads,
     getDownload,

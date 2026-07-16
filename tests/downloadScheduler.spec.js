@@ -2,7 +2,7 @@
 
 const {
     DEFAULT_MAX_CONCURRENT_DOWNLOADS,
-    MAX_CONCURRENT_DOWNLOADS_LIMIT,
+    UNLIMITED_CONCURRENT_DOWNLOADS,
     parseMaxConcurrentDownloads,
     sortQueuedDownloadRecords,
     DownloadScheduler
@@ -107,16 +107,94 @@ describe('DownloadScheduler', () => {
         expect(scheduler.getSnapshot()).toMatchObject({ queuedCount: 1, queuedIds: ['waiting'] });
         expect(started).toEqual(['active']);
     });
+
+    test('starts additional queued work immediately when the limit increases', async () => {
+        const scheduler = new DownloadScheduler({ maxConcurrentDownloads: 1 });
+        const firstGate = createDeferred();
+        const secondGate = createDeferred();
+        const started = [];
+
+        scheduler.enqueue('first', async () => {
+            started.push('first');
+            await firstGate.promise;
+        });
+        scheduler.enqueue('second', async () => {
+            started.push('second');
+            await secondGate.promise;
+        });
+
+        expect(started).toEqual(['first']);
+        scheduler.setMaxConcurrentDownloads(2);
+        expect(started).toEqual(['first', 'second']);
+        expect(scheduler.getSnapshot()).toMatchObject({ maxConcurrentDownloads: 2, activeCount: 2, queuedCount: 0 });
+
+        firstGate.resolve();
+        secondGate.resolve();
+        await waitFor(() => scheduler.getSnapshot().activeCount === 0);
+    });
+
+    test('does not interrupt active work when the limit decreases', async () => {
+        const scheduler = new DownloadScheduler({ maxConcurrentDownloads: 2 });
+        const gates = [createDeferred(), createDeferred(), createDeferred()];
+        const started = [];
+
+        ['first', 'second', 'third'].forEach((id, index) => {
+            scheduler.enqueue(id, async () => {
+                started.push(id);
+                await gates[index].promise;
+            });
+        });
+
+        scheduler.setMaxConcurrentDownloads(1);
+        expect(scheduler.getSnapshot()).toMatchObject({ maxConcurrentDownloads: 1, activeCount: 2, queuedCount: 1 });
+
+        gates[0].resolve();
+        await waitFor(() => scheduler.getSnapshot().activeCount === 1);
+        expect(started).toEqual(['first', 'second']);
+
+        gates[1].resolve();
+        await waitFor(() => started.length === 3);
+        expect(started).toEqual(['first', 'second', 'third']);
+        gates[2].resolve();
+        await waitFor(() => scheduler.getSnapshot().activeCount === 0);
+    });
+
+    test('starts all waiting work when concurrency becomes unlimited', async () => {
+        const scheduler = new DownloadScheduler({ maxConcurrentDownloads: 1 });
+        const gates = [createDeferred(), createDeferred(), createDeferred()];
+        const started = [];
+
+        ['first', 'second', 'third'].forEach((id, index) => {
+            scheduler.enqueue(id, async () => {
+                started.push(id);
+                await gates[index].promise;
+            });
+        });
+
+        expect(started).toEqual(['first']);
+        scheduler.setMaxConcurrentDownloads(UNLIMITED_CONCURRENT_DOWNLOADS);
+        expect(started).toEqual(['first', 'second', 'third']);
+        expect(scheduler.getSnapshot()).toMatchObject({
+            maxConcurrentDownloads: UNLIMITED_CONCURRENT_DOWNLOADS,
+            activeCount: 3,
+            queuedCount: 0
+        });
+
+        gates.forEach(({ resolve }) => resolve());
+        await waitFor(() => scheduler.getSnapshot().activeCount === 0);
+    });
 });
 
 describe('download scheduler configuration', () => {
-    test('accepts safe positive limits and falls back for invalid values', () => {
+    test('accepts custom and unlimited limits and falls back for invalid values', () => {
         expect(parseMaxConcurrentDownloads('1')).toBe(1);
-        expect(parseMaxConcurrentDownloads('8')).toBe(8);
+        expect(parseMaxConcurrentDownloads('128')).toBe(128);
+        expect(parseMaxConcurrentDownloads('unlimited')).toBe(UNLIMITED_CONCURRENT_DOWNLOADS);
+        expect(parseMaxConcurrentDownloads(' Unlimited ')).toBe(UNLIMITED_CONCURRENT_DOWNLOADS);
         expect(parseMaxConcurrentDownloads('0')).toBe(DEFAULT_MAX_CONCURRENT_DOWNLOADS);
         expect(parseMaxConcurrentDownloads('-1')).toBe(DEFAULT_MAX_CONCURRENT_DOWNLOADS);
         expect(parseMaxConcurrentDownloads('1.5')).toBe(DEFAULT_MAX_CONCURRENT_DOWNLOADS);
-        expect(parseMaxConcurrentDownloads(String(MAX_CONCURRENT_DOWNLOADS_LIMIT + 1))).toBe(DEFAULT_MAX_CONCURRENT_DOWNLOADS);
+        expect(parseMaxConcurrentDownloads(String(Number.MAX_SAFE_INTEGER + 1))).toBe(DEFAULT_MAX_CONCURRENT_DOWNLOADS);
         expect(parseMaxConcurrentDownloads('invalid', 4)).toBe(4);
     });
 

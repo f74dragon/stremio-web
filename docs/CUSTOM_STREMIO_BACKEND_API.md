@@ -155,6 +155,47 @@ Response shape:
 }
 ```
 
+### 1A. `GET /settings`
+
+Purpose:
+- Read local backend settings used by the custom Stremio UI.
+
+Response shape:
+
+```json
+{
+  "downloads": {
+    "maxConcurrentDownloads": 2,
+    "minAllowedConcurrentDownloads": 1,
+    "maxAllowedConcurrentDownloads": null,
+    "unlimitedValue": "unlimited"
+  }
+}
+```
+
+### 1B. `PATCH /settings`
+
+Purpose:
+- Persist and immediately apply a local download concurrency limit.
+
+Request shape:
+
+```json
+{
+  "downloads": {
+    "maxConcurrentDownloads": 2
+  }
+}
+```
+
+Behavior notes:
+- Accepted values are positive safe integers or the string `"unlimited"`; invalid values return HTTP `400`.
+- Positive integers provide an exact custom concurrency limit. `"unlimited"` immediately dispatches every queued transfer without a concurrency cap.
+- The new value is atomically persisted before it is applied to the live scheduler. Persistence failures return HTTP `500` and leave the previous runtime value active.
+- Raising the limit immediately starts additional FIFO work when available.
+- Lowering the limit does not interrupt active transfers. New work waits until the active count is below the new value.
+- The response uses the same shape as `GET /settings`.
+
 ### 2. `POST /downloads`
 
 Purpose:
@@ -182,7 +223,7 @@ Response shape:
 
 Runtime behavior:
 - New records enter a FIFO scheduler and start when a configured concurrency slot is available.
-- The backend runs at most two simultaneous transfers by default. `CUSTOM_STREMIO_MAX_CONCURRENT_DOWNLOADS` accepts integers from `1` through `16`.
+- The backend runs at most two simultaneous transfers by default. `CUSTOM_STREMIO_MAX_CONCURRENT_DOWNLOADS` accepts a positive integer or `unlimited`.
 - The queued record and its `queuedAt` time are durably stored before scheduler dispatch.
 - The response returns before the file transfer completes.
 - Frontend polling or refresh should read progress from later `GET /downloads` or `GET /downloads/:id` responses.
@@ -391,6 +432,16 @@ Notes:
 - `deleted` records are omitted from storage.
 - Invalid or unsupported metadata documents stop backend startup rather than being silently overwritten.
 
+## Persistent Backend Settings
+
+- Settings are stored separately from download records in a versioned `backend-settings.json` document.
+- Default Windows path: `%LOCALAPPDATA%\Custom Stremio\backend-settings.json`
+- `CUSTOM_STREMIO_DATA_DIR` overrides the directory for both record and settings documents.
+- Writes use atomic temporary-file replacement.
+- A saved `downloads.maxConcurrentDownloads` value takes precedence over `CUSTOM_STREMIO_MAX_CONCURRENT_DOWNLOADS` on startup.
+- When no saved document exists, the environment value is used if it is a positive integer or `unlimited`; otherwise the scheduler default is `2`.
+- Invalid or unsupported settings documents stop backend startup rather than being silently overwritten.
+
 ## File Organization Rule
 
 Intended default structure:
@@ -429,5 +480,5 @@ Current implementation notes:
 
 - SQLite remains an option if future global-library/query requirements outgrow the current single-file record store
 - WebSocket/SSE progress updates later
-- Settings page later for download folder and MPC-HC path
+- Additional Settings controls later for download folder and MPC-HC path
 - final desktop packaging later

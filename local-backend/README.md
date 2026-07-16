@@ -52,14 +52,22 @@ npm start
 
 ## Download Concurrency
 
-The scheduler starts downloads in FIFO order and runs at most two transfers simultaneously by default. Set an explicit limit before starting the backend:
+The scheduler starts downloads in FIFO order and runs at most two transfers simultaneously by default. The normal user control is available under **Downloads → Download options → Simultaneous downloads** and applies without restarting the backend.
+
+The saved value is stored in:
+
+`%LOCALAPPDATA%\Custom Stremio\backend-settings.json`
+
+`CUSTOM_STREMIO_DATA_DIR` also relocates this settings file. The environment variable remains an optional initial fallback when no saved selection exists yet:
 
 ```powershell
 $env:CUSTOM_STREMIO_MAX_CONCURRENT_DOWNLOADS = '1'
 npm start
 ```
 
-Accepted values are integers from `1` through `16`. Missing or invalid values use the default of `2`. Restart the backend after changing the environment setting.
+Accepted backend values are positive whole numbers or `unlimited`. The app presents quick choices `1` through `4`, a Custom number field, and an explicit Unlimited mode. Missing or invalid environment values use the default of `2`. Once an in-app choice is saved, it takes precedence over the environment fallback.
+
+Unlimited starts every queued transfer and can use substantial bandwidth, storage I/O, and system resources. Custom values and Unlimited are applied immediately without interrupting transfers that are already active.
 
 ## Persistent Download Records
 
@@ -115,6 +123,23 @@ Invoke-RestMethod -Uri 'http://127.0.0.1:5577/health'
 ```
 
 The response includes `downloads.maxConcurrent`, `downloads.active`, and `downloads.queued` scheduler diagnostics.
+
+## PowerShell Test: Download Settings
+
+Read the active setting:
+
+```powershell
+Invoke-RestMethod -Uri 'http://127.0.0.1:5577/settings'
+```
+
+Update it without restarting:
+
+```powershell
+$settings = @{ downloads = @{ maxConcurrentDownloads = 2 } } | ConvertTo-Json
+Invoke-RestMethod -Uri 'http://127.0.0.1:5577/settings' -Method Patch -ContentType 'application/json' -Body $settings
+```
+
+Increasing the value starts additional queued work immediately. Decreasing it lets active transfers continue and applies the lower cap as slots become free.
 
 ## PowerShell Test: Create Direct Download
 

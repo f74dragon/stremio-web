@@ -487,4 +487,89 @@ describe('download lifecycle API integration', () => {
         expect(fs.readFileSync(completedWaiting.localPath)).toEqual(sourceMedia);
         expect(sourceRequests.filter((request) => request.path === '/restart-waiting.mp4')).toHaveLength(1);
     });
+
+    test('updates concurrency at runtime and preserves the in-app setting across restart', async () => {
+        const initialSettings = await requestJson(backendPort, '/settings');
+        expect(initialSettings.statusCode).toBe(200);
+        expect(initialSettings.body.downloads).toEqual({
+            maxConcurrentDownloads: 1,
+            minAllowedConcurrentDownloads: 1,
+            maxAllowedConcurrentDownloads: null,
+            unlimitedValue: 'unlimited'
+        });
+
+        sourceShouldFail = false;
+        sourceMedia = Buffer.alloc(512 * 1024, 0x4d);
+        sourceChunkSize = 4096;
+        sourceChunkDelayMs = 15;
+
+        const firstResponse = await requestJson(backendPort, '/downloads', {
+            method: 'POST',
+            body: {
+                metaId: 'tt-settings-first',
+                type: 'movie',
+                parentTitle: 'Settings First Movie',
+                downloadUrl: `http://127.0.0.1:${sourcePort}/settings-first.mp4`
+            }
+        });
+        await waitFor(async () => {
+            const response = await requestJson(backendPort, `/downloads/${firstResponse.body.id}`);
+            return response.body?.status === 'downloading' && response.body.bytesDownloaded > 0;
+        });
+
+        const secondResponse = await requestJson(backendPort, '/downloads', {
+            method: 'POST',
+            body: {
+                metaId: 'tt-settings-second',
+                type: 'movie',
+                parentTitle: 'Settings Second Movie',
+                downloadUrl: `http://127.0.0.1:${sourcePort}/settings-second.mp4`
+            }
+        });
+        expect(secondResponse.body.status).toBe('queued');
+
+        const updatedSettings = await requestJson(backendPort, '/settings', {
+            method: 'PATCH',
+            body: { downloads: { maxConcurrentDownloads: 2 } }
+        });
+        expect(updatedSettings.statusCode).toBe(200);
+        expect(updatedSettings.body.downloads.maxConcurrentDownloads).toBe(2);
+
+        await waitFor(async () => {
+            const response = await requestJson(backendPort, `/downloads/${secondResponse.body.id}`);
+            return response.body?.status === 'downloading';
+        });
+        expect((await requestJson(backendPort, '/health')).body.downloads).toMatchObject({
+            maxConcurrent: 2,
+            active: 2
+        });
+
+        const customSettings = await requestJson(backendPort, '/settings', {
+            method: 'PATCH',
+            body: { downloads: { maxConcurrentDownloads: 128 } }
+        });
+        expect(customSettings.statusCode).toBe(200);
+        expect(customSettings.body.downloads.maxConcurrentDownloads).toBe(128);
+
+        const unlimitedSettings = await requestJson(backendPort, '/settings', {
+            method: 'PATCH',
+            body: { downloads: { maxConcurrentDownloads: 'unlimited' } }
+        });
+        expect(unlimitedSettings.statusCode).toBe(200);
+        expect(unlimitedSettings.body.downloads.maxConcurrentDownloads).toBe('unlimited');
+
+        const invalidSettings = await requestJson(backendPort, '/settings', {
+            method: 'PATCH',
+            body: { downloads: { maxConcurrentDownloads: 0 } }
+        });
+        expect(invalidSettings.statusCode).toBe(400);
+
+        await stopChildProcess(backendProcess);
+        backendProcess = null;
+        await startBackend();
+
+        const restoredSettings = await requestJson(backendPort, '/settings');
+        expect(restoredSettings.body.downloads.maxConcurrentDownloads).toBe('unlimited');
+        expect((await requestJson(backendPort, '/health')).body.downloads.maxConcurrent).toBe('unlimited');
+    });
 });

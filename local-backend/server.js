@@ -7,9 +7,12 @@ const { isDownloadRetryable, prepareDownloadRetry } = require('./downloadRetry')
 const { isDownloadResumable, prepareDownloadResume } = require('./downloadResume');
 const {
     DownloadScheduler,
+    UNLIMITED_CONCURRENT_DOWNLOADS,
+    isValidMaxConcurrentDownloads,
     getConfiguredMaxConcurrentDownloads,
     sortQueuedDownloadRecords
 } = require('./downloadScheduler');
+const { createBackendSettings, BackendSettingsStore } = require('./backendSettingsStore');
 const { launchMediaFile } = require('./playerLauncher');
 const { openDownloadLocation } = require('./fileExplorerLauncher');
 const { DownloadRecordStore, recoverInterruptedDownloadRecords } = require('./downloadRecordStore');
@@ -29,6 +32,8 @@ const downloadScheduler = new DownloadScheduler({
     maxConcurrentDownloads: getConfiguredMaxConcurrentDownloads(),
     onTaskError: (error, recordId) => console.error(`Scheduled download ${recordId} failed unexpectedly:`, error)
 });
+const settingsStore = new BackendSettingsStore();
+let backendSettings = createBackendSettings(downloadScheduler.maxConcurrentDownloads);
 let downloadCounter = 0;
 let httpServer = null;
 let shuttingDown = false;
@@ -201,6 +206,15 @@ const enqueueDownload = (record, options) => {
     return downloadScheduler.enqueue(record.id, () => runScheduledDownload(record.id, scheduledOptions));
 };
 
+const getBackendSettingsResponse = () => ({
+    downloads: {
+        maxConcurrentDownloads: backendSettings.downloads.maxConcurrentDownloads,
+        minAllowedConcurrentDownloads: 1,
+        maxAllowedConcurrentDownloads: null,
+        unlimitedValue: UNLIMITED_CONCURRENT_DOWNLOADS
+    }
+});
+
 app.use(cors());
 app.use(express.json());
 
@@ -222,6 +236,36 @@ app.get('/health', (request, response) => {
             queued: scheduler.queuedCount
         }
     });
+});
+
+app.get('/settings', (request, response) => {
+    response.json(getBackendSettingsResponse());
+});
+
+app.patch('/settings', async (request, response) => {
+    const maxConcurrentDownloads = request.body?.downloads?.maxConcurrentDownloads;
+    if (!isValidMaxConcurrentDownloads(maxConcurrentDownloads)) {
+        response.status(400).json({
+            ok: false,
+            error: `downloads.maxConcurrentDownloads must be a positive safe integer or "${UNLIMITED_CONCURRENT_DOWNLOADS}"`
+        });
+        return;
+    }
+
+    const nextSettings = createBackendSettings(maxConcurrentDownloads);
+    try {
+        backendSettings = await settingsStore.save(nextSettings);
+    } catch (error) {
+        console.error('Could not persist backend settings:', error);
+        response.status(500).json({
+            ok: false,
+            error: 'Could not save local download settings'
+        });
+        return;
+    }
+
+    downloadScheduler.setMaxConcurrentDownloads(maxConcurrentDownloads);
+    response.json(getBackendSettingsResponse());
 });
 
 app.post('/downloads', async (request, response) => {
@@ -675,6 +719,9 @@ const shutdown = async (signal) => {
 };
 
 const startServer = async () => {
+    backendSettings = await settingsStore.load(createBackendSettings(getConfiguredMaxConcurrentDownloads()));
+    downloadScheduler.setMaxConcurrentDownloads(backendSettings.downloads.maxConcurrentDownloads);
+
     const storedRecords = await recordStore.load();
     const recovery = recoverInterruptedDownloadRecords(storedRecords);
     recovery.records.forEach((record) => downloads.set(record.id, record));
@@ -723,6 +770,7 @@ const startServer = async () => {
     httpServer = app.listen(PORT, HOST, () => {
         console.log(`${SERVICE_NAME} listening on http://${HOST}:${PORT}`);
         console.log(`Download records: ${recordStore.filePath}`);
+        console.log(`Backend settings: ${settingsStore.filePath}`);
         console.log(`Maximum concurrent downloads: ${downloadScheduler.maxConcurrentDownloads}`);
     });
 

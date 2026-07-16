@@ -9,6 +9,7 @@ const { groupDownloadRecords, groupDownloadRecordsByMedia } = require('stremio/c
 const DownloadMediaGroup = require('stremio/customStremio/components/DownloadMediaGroup');
 const DownloadMediaDetails = require('stremio/customStremio/components/DownloadMediaDetails');
 const DownloadActivityPanel = require('stremio/customStremio/components/DownloadActivityPanel');
+const DownloadManagerSettingsPanel = require('stremio/customStremio/components/DownloadManagerSettingsPanel');
 const styles = require('./styles.less');
 
 const Downloads = () => {
@@ -16,6 +17,7 @@ const Downloads = () => {
     const contentRef = React.useRef(null);
     const libraryScrollPositionRef = React.useRef(0);
     const [selectedMediaKey, setSelectedMediaKey] = React.useState(null);
+    const [settingsOpen, setSettingsOpen] = React.useState(false);
     const {
         items,
         initialLoading,
@@ -111,6 +113,13 @@ const Downloads = () => {
                                 <div className={styles['header-actions']}>
                                     {refreshing ? <span className={styles['refreshing-label']}>{t('CUSTOM_DOWNLOADS_REFRESHING', { defaultValue: 'Refreshing...' })}</span> : null}
                                     <Button
+                                        className={settingsOpen ? styles['options-button-active'] : styles['options-button']}
+                                        aria-expanded={settingsOpen}
+                                        onClick={() => setSettingsOpen((current) => !current)}
+                                    >
+                                        {t('CUSTOM_DOWNLOADS_OPTIONS', { defaultValue: 'Download options' })}
+                                    </Button>
+                                    <Button
                                         className={styles['refresh-button']}
                                         title={t('CUSTOM_DOWNLOADS_REFRESH_TITLE', { defaultValue: 'Refresh downloads' })}
                                         aria-disabled={refreshing}
@@ -121,6 +130,8 @@ const Downloads = () => {
                                     </Button>
                                 </div>
                             </header>
+
+                            {settingsOpen ? <DownloadManagerSettingsPanel /> : null}
 
                             <DownloadActivityPanel
                                 records={items}
