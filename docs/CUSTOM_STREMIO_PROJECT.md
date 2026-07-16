@@ -59,7 +59,7 @@ Notes:
 - `4. Add placeholder Download / Play Download buttons`: In progress (`Milestone 4A` implemented)
 - `5. Create local backend prototype`: In progress (`Milestone 5B` backend skeleton created)
 - `7. Add title-specific downloads panel`: In progress (`Milestone 7A` implemented)
-- `6. Implement real download manager`: In progress (`Milestones 6A-6D` real downloads, persistence, retry, and resumable partial transfers implemented)
+- `6. Implement real download manager`: In progress (`Milestones 6A-6E` real downloads, persistence, retry, resumable partial transfers, and FIFO scheduling implemented)
 - `8. Add global downloads page`: In progress (`Milestones 8A-8C.2` implemented)
 - `9. Add MPC-HC launch support`: In progress (`Milestones 9A-9B` panel and stream-row playback implemented)
 - `10. Add watched/unwatched integration`: Not started
@@ -78,7 +78,31 @@ Notes:
 
 ## Next Recommended Step
 
-Add explicit queue ordering and a configurable download concurrency limit. Debrid/hash availability remains the next discovery/availability feature after download scheduling is stable.
+Expose the concurrency limit in the frontend Settings experience and add clear queue-position treatment for waiting downloads. Queue reordering and multi-title/episode batch selection can follow that UI foundation. Debrid/hash availability remains the next discovery/availability feature after download scheduling UX is stable.
+
+## Milestone 6E Findings: FIFO Download Queue and Concurrency Control
+
+- Scheduler foundation:
+  - Added an isolated backend scheduler that dispatches download tasks in first-in, first-out order without changing the downloader's byte-transfer responsibilities.
+  - The backend runs at most two transfers concurrently by default. `CUSTOM_STREMIO_MAX_CONCURRENT_DOWNLOADS` accepts an integer from `1` through `16`; missing or invalid values safely use the default.
+  - `GET /health` now reports the configured limit plus current active and queued counts for local diagnostics.
+  - New records include `queuedAt`, and Retry/Resume refresh it when the existing record enters the back of the queue again.
+- Lifecycle integration:
+  - New downloads, retries, and resumes all pass through the same scheduler instead of starting directly.
+  - Completing or failing an active transfer releases its slot. Pausing or canceling an active transfer releases its slot after the transfer state is finalized, allowing the next waiting job to start.
+  - Pausing, canceling, or deleting a waiting record removes it from the scheduler before it can open a source request.
+  - The existing frontend already renders `queued` records, polls while queued/downloading work exists, and exposes Pause/Cancel, so this backend pass required no new UI action model.
+- Persistence and restart behavior:
+  - Records that were genuinely waiting remain `queued` across backend restarts and are restored in `queuedAt` order.
+  - Records that were actively `downloading` when the process stopped still recover as `paused`, preserving the explicit user-controlled resume behavior from Milestone 6D.
+  - A queued resumed transfer revalidates its partial file on startup before it is allowed back into the scheduler; invalid partial state is kept paused with an actionable error.
+  - Shutdown stops new dispatch before the final record flush so waiting work cannot accidentally start while the process is closing.
+- Tests and remaining work:
+  - Added unit coverage for concurrency limits, FIFO order, queued removal, failure slot release, shutdown dispatch blocking, configuration parsing, and persisted ordering.
+  - Added API integration coverage proving a waiting job does not contact its source early, queued cancellation never starts, Pause hands the slot to the next job, Resume re-enters the queue, and waiting jobs survive restart.
+  - Backend syntax checks pass and all 118 Jest tests pass. ESLint and the production webpack build also pass with only the existing bundle-size warnings.
+  - Frontend Settings for the concurrency value, visible queue positions, manual queue reordering, and batch downloads remain separate passes.
+  - Debrid/hash availability, watched progress, filesystem discovery, metadata backfill, and media-file deletion remain tracked for later passes.
 
 ## Milestone 6D Findings: Pause, Resume, and Partial-File Recovery
 

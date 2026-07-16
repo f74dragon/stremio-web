@@ -5,7 +5,7 @@ const path = require('path');
 const STORE_VERSION = 1;
 const DATA_DIR_ENV = 'CUSTOM_STREMIO_DATA_DIR';
 const RECORDS_FILE_NAME = 'download-records.json';
-const INTERRUPTED_STATUSES = new Set(['queued', 'downloading']);
+const INTERRUPTED_STATUSES = new Set(['downloading']);
 const INTERRUPTED_ERROR = 'Download paused because the local backend stopped before completion. Resume to continue.';
 
 const getDefaultDataDirectory = () => {

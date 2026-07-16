@@ -61,6 +61,7 @@ describe('downloadResume', () => {
             progress: 40,
             speedBytesPerSecond: 0,
             etaSeconds: null,
+            queuedAt: '2026-07-16T15:00:00.000Z',
             completedAt: null,
             updatedAt: '2026-07-16T15:00:00.000Z',
             error: null

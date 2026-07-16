@@ -79,7 +79,7 @@ describe('downloadRecordStore', () => {
         ]);
     });
 
-    test('marks interrupted queued/downloading records as paused while preserving existing pauses', () => {
+    test('preserves queued work and marks only interrupted active records as paused', () => {
         const recovery = recoverInterruptedDownloadRecords([
             { id: 'dl_queued', status: 'queued', speedBytesPerSecond: 10 },
             { id: 'dl_downloading', status: 'downloading', progress: 42 },
@@ -87,23 +87,17 @@ describe('downloadRecordStore', () => {
             { id: 'dl_completed', status: 'completed', progress: 100 }
         ], '2026-07-15T12:00:00.000Z');
 
-        expect(recovery.recoveredCount).toBe(2);
-        expect(recovery.records.slice(0, 2)).toEqual([
-            expect.objectContaining({
-                id: 'dl_queued',
-                status: 'paused',
-                speedBytesPerSecond: 0,
-                etaSeconds: null,
-                completedAt: null,
-                updatedAt: '2026-07-15T12:00:00.000Z',
-                error: INTERRUPTED_ERROR
-            }),
-            expect.objectContaining({
-                id: 'dl_downloading',
-                status: 'paused',
-                error: INTERRUPTED_ERROR
-            })
-        ]);
+        expect(recovery.recoveredCount).toBe(1);
+        expect(recovery.records[0]).toEqual({ id: 'dl_queued', status: 'queued', speedBytesPerSecond: 10 });
+        expect(recovery.records[1]).toEqual(expect.objectContaining({
+            id: 'dl_downloading',
+            status: 'paused',
+            speedBytesPerSecond: 0,
+            etaSeconds: null,
+            completedAt: null,
+            updatedAt: '2026-07-15T12:00:00.000Z',
+            error: INTERRUPTED_ERROR
+        }));
         expect(recovery.records[2]).toEqual({ id: 'dl_paused', status: 'paused' });
         expect(recovery.records[3]).toEqual({
             id: 'dl_completed',

@@ -58,6 +58,7 @@ The backend will generate and maintain these backend-only fields later:
 - `progress`
 - `speedBytesPerSecond`
 - `etaSeconds`
+- `queuedAt`
 - `createdAt`
 - `updatedAt`
 - `completedAt`
@@ -109,6 +110,7 @@ Example combined download record shape:
   "progress": 0,
   "speedBytesPerSecond": 0,
   "etaSeconds": null,
+  "queuedAt": "2026-05-23T12:00:00.000Z",
   "createdAt": "2026-05-23T12:00:00.000Z",
   "updatedAt": "2026-05-23T12:00:00.000Z",
   "completedAt": null,
@@ -144,7 +146,12 @@ Response shape:
   "ok": true,
   "service": "custom-stremio-local-backend",
   "version": "dev",
-  "time": "2026-05-23T12:00:00.000Z"
+  "time": "2026-05-23T12:00:00.000Z",
+  "downloads": {
+    "maxConcurrent": 2,
+    "active": 1,
+    "queued": 3
+  }
 }
 ```
 
@@ -174,8 +181,9 @@ Response shape:
 - Duplicate active record: HTTP `200` with the existing full download record and `duplicate: true`
 
 Runtime behavior:
-- New records start a real background direct-file download immediately after record creation.
-- The queued record is durably stored before the background transfer starts.
+- New records enter a FIFO scheduler and start when a configured concurrency slot is available.
+- The backend runs at most two simultaneous transfers by default. `CUSTOM_STREMIO_MAX_CONCURRENT_DOWNLOADS` accepts integers from `1` through `16`.
+- The queued record and its `queuedAt` time are durably stored before scheduler dispatch.
 - The response returns before the file transfer completes.
 - Frontend polling or refresh should read progress from later `GET /downloads` or `GET /downloads/:id` responses.
 
@@ -223,6 +231,7 @@ Response shape:
 
 Behavior notes:
 - Only `queued` and `downloading` records can transition to `paused`; incompatible states return HTTP `409`.
+- A waiting queued record is removed before it can start. Pausing an active record releases its concurrency slot for the next waiting job.
 - An active request and file stream are stopped before the response is returned.
 - The `.part` file, trusted byte count, remote range capability, and available response validators remain on the record for a later resume.
 
@@ -243,6 +252,7 @@ Behavior notes:
 - A non-zero resume sends `Range: bytes=<offset>-` and sends `If-Range` when a strong `ETag` or `Last-Modified` validator was captured.
 - The remote response must be `206 Partial Content` with a matching `Content-Range` start. A source that returns a full `200` response fails the record safely and preserves the partial bytes for inspection or Retry.
 - A missing, invalid, or unexpectedly oversized partial file rejects the resume without starting a transfer.
+- A successful preparation refreshes `queuedAt` and places the resumed record at the back of the FIFO queue.
 
 ### 7. `POST /downloads/:id/retry`
 
@@ -262,6 +272,7 @@ Behavior notes:
 - Any final file and `.part` file at the derived destination are removed before restarting so stale bytes cannot be mistaken for completed media.
 - Progress, byte totals, speed, ETA, completion time, and error state are reset.
 - `attemptCount` increments and `lastAttemptAt` records the retry time. Legacy records without attempt metadata begin their retry as attempt `2`.
+- `queuedAt` is refreshed so the retry enters at the back of the FIFO queue.
 - The queued retry is persisted before its background transfer starts.
 
 ### 8. `POST /downloads/:id/cancel`
@@ -277,6 +288,7 @@ Response shape:
 
 Behavior notes:
 - If the download is actively running, the backend aborts the active transfer and updates the record to `canceled`.
+- If the record is waiting, it is removed from the scheduler and never opens a source request.
 - Partial `.part` files remain on disk until the record is resumed, retried, or removed manually. Retry removes the derived artifacts before starting again.
 - The canceled state is persisted across backend restarts.
 
@@ -374,7 +386,8 @@ Notes:
 - `CUSTOM_STREMIO_DATA_DIR` overrides the metadata directory.
 - Writes use an atomic temporary-file replacement, and frequent progress changes are coalesced.
 - `completed`, `failed`, `canceled`, and already `paused` records are restored unchanged after restart.
-- Restored `queued` or `downloading` records become `paused` with an interruption note and can be resumed explicitly.
+- Waiting `queued` records are restored in `queuedAt` order and automatically dispatched as slots become available.
+- Restored `downloading` records become `paused` with an interruption note and can be resumed explicitly.
 - `deleted` records are omitted from storage.
 - Invalid or unsupported metadata documents stop backend startup rather than being silently overwritten.
 

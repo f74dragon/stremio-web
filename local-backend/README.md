@@ -50,6 +50,17 @@ $env:CUSTOM_STREMIO_DOWNLOAD_DIR = 'C:\Temp\Custom Stremio Downloads'
 npm start
 ```
 
+## Download Concurrency
+
+The scheduler starts downloads in FIFO order and runs at most two transfers simultaneously by default. Set an explicit limit before starting the backend:
+
+```powershell
+$env:CUSTOM_STREMIO_MAX_CONCURRENT_DOWNLOADS = '1'
+npm start
+```
+
+Accepted values are integers from `1` through `16`. Missing or invalid values use the default of `2`. Restart the backend after changing the environment setting.
+
 ## Persistent Download Records
 
 Download metadata is stored separately from media files at:
@@ -71,21 +82,24 @@ Restart behavior:
 
 - Completed, failed, and canceled records are restored.
 - Restored completed records remain playable when their media file still exists.
-- Queued or downloading records from an interrupted process are restored as `paused` with an interruption note. Paused records remain paused and can be resumed explicitly.
+- Waiting `queued` records remain queued and automatically re-enter the scheduler in FIFO order.
+- Records that were actively `downloading` are restored as `paused` with an interruption note. Existing paused records remain paused and can be resumed explicitly.
 - Removed records stay removed. Removing a record does not delete its media file.
 - If the metadata document is malformed or uses an unsupported version, startup stops instead of silently overwriting the stored data.
 
 ## Current Download Behavior
 
-- `POST /downloads` returns immediately with a queued record, then starts a background download.
+- `POST /downloads` returns immediately with a queued record. The FIFO scheduler starts it when a concurrency slot is available.
 - Records update in memory and are persisted as the download moves through `queued`, `downloading`, `paused`, `completed`, `failed`, or `canceled`.
+- New downloads, retries, and resumes use the same queue. Retry and Resume enter at the back with a refreshed `queuedAt` timestamp.
+- Finishing, failing, pausing, or canceling an active transfer releases its scheduler slot for the next waiting job.
 - Duplicate prevention still applies before a new download starts.
 - Only `http` and `https` source URLs are accepted.
 
 ## Cancel / Retry / Pause / Resume
 
-- `POST /downloads/:id/cancel` stops an active download and marks the record `canceled`.
-- `POST /downloads/:id/pause` stops a queued/downloading transfer, preserves its `.part` file, and marks the record `paused`.
+- `POST /downloads/:id/cancel` removes waiting work before it starts or stops an active download and marks the record `canceled`.
+- `POST /downloads/:id/pause` removes waiting work from the queue or stops an active transfer, preserves its `.part` file, and marks the record `paused`.
 - `POST /downloads/:id/resume` measures the trusted `.part` file and requests the remaining bytes with HTTP Range semantics.
 - Non-zero resumes require a matching `206 Partial Content` response. When a strong `ETag` or `Last-Modified` value is available, the backend also sends `If-Range` to protect against joining bytes from a changed source file.
 - If a server ignores the Range request, the record becomes `failed` without appending a full response to the partial file. Use Retry to restart safely from byte zero.
@@ -99,6 +113,8 @@ Restart behavior:
 ```powershell
 Invoke-RestMethod -Uri 'http://127.0.0.1:5577/health'
 ```
+
+The response includes `downloads.maxConcurrent`, `downloads.active`, and `downloads.queued` scheduler diagnostics.
 
 ## PowerShell Test: Create Direct Download
 
@@ -237,7 +253,7 @@ Invoke-RestMethod -Uri 'http://127.0.0.1:5577/downloads' -Method Post -ContentTy
 - New records preserve optional title posters/backgrounds, logos, summaries, runtime/release information, metadata links, and episode thumbnails for the media-first Downloads Library. Older records without rich metadata remain valid and use frontend fallbacks.
 - `POST /downloads/:id/open-location` opens only locations derived from stored records; it does not accept caller-supplied paths.
 - The first restart after upgrading from the older in-memory backend cannot recover records that were never written by that older process; their media files remain on disk.
-- Interrupted active transfers are restored as `paused` on the next startup and can be resumed explicitly.
+- Waiting queued work is restored automatically in FIFO order; interrupted active transfers are restored as `paused` and can be resumed explicitly.
 - Real file downloading is implemented only for direct `http`/`https` URLs in this milestone.
 - Pause/resume requires the remote direct-file source to honor HTTP byte ranges. Unsupported sources fail safely and can still use Retry from byte zero.
 - Completed records can be opened through `POST /play` when `CUSTOM_STREMIO_PLAYER_PATH` points to a valid player executable.

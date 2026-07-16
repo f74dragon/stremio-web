@@ -5,6 +5,11 @@ const cors = require('cors');
 const { startDownload, pauseDownload, cancelDownload, isDownloadActive, isSupportedSourceUrl } = require('./downloadManager');
 const { isDownloadRetryable, prepareDownloadRetry } = require('./downloadRetry');
 const { isDownloadResumable, prepareDownloadResume } = require('./downloadResume');
+const {
+    DownloadScheduler,
+    getConfiguredMaxConcurrentDownloads,
+    sortQueuedDownloadRecords
+} = require('./downloadScheduler');
 const { launchMediaFile } = require('./playerLauncher');
 const { openDownloadLocation } = require('./fileExplorerLauncher');
 const { DownloadRecordStore, recoverInterruptedDownloadRecords } = require('./downloadRecordStore');
@@ -19,6 +24,10 @@ const app = express();
 const downloads = new Map();
 const recordStore = new DownloadRecordStore({
     onError: (error) => console.error('Could not persist download records:', error)
+});
+const downloadScheduler = new DownloadScheduler({
+    maxConcurrentDownloads: getConfiguredMaxConcurrentDownloads(),
+    onTaskError: (error, recordId) => console.error(`Scheduled download ${recordId} failed unexpectedly:`, error)
 });
 let downloadCounter = 0;
 let httpServer = null;
@@ -79,6 +88,7 @@ const createDownloadRecord = (payload) => {
         progress: 0,
         speedBytesPerSecond: 0,
         etaSeconds: null,
+        queuedAt: now,
         createdAt: now,
         updatedAt: now,
         completedAt: null,
@@ -159,27 +169,36 @@ const getDownloadRecordOrSend404 = (id, response) => {
     return record;
 };
 
-const startBackgroundDownload = (record, options) => {
-    (async () => {
-        try {
-            await startDownload(record, updateDownloadRecordById, options);
-        } catch (error) {
-            const nextRecord = downloads.get(record.id);
-            if (nextRecord && nextRecord.status !== 'failed' && nextRecord.status !== 'canceled') {
-                updateDownloadRecord(nextRecord, {
-                    status: 'failed',
-                    error: error?.message || 'Download failed',
-                    completedAt: null,
-                    speedBytesPerSecond: 0,
-                    etaSeconds: null
-                });
-            }
-        } finally {
-            await persistDownloadRecordsNow().catch((error) => {
-                console.error('Could not persist final download state:', error);
+const runScheduledDownload = async (recordId, options) => {
+    const record = downloads.get(recordId);
+    if (!record || record.status !== 'queued') {
+        return;
+    }
+
+    try {
+        await startDownload(record, updateDownloadRecordById, options);
+    } catch (error) {
+        const nextRecord = downloads.get(record.id);
+        if (nextRecord && !['failed', 'canceled', 'paused'].includes(nextRecord.status)) {
+            updateDownloadRecord(nextRecord, {
+                status: 'failed',
+                error: error?.message || 'Download failed',
+                completedAt: null,
+                speedBytesPerSecond: 0,
+                etaSeconds: null
             });
         }
-    })();
+    } finally {
+        await persistDownloadRecordsNow().catch((error) => {
+            console.error('Could not persist final download state:', error);
+        });
+    }
+};
+
+const enqueueDownload = (record, options) => {
+    const savedBytes = Number(record?.bytesDownloaded);
+    const scheduledOptions = options || (Number.isSafeInteger(savedBytes) && savedBytes > 0 ? { resumeOffset: savedBytes } : undefined);
+    return downloadScheduler.enqueue(record.id, () => runScheduledDownload(record.id, scheduledOptions));
 };
 
 app.use(cors());
@@ -191,11 +210,17 @@ app.use((request, response, next) => {
 });
 
 app.get('/health', (request, response) => {
+    const scheduler = downloadScheduler.getSnapshot();
     response.json({
         ok: true,
         service: SERVICE_NAME,
         version: SERVICE_VERSION,
-        time: getNowIso()
+        time: getNowIso(),
+        downloads: {
+            maxConcurrent: scheduler.maxConcurrentDownloads,
+            active: scheduler.activeCount,
+            queued: scheduler.queuedCount
+        }
     });
 });
 
@@ -250,7 +275,7 @@ app.post('/downloads', async (request, response) => {
         return;
     }
 
-    startBackgroundDownload(record);
+    enqueueDownload(record);
     response.status(201).json({
         ...record,
         duplicate: false
@@ -294,7 +319,16 @@ app.post('/downloads/:id/pause', async (request, response) => {
         return;
     }
 
-    if (isDownloadActive(record.id)) {
+    if (downloadScheduler.isQueued(record.id)) {
+        downloadScheduler.remove(record.id);
+        updateDownloadRecord(record, {
+            status: 'paused',
+            speedBytesPerSecond: 0,
+            etaSeconds: null,
+            completedAt: null,
+            error: null
+        });
+    } else if (isDownloadActive(record.id)) {
         await pauseDownload(record.id);
     } else if (record.status === 'queued' || record.status === 'downloading') {
         updateDownloadRecord(record, {
@@ -379,7 +413,7 @@ app.post('/downloads/:id/resume', async (request, response) => {
         return;
     }
 
-    startBackgroundDownload(resumePreparation.record, { resumeOffset: resumePreparation.resumeOffset });
+    enqueueDownload(resumePreparation.record, { resumeOffset: resumePreparation.resumeOffset });
     response.status(202).json(resumePreparation.record);
 });
 
@@ -432,13 +466,35 @@ app.post('/downloads/:id/retry', async (request, response) => {
         return;
     }
 
-    startBackgroundDownload(retriedRecord);
+    enqueueDownload(retriedRecord);
     response.status(202).json(retriedRecord);
 });
 
 app.post('/downloads/:id/cancel', async (request, response) => {
     const record = getDownloadRecordOrSend404(request.params.id, response);
     if (!record) {
+        return;
+    }
+
+    if (downloadScheduler.isQueued(record.id)) {
+        downloadScheduler.remove(record.id);
+        const canceledRecord = updateDownloadRecord(record, {
+            status: 'canceled',
+            speedBytesPerSecond: 0,
+            etaSeconds: null,
+            error: null
+        });
+        try {
+            await persistDownloadRecordsNow();
+        } catch (error) {
+            console.error('Could not persist canceled download record:', error);
+            response.status(500).json({
+                ok: false,
+                error: 'Download was canceled but its saved record could not be updated'
+            });
+            return;
+        }
+        response.json(canceledRecord);
         return;
     }
 
@@ -488,7 +544,10 @@ app.delete('/downloads/:id', async (request, response) => {
         return;
     }
 
-    if (isDownloadActive(record.id)) {
+    const wasQueued = downloadScheduler.isQueued(record.id);
+    if (wasQueued) {
+        downloadScheduler.remove(record.id);
+    } else if (isDownloadActive(record.id)) {
         await cancelDownload(record.id);
     }
 
@@ -499,6 +558,9 @@ app.delete('/downloads/:id', async (request, response) => {
         await persistDownloadRecordsNow();
     } catch (error) {
         downloads.set(latestRecord.id, latestRecord);
+        if (wasQueued) {
+            enqueueDownload(latestRecord);
+        }
         console.error('Could not persist removed download record:', error);
         response.status(500).json({
             ok: false,
@@ -596,6 +658,7 @@ const shutdown = async (signal) => {
     }
 
     shuttingDown = true;
+    downloadScheduler.stop();
     console.log(`${signal} received; saving download records before shutdown.`);
 
     if (httpServer !== null) {
@@ -616,14 +679,51 @@ const startServer = async () => {
     const recovery = recoverInterruptedDownloadRecords(storedRecords);
     recovery.records.forEach((record) => downloads.set(record.id, record));
 
-    if (recovery.recoveredCount > 0) {
+    const queuedRecords = sortQueuedDownloadRecords(recovery.records.filter((record) => record.status === 'queued'));
+    let restoredQueuedCount = 0;
+    for (const queuedRecord of queuedRecords) {
+        let recordToQueue = queuedRecord;
+        let options;
+        if (Number(queuedRecord.bytesDownloaded) > 0) {
+            try {
+                const preparation = await prepareDownloadResume({ ...queuedRecord, status: 'paused' }, getNowIso());
+                recordToQueue = {
+                    ...preparation.record,
+                    queuedAt: queuedRecord.queuedAt || queuedRecord.createdAt || getNowIso()
+                };
+                downloads.set(recordToQueue.id, recordToQueue);
+                options = { resumeOffset: preparation.resumeOffset };
+            } catch (error) {
+                downloads.set(queuedRecord.id, {
+                    ...queuedRecord,
+                    status: 'paused',
+                    speedBytesPerSecond: 0,
+                    etaSeconds: null,
+                    updatedAt: getNowIso(),
+                    error: `Queued download could not be restored: ${error?.message || 'partial file validation failed'}`
+                });
+                continue;
+            }
+        }
+
+        enqueueDownload(recordToQueue, options);
+        restoredQueuedCount += 1;
+    }
+
+    if (recovery.recoveredCount > 0 || queuedRecords.length > 0) {
         await persistDownloadRecordsNow();
-        console.log(`Recovered ${recovery.recoveredCount} interrupted download record(s) as paused.`);
+    }
+    if (recovery.recoveredCount > 0) {
+        console.log(`Recovered ${recovery.recoveredCount} interrupted active download record(s) as paused.`);
+    }
+    if (restoredQueuedCount > 0) {
+        console.log(`Restored ${restoredQueuedCount} queued download record(s).`);
     }
 
     httpServer = app.listen(PORT, HOST, () => {
         console.log(`${SERVICE_NAME} listening on http://${HOST}:${PORT}`);
         console.log(`Download records: ${recordStore.filePath}`);
+        console.log(`Maximum concurrent downloads: ${downloadScheduler.maxConcurrentDownloads}`);
     });
 
     process.once('SIGINT', () => {

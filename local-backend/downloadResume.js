@@ -71,6 +71,7 @@ const prepareDownloadResume = async (record, now = new Date().toISOString()) => 
             progress: getProgress(resumeOffset, bytesTotal),
             speedBytesPerSecond: 0,
             etaSeconds: null,
+            queuedAt: now,
             updatedAt: now,
             completedAt: null,
             error: null

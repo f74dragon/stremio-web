@@ -94,6 +94,27 @@ describe('download lifecycle API integration', () => {
     let sourceChunkDelayMs;
     let lastRangeHeader;
     let lastIfRangeHeader;
+    let sourceRequests;
+
+    const startBackend = async () => {
+        backendProcess = spawn(process.execPath, [path.join(__dirname, '..', 'local-backend', 'server.js')], {
+            cwd: path.join(__dirname, '..'),
+            env: {
+                ...process.env,
+                PORT: String(backendPort),
+                CUSTOM_STREMIO_DATA_DIR: path.join(tempDirectory, 'data'),
+                CUSTOM_STREMIO_DOWNLOAD_DIR: path.join(tempDirectory, 'downloads'),
+                CUSTOM_STREMIO_MAX_CONCURRENT_DOWNLOADS: '1'
+            },
+            stdio: 'ignore',
+            windowsHide: true
+        });
+
+        await waitFor(async () => {
+            const health = await requestJson(backendPort, '/health');
+            return health.statusCode === 200;
+        });
+    };
 
     beforeEach(async () => {
         tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'custom-stremio-retry-api-'));
@@ -106,7 +127,12 @@ describe('download lifecycle API integration', () => {
         sourceChunkDelayMs = 0;
         lastRangeHeader = null;
         lastIfRangeHeader = null;
+        sourceRequests = [];
         sourceServer = http.createServer((request, response) => {
+            sourceRequests.push({
+                path: request.url,
+                range: request.headers.range || null
+            });
             if (sourceShouldFail) {
                 response.writeHead(503, { 'Content-Type': 'text/plain' });
                 response.end('temporarily unavailable');
@@ -161,22 +187,7 @@ describe('download lifecycle API integration', () => {
             sourceServer.listen(sourcePort, '127.0.0.1', resolve);
         });
 
-        backendProcess = spawn(process.execPath, [path.join(__dirname, '..', 'local-backend', 'server.js')], {
-            cwd: path.join(__dirname, '..'),
-            env: {
-                ...process.env,
-                PORT: String(backendPort),
-                CUSTOM_STREMIO_DATA_DIR: path.join(tempDirectory, 'data'),
-                CUSTOM_STREMIO_DOWNLOAD_DIR: path.join(tempDirectory, 'downloads')
-            },
-            stdio: 'ignore',
-            windowsHide: true
-        });
-
-        await waitFor(async () => {
-            const health = await requestJson(backendPort, '/health');
-            return health.statusCode === 200;
-        });
+        await startBackend();
     });
 
     afterEach(async () => {
@@ -338,5 +349,142 @@ describe('download lifecycle API integration', () => {
         expect(failedRecord.error).toContain('does not support resuming');
         expect(fs.statSync(failedRecord.partialPath).size).toBe(partialSize);
         expect(fs.existsSync(failedRecord.localPath)).toBe(false);
+    });
+
+    test('queues downloads FIFO and hands the slot to waiting work after pause', async () => {
+        sourceShouldFail = false;
+        sourceMedia = Buffer.alloc(512 * 1024, 0x2a);
+        sourceChunkSize = 4096;
+        sourceChunkDelayMs = 15;
+
+        const firstResponse = await requestJson(backendPort, '/downloads', {
+            method: 'POST',
+            body: {
+                metaId: 'tt-queue-first',
+                type: 'movie',
+                parentTitle: 'Queue First Movie',
+                downloadUrl: `http://127.0.0.1:${sourcePort}/queue-first.mp4`
+            }
+        });
+        await waitFor(async () => {
+            const response = await requestJson(backendPort, `/downloads/${firstResponse.body.id}`);
+            return response.body?.status === 'downloading' && response.body.bytesDownloaded > 0;
+        });
+
+        const secondResponse = await requestJson(backendPort, '/downloads', {
+            method: 'POST',
+            body: {
+                metaId: 'tt-queue-second',
+                type: 'movie',
+                parentTitle: 'Queue Second Movie',
+                downloadUrl: `http://127.0.0.1:${sourcePort}/queue-second.mp4`
+            }
+        });
+        expect(secondResponse.body.status).toBe('queued');
+
+        const canceledWaitingResponse = await requestJson(backendPort, '/downloads', {
+            method: 'POST',
+            body: {
+                metaId: 'tt-queue-canceled',
+                type: 'movie',
+                parentTitle: 'Queue Canceled Movie',
+                downloadUrl: `http://127.0.0.1:${sourcePort}/queue-canceled.mp4`
+            }
+        });
+        expect(canceledWaitingResponse.body.status).toBe('queued');
+
+        const healthWhileQueued = await requestJson(backendPort, '/health');
+        expect(healthWhileQueued.body.downloads).toEqual({ maxConcurrent: 1, active: 1, queued: 2 });
+        expect(sourceRequests.some((request) => request.path === '/queue-second.mp4')).toBe(false);
+        expect(sourceRequests.some((request) => request.path === '/queue-canceled.mp4')).toBe(false);
+
+        const canceledWaiting = await requestJson(
+            backendPort,
+            `/downloads/${canceledWaitingResponse.body.id}/cancel`,
+            { method: 'POST' }
+        );
+        expect(canceledWaiting.body.status).toBe('canceled');
+        expect((await requestJson(backendPort, '/health')).body.downloads).toEqual({ maxConcurrent: 1, active: 1, queued: 1 });
+
+        const pausedFirst = await requestJson(backendPort, `/downloads/${firstResponse.body.id}/pause`, { method: 'POST' });
+        expect(pausedFirst.body.status).toBe('paused');
+
+        await waitFor(async () => {
+            const response = await requestJson(backendPort, `/downloads/${secondResponse.body.id}`);
+            return response.body?.status === 'downloading';
+        });
+
+        const resumedFirst = await requestJson(backendPort, `/downloads/${firstResponse.body.id}/resume`, { method: 'POST' });
+        expect(resumedFirst.body.status).toBe('queued');
+        expect((await requestJson(backendPort, '/health')).body.downloads).toEqual({ maxConcurrent: 1, active: 1, queued: 1 });
+
+        const completedSecond = await waitFor(async () => {
+            const response = await requestJson(backendPort, `/downloads/${secondResponse.body.id}`);
+            return response.body?.status === 'completed' ? response.body : null;
+        });
+        const completedFirst = await waitFor(async () => {
+            const response = await requestJson(backendPort, `/downloads/${firstResponse.body.id}`);
+            return response.body?.status === 'completed' ? response.body : null;
+        });
+
+        expect(fs.readFileSync(completedSecond.localPath)).toEqual(sourceMedia);
+        expect(fs.readFileSync(completedFirst.localPath)).toEqual(sourceMedia);
+        expect(sourceRequests.map((request) => request.path)).toEqual([
+            '/queue-first.mp4',
+            '/queue-second.mp4',
+            '/queue-first.mp4'
+        ]);
+        expect(sourceRequests[2].range).toMatch(/^bytes=\d+-$/);
+        expect(sourceRequests.some((request) => request.path === '/queue-canceled.mp4')).toBe(false);
+    });
+
+    test('preserves waiting work across restart while recovering the interrupted transfer as paused', async () => {
+        sourceShouldFail = false;
+        sourceMedia = Buffer.alloc(512 * 1024, 0x6b);
+        sourceChunkSize = 4096;
+        sourceChunkDelayMs = 15;
+
+        const activeResponse = await requestJson(backendPort, '/downloads', {
+            method: 'POST',
+            body: {
+                metaId: 'tt-restart-active',
+                type: 'movie',
+                parentTitle: 'Restart Active Movie',
+                downloadUrl: `http://127.0.0.1:${sourcePort}/restart-active.mp4`
+            }
+        });
+        await waitFor(async () => {
+            const response = await requestJson(backendPort, `/downloads/${activeResponse.body.id}`);
+            return response.body?.status === 'downloading' && response.body.bytesDownloaded > 0;
+        });
+
+        const waitingResponse = await requestJson(backendPort, '/downloads', {
+            method: 'POST',
+            body: {
+                metaId: 'tt-restart-waiting',
+                type: 'movie',
+                parentTitle: 'Restart Waiting Movie',
+                downloadUrl: `http://127.0.0.1:${sourcePort}/restart-waiting.mp4`
+            }
+        });
+        expect(waitingResponse.body.status).toBe('queued');
+        expect(sourceRequests.some((request) => request.path === '/restart-waiting.mp4')).toBe(false);
+
+        await stopChildProcess(backendProcess);
+        backendProcess = null;
+        await startBackend();
+
+        const recoveredActive = await waitFor(async () => {
+            const response = await requestJson(backendPort, `/downloads/${activeResponse.body.id}`);
+            return response.body?.status === 'paused' ? response.body : null;
+        });
+        expect(recoveredActive.error).toContain('backend stopped');
+
+        const completedWaiting = await waitFor(async () => {
+            const response = await requestJson(backendPort, `/downloads/${waitingResponse.body.id}`);
+            return response.body?.status === 'completed' ? response.body : null;
+        });
+        expect(fs.readFileSync(completedWaiting.localPath)).toEqual(sourceMedia);
+        expect(sourceRequests.filter((request) => request.path === '/restart-waiting.mp4')).toHaveLength(1);
     });
 });

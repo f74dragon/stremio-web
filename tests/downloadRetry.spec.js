@@ -77,6 +77,7 @@ describe('downloadRetry', () => {
             progress: 0,
             speedBytesPerSecond: 0,
             etaSeconds: null,
+            queuedAt: '2026-07-16T12:00:00.000Z',
             updatedAt: '2026-07-16T12:00:00.000Z',
             completedAt: null,
             error: null,
