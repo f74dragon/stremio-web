@@ -7,7 +7,7 @@ const classnames = require('classnames');
 const { useCore } = require('stremio/core');
 const { useContentGamepadNavigation } = require('stremio/services/GamepadNavigation');
 const { withCoreSuspender } = require('stremio/common');
-const { listDownloads, cancelDownload, deleteDownload, playDownload } = require('stremio/customStremio/localBackendClient');
+const useDownloadRecords = require('stremio/customStremio/useDownloadRecords');
 const { VerticalNavBar, HorizontalNavBar, DelayedRenderer, Image, MetaPreview, ModalDialog } = require('stremio/components');
 const StreamsList = require('./StreamsList');
 const VideosList = require('./VideosList');
@@ -21,7 +21,6 @@ const STREAMS_SIDEBAR_WIDTH_STORAGE_KEY = 'customStremio.streamsSidebarWidth';
 const STREAMS_SIDEBAR_MIN_WIDTH = 420;
 const STREAMS_SIDEBAR_MAX_WIDTH = 2260;
 const STREAMS_SIDEBAR_MIN_MAIN_CONTENT_WIDTH = 50;
-const ACTIVE_DOWNLOAD_STATUSES = new Set(['queued', 'downloading', 'paused']);
 
 const clampSidebarWidth = (width, containerWidth) => {
     const maxWidth = typeof containerWidth === 'number' && !Number.isNaN(containerWidth) ?
@@ -35,19 +34,9 @@ const clampSidebarWidth = (width, containerWidth) => {
 const MetaDetails = ({ urlParams, queryParams }) => {
     const contentRef = React.useRef(null);
     const sidebarResizeStateRef = React.useRef(null);
-    const titleDownloadsLoadedRef = React.useRef(false);
-    const titleDownloadsSnapshotRef = React.useRef('');
-    const titleDownloadActionsRef = React.useRef({});
     const { t } = useTranslation();
     const core = useCore();
     const metaDetails = useMetaDetails(urlParams);
-    const [downloadsRefreshKey, setDownloadsRefreshKey] = React.useState(0);
-    const [titleDownloadRecords, setTitleDownloadRecords] = React.useState([]);
-    const [titleDownloadsInitialLoading, setTitleDownloadsInitialLoading] = React.useState(false);
-    const [titleDownloadsRefreshing, setTitleDownloadsRefreshing] = React.useState(false);
-    const [titleDownloadsError, setTitleDownloadsError] = React.useState('');
-    const [titleDownloadActions, setTitleDownloadActions] = React.useState({});
-    const [titleDownloadActionErrors, setTitleDownloadActionErrors] = React.useState({});
     const [streamsSidebarWidth, setStreamsSidebarWidth] = React.useState(() => {
         try {
             if (typeof window === 'undefined' || !window.localStorage) {
@@ -86,9 +75,22 @@ const MetaDetails = ({ urlParams, queryParams }) => {
             null;
     }, [metaDetails.metaItem]);
     const titleDownloadsMetaId = metaItemContent?.id ?? null;
-    const titleDownloadsHasActiveRecords = React.useMemo(() => {
-        return titleDownloadRecords.some((record) => ACTIVE_DOWNLOAD_STATUSES.has(record?.status));
-    }, [titleDownloadRecords]);
+    const {
+        items: titleDownloadRecords,
+        initialLoading: titleDownloadsInitialLoading,
+        refreshing: titleDownloadsRefreshing,
+        error: titleDownloadsError,
+        actionStates: titleDownloadActions,
+        actionErrors: titleDownloadActionErrors,
+        refresh: loadTitleDownloads,
+        onDownloadCreated: handleDownloadCreated,
+        cancel: handleCancelDownload,
+        play: handlePlayDownload,
+        remove: handleRemoveDownloadRecord
+    } = useDownloadRecords({
+        metaId: titleDownloadsMetaId,
+        enabled: streamPath !== null && Boolean(titleDownloadsMetaId)
+    });
     const addToLibrary = React.useCallback(() => {
         if (metaDetails.metaItem === null || metaDetails.metaItem.content.type !== 'Ready') {
             return;
@@ -142,156 +144,6 @@ const MetaDetails = ({ urlParams, queryParams }) => {
     const seasonOnSelect = React.useCallback((event) => {
         setSeason(event.value);
     }, [setSeason]);
-    const handleDownloadCreated = React.useCallback(() => {
-        setDownloadsRefreshKey((currentValue) => currentValue + 1);
-    }, []);
-    const loadTitleDownloads = React.useCallback(async ({ silent = false } = {}) => {
-        if (!titleDownloadsMetaId) {
-            setTitleDownloadRecords([]);
-            setTitleDownloadsError('');
-            setTitleDownloadsInitialLoading(false);
-            setTitleDownloadsRefreshing(false);
-            titleDownloadsLoadedRef.current = false;
-            titleDownloadsSnapshotRef.current = '';
-            return [];
-        }
-
-        if (!silent && !titleDownloadsLoadedRef.current) {
-            setTitleDownloadsInitialLoading(true);
-        } else if (silent || titleDownloadsLoadedRef.current) {
-            setTitleDownloadsRefreshing(true);
-        }
-
-        if (!silent || !titleDownloadsLoadedRef.current) {
-            setTitleDownloadsError('');
-        }
-
-        try {
-            const response = await listDownloads(titleDownloadsMetaId);
-            const items = Array.isArray(response?.items) ? response.items : [];
-            const nextSnapshot = JSON.stringify(items);
-
-            if (titleDownloadsSnapshotRef.current !== nextSnapshot) {
-                setTitleDownloadRecords(items);
-                titleDownloadsSnapshotRef.current = nextSnapshot;
-            }
-
-            titleDownloadsLoadedRef.current = true;
-            setTitleDownloadsError('');
-            return items;
-        } catch (requestError) {
-            const message = requestError?.message || 'Local backend is unavailable.';
-
-            if (!titleDownloadsLoadedRef.current) {
-                setTitleDownloadRecords([]);
-                titleDownloadsSnapshotRef.current = '';
-            }
-
-            setTitleDownloadsError(message);
-            return titleDownloadsLoadedRef.current ? titleDownloadRecords : [];
-        } finally {
-            setTitleDownloadsInitialLoading(false);
-            setTitleDownloadsRefreshing(false);
-        }
-    }, [titleDownloadsMetaId, titleDownloadRecords]);
-    const clearTitleDownloadActionError = React.useCallback((recordId) => {
-        setTitleDownloadActionErrors((currentErrors) => {
-            if (!Object.prototype.hasOwnProperty.call(currentErrors, recordId)) {
-                return currentErrors;
-            }
-
-            const nextErrors = { ...currentErrors };
-            delete nextErrors[recordId];
-            return nextErrors;
-        });
-    }, []);
-    const setTitleDownloadAction = React.useCallback((recordId, action) => {
-        const nextActions = { ...titleDownloadActionsRef.current };
-
-        if (action === null) {
-            delete nextActions[recordId];
-        } else {
-            nextActions[recordId] = action;
-        }
-
-        titleDownloadActionsRef.current = nextActions;
-        setTitleDownloadActions((currentActions) => {
-            return JSON.stringify(currentActions) === JSON.stringify(nextActions) ? currentActions : nextActions;
-        });
-    }, []);
-    const handleCancelDownload = React.useCallback(async (recordId) => {
-        if (!recordId || titleDownloadActionsRef.current[recordId]) {
-            return;
-        }
-
-        clearTitleDownloadActionError(recordId);
-        setTitleDownloadAction(recordId, 'cancel');
-
-        try {
-            const canceledRecord = await cancelDownload(recordId);
-            setTitleDownloadRecords((currentRecords) => {
-                const nextRecords = currentRecords.map((record) => record?.id === recordId ?
-                    { ...record, ...canceledRecord }
-                    :
-                    record
-                );
-                titleDownloadsSnapshotRef.current = JSON.stringify(nextRecords);
-                return nextRecords;
-            });
-            await loadTitleDownloads({ silent: true });
-        } catch (requestError) {
-            setTitleDownloadActionErrors((currentErrors) => ({
-                ...currentErrors,
-                [recordId]: requestError?.backendError || 'Could not cancel this download. Check that the local backend is running.'
-            }));
-        } finally {
-            setTitleDownloadAction(recordId, null);
-        }
-    }, [clearTitleDownloadActionError, loadTitleDownloads, setTitleDownloadAction]);
-    const handleRemoveDownloadRecord = React.useCallback(async (recordId) => {
-        if (!recordId || titleDownloadActionsRef.current[recordId]) {
-            return;
-        }
-
-        clearTitleDownloadActionError(recordId);
-        setTitleDownloadAction(recordId, 'remove');
-
-        try {
-            await deleteDownload(recordId);
-            setTitleDownloadRecords((currentRecords) => {
-                const nextRecords = currentRecords.filter((record) => record?.id !== recordId);
-                titleDownloadsSnapshotRef.current = JSON.stringify(nextRecords);
-                return nextRecords;
-            });
-            await loadTitleDownloads({ silent: true });
-        } catch (requestError) {
-            setTitleDownloadActionErrors((currentErrors) => ({
-                ...currentErrors,
-                [recordId]: requestError?.backendError || 'Could not remove this record. Check that the local backend is running.'
-            }));
-        } finally {
-            setTitleDownloadAction(recordId, null);
-        }
-    }, [clearTitleDownloadActionError, loadTitleDownloads, setTitleDownloadAction]);
-    const handlePlayDownload = React.useCallback(async (recordId) => {
-        if (!recordId || titleDownloadActionsRef.current[recordId]) {
-            return;
-        }
-
-        clearTitleDownloadActionError(recordId);
-        setTitleDownloadAction(recordId, 'play');
-
-        try {
-            await playDownload(recordId);
-        } catch (requestError) {
-            setTitleDownloadActionErrors((currentErrors) => ({
-                ...currentErrors,
-                [recordId]: requestError?.backendError || 'Could not open this download. Check the local backend player configuration.'
-            }));
-        } finally {
-            setTitleDownloadAction(recordId, null);
-        }
-    }, [clearTitleDownloadActionError, setTitleDownloadAction]);
     const handleEpisodeSearch = React.useCallback((season, episode) => {
         const searchVideoHash = encodeURIComponent(`${urlParams.id}:${season}:${episode}`);
         const url = window.location.hash;
@@ -373,37 +225,6 @@ const MetaDetails = ({ urlParams, queryParams }) => {
             // Ignore persistence failures and keep the in-memory width.
         }
     }, [streamsSidebarWidth]);
-    React.useEffect(() => {
-        if (streamPath === null) {
-            setTitleDownloadRecords([]);
-            setTitleDownloadsError('');
-            setTitleDownloadsInitialLoading(false);
-            setTitleDownloadsRefreshing(false);
-            setTitleDownloadActions({});
-            setTitleDownloadActionErrors({});
-            titleDownloadActionsRef.current = {};
-            titleDownloadsLoadedRef.current = false;
-            titleDownloadsSnapshotRef.current = '';
-            return;
-        }
-
-        loadTitleDownloads();
-    }, [downloadsRefreshKey, loadTitleDownloads, streamPath]);
-
-    React.useEffect(() => {
-        if (streamPath === null || !titleDownloadsMetaId || !titleDownloadsHasActiveRecords || titleDownloadsError) {
-            return undefined;
-        }
-
-        const intervalId = window.setInterval(() => {
-            loadTitleDownloads({ silent: true });
-        }, 1500);
-
-        return () => {
-            window.clearInterval(intervalId);
-        };
-    }, [loadTitleDownloads, streamPath, titleDownloadsError, titleDownloadsHasActiveRecords, titleDownloadsMetaId]);
-
     const renderBackgroundImageFallback = React.useCallback(() => null, []);
     const renderBackground = React.useMemo(() => !!(
         metaPath &&

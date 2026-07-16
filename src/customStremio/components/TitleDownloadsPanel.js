@@ -2,41 +2,8 @@ const React = require('react');
 const PropTypes = require('prop-types');
 const { useTranslation } = require('react-i18next');
 const { Button } = require('stremio/components');
+const DownloadRecordCard = require('./DownloadRecordCard');
 const styles = require('./TitleDownloadsPanel.less');
-
-const CANCELABLE_STATUSES = new Set(['queued', 'downloading', 'paused']);
-const REMOVABLE_STATUSES = new Set(['completed', 'failed', 'canceled']);
-const PLAYABLE_STATUSES = new Set(['completed']);
-
-const formatProgress = (value) => {
-    const numericValue = Number(value);
-    return Number.isFinite(numericValue) ? `${Math.round(numericValue)}%` : '0%';
-};
-
-const formatCreatedAt = (value) => {
-    if (!value) {
-        return null;
-    }
-
-    const date = new Date(value);
-    return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
-};
-
-const getRecordTitle = (record, untitledLabel) => {
-    if (record?.videoTitle) {
-        if (typeof record.season === 'number' && typeof record.episode === 'number') {
-            return `S${record.season}E${record.episode} ${record.videoTitle}`;
-        }
-
-        return record.videoTitle;
-    }
-
-    return untitledLabel;
-};
-
-const getStatusClassName = (status) => {
-    return [styles['record-status'], styles[`record-status-${status}`]].filter(Boolean).join(' ');
-};
 
 const TitleDownloadsPanel = ({
     metaId,
@@ -109,154 +76,17 @@ const TitleDownloadsPanel = ({
                                 }
                                 {items.map((record) => {
                                     const recordId = record?.id;
-                                    const recordTitle = getRecordTitle(record, t('CUSTOM_DOWNLOAD_UNTITLED', { defaultValue: 'Untitled download' }));
-                                    const status = record?.status || 'unknown';
-                                    const action = recordId ? actionStates[recordId] : null;
-                                    const actionError = recordId ? actionErrors[recordId] : null;
-                                    const actionInProgress = typeof action === 'string';
-                                    const canCancel = recordId && CANCELABLE_STATUSES.has(status);
-                                    const canPlay = recordId && PLAYABLE_STATUSES.has(status);
-                                    const canRemove = recordId && REMOVABLE_STATUSES.has(status);
 
                                     return (
-                                        <div
+                                        <DownloadRecordCard
                                             key={recordId || `${record.videoId}-${record.createdAt}`}
-                                            className={styles['record-card']}
-                                            aria-busy={actionInProgress}
-                                        >
-                                            <div className={styles['record-heading']}>
-                                                <div className={styles['record-title']}>{recordTitle}</div>
-                                                <div className={getStatusClassName(status)}>{status}</div>
-                                            </div>
-                                            <div className={styles['record-meta']}>
-                                                <span>{record.addonName || t('CUSTOM_DOWNLOAD_UNKNOWN_ADDON', { defaultValue: 'Unknown addon' })}</span>
-                                                <span>{record.streamName || t('CUSTOM_DOWNLOAD_UNKNOWN_STREAM', { defaultValue: 'Unknown stream' })}</span>
-                                                <span>
-                                                    {t('CUSTOM_DOWNLOAD_PROGRESS', {
-                                                        defaultValue: 'Progress: {{progress}}',
-                                                        progress: formatProgress(record.progress)
-                                                    })}
-                                                </span>
-                                            </div>
-                                            {
-                                                record.localPath ?
-                                                    <div className={styles['record-path']} title={record.localPath}>
-                                                        {record.localPath}
-                                                    </div>
-                                                    :
-                                                    null
-                                            }
-                                            {
-                                                record.createdAt ?
-                                                    <div className={styles['record-created']}>
-                                                        {t('CUSTOM_DOWNLOAD_CREATED', {
-                                                            defaultValue: 'Created: {{createdAt}}',
-                                                            createdAt: formatCreatedAt(record.createdAt)
-                                                        })}
-                                                    </div>
-                                                    :
-                                                    null
-                                            }
-                                            {
-                                                actionError ?
-                                                    <div className={styles['record-action-error']} role={'alert'}>{actionError}</div>
-                                                    :
-                                                    null
-                                            }
-                                            {
-                                                canCancel || canPlay || canRemove ?
-                                                    <div className={styles['record-actions']}>
-                                                        {
-                                                            canRemove ?
-                                                                <div className={styles['record-action-note']}>
-                                                                    {t('CUSTOM_DOWNLOAD_REMOVE_NOTE', { defaultValue: 'The downloaded file will stay on disk.' })}
-                                                                </div>
-                                                                :
-                                                                null
-                                                        }
-                                                        {
-                                                            canPlay ?
-                                                                <Button
-                                                                    className={styles['play-button']}
-                                                                    title={t('CUSTOM_DOWNLOAD_PLAY_TITLE', {
-                                                                        defaultValue: 'Play {{title}} in MPC-HC',
-                                                                        title: recordTitle
-                                                                    })}
-                                                                    role={'button'}
-                                                                    aria-label={t('CUSTOM_DOWNLOAD_PLAY_TITLE', {
-                                                                        defaultValue: 'Play {{title}} in MPC-HC',
-                                                                        title: recordTitle
-                                                                    })}
-                                                                    aria-disabled={actionInProgress}
-                                                                    disabled={actionInProgress}
-                                                                    tabIndex={actionInProgress ? -1 : 0}
-                                                                    onClick={() => !actionInProgress && onPlay?.(recordId)}
-                                                                >
-                                                                    {action === 'play' ?
-                                                                        t('CUSTOM_DOWNLOAD_OPENING', { defaultValue: 'Opening...' })
-                                                                        :
-                                                                        t('CUSTOM_DOWNLOAD_PLAY', { defaultValue: 'Play' })}
-                                                                </Button>
-                                                                :
-                                                                null
-                                                        }
-                                                        {
-                                                            canCancel ?
-                                                                <Button
-                                                                    className={styles['cancel-button']}
-                                                                    title={t('CUSTOM_DOWNLOAD_CANCEL_TITLE', {
-                                                                        defaultValue: 'Cancel {{title}}',
-                                                                        title: recordTitle
-                                                                    })}
-                                                                    role={'button'}
-                                                                    aria-label={t('CUSTOM_DOWNLOAD_CANCEL_TITLE', {
-                                                                        defaultValue: 'Cancel {{title}}',
-                                                                        title: recordTitle
-                                                                    })}
-                                                                    aria-disabled={actionInProgress}
-                                                                    disabled={actionInProgress}
-                                                                    tabIndex={actionInProgress ? -1 : 0}
-                                                                    onClick={() => !actionInProgress && onCancel?.(recordId)}
-                                                                >
-                                                                    {action === 'cancel' ?
-                                                                        t('CUSTOM_DOWNLOAD_CANCELING', { defaultValue: 'Canceling...' })
-                                                                        :
-                                                                        t('CUSTOM_DOWNLOAD_CANCEL', { defaultValue: 'Cancel' })}
-                                                                </Button>
-                                                                :
-                                                                null
-                                                        }
-                                                        {
-                                                            canRemove ?
-                                                                <Button
-                                                                    className={styles['remove-button']}
-                                                                    title={t('CUSTOM_DOWNLOAD_REMOVE_TITLE', {
-                                                                        defaultValue: 'Remove {{title}} from this list; the downloaded file will stay on disk',
-                                                                        title: recordTitle
-                                                                    })}
-                                                                    role={'button'}
-                                                                    aria-label={t('CUSTOM_DOWNLOAD_REMOVE_ARIA_LABEL', {
-                                                                        defaultValue: 'Remove {{title}} record; keep the downloaded file',
-                                                                        title: recordTitle
-                                                                    })}
-                                                                    aria-disabled={actionInProgress}
-                                                                    disabled={actionInProgress}
-                                                                    tabIndex={actionInProgress ? -1 : 0}
-                                                                    onClick={() => !actionInProgress && onRemove?.(recordId)}
-                                                                >
-                                                                    {action === 'remove' ?
-                                                                        t('CUSTOM_DOWNLOAD_REMOVING', { defaultValue: 'Removing...' })
-                                                                        :
-                                                                        t('CUSTOM_DOWNLOAD_REMOVE', { defaultValue: 'Remove record' })}
-                                                                </Button>
-                                                                :
-                                                                null
-                                                        }
-                                                    </div>
-                                                    :
-                                                    null
-                                            }
-                                        </div>
+                                            record={record}
+                                            action={recordId ? actionStates[recordId] : null}
+                                            actionError={recordId ? actionErrors[recordId] : null}
+                                            onCancel={onCancel}
+                                            onPlay={onPlay}
+                                            onRemove={onRemove}
+                                        />
                                     );
                                 })}
                             </div>

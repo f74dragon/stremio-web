@@ -136,6 +136,18 @@ describe('routesRegexp', () => {
         });
     });
 
+    describe('downloads route regexp', () => {
+        it('match /downloads', async () => {
+            expect(Array.from('/downloads'.match(routesRegexp.downloads.regexp)))
+                .toEqual(['/downloads']);
+        });
+
+        it('not match /downloads/', async () => {
+            expect('/downloads/'.match(routesRegexp.downloads.regexp))
+                .toBe(null);
+        });
+    });
+
     describe('search route regexp', () => {
         it('match /search', async () => {
             expect(Array.from('/search'.match(routesRegexp.search.regexp)))

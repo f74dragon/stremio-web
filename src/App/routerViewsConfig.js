@@ -24,6 +24,10 @@ const routerViewsConfig = [
             component: routes.Library
         },
         {
+            ...routesRegexp.downloads,
+            component: routes.Downloads
+        },
+        {
             ...routesRegexp.calendar,
             component: routes.Calendar
         },

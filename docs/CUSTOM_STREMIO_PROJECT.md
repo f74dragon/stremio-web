@@ -60,7 +60,7 @@ Notes:
 - `5. Create local backend prototype`: In progress (`Milestone 5B` backend skeleton created)
 - `7. Add title-specific downloads panel`: In progress (`Milestone 7A` implemented)
 - `6. Implement real download manager`: In progress (`Milestones 6A-6B` real downloads and persistent records implemented)
-- `8. Add global downloads page`: Not started
+- `8. Add global downloads page`: In progress (`Milestone 8A` implemented)
 - `9. Add MPC-HC launch support`: In progress (`Milestones 9A-9B` panel and stream-row playback implemented)
 - `10. Add watched/unwatched integration`: Not started
 - `11. Package as Windows app`: Not started
@@ -78,7 +78,38 @@ Notes:
 
 ## Next Recommended Step
 
-Add the global downloads page using the now-persistent backend records.
+Improve the global Downloads Library into a media-first browsing experience: persist poster/thumbnail metadata, group records by movie/show, and expose episodes clearly before adding debrid/hash availability highlighting.
+
+## Milestone 8A Findings: Global Downloads Library
+
+- New route and navigation:
+  - Added `#/downloads` to the application router and route-regexp coverage.
+  - Added a Downloads destination to the shared desktop/mobile navigation using the existing Stremio download icon.
+  - The generic navigation tab supports an explicit inactive icon for icon families without an `-outline` variant.
+- Shared frontend architecture:
+  - Added `src/customStremio/useDownloadRecords.js` as the shared controller for title-specific and global record queries.
+  - Initial loading, silent polling, identical-snapshot suppression, offline record retention, and per-record action locks/errors now have one implementation.
+  - Migrated `MetaDetails` to the shared controller while preserving title-panel and stream-row record state.
+  - Added a shared responsive `DownloadRecordCard` used by both the title panel and global library.
+- Global library behavior:
+  - Added summary counts and separate `Active`, `Ready to play`, and `Needs attention` sections.
+  - Records are sorted newest-first inside each section and link back to their title/episode when metadata is available.
+  - The page polls only while active records exist, keeps visible records during backend outages, and supports manual refresh/retry.
+  - Existing Play, Cancel, and Remove Record actions are available with per-record busy and error feedback.
+  - Removing a record continues to preserve its media file.
+- Presentation:
+  - Responsive one/two/three-column record layout with streaming-library hierarchy, progress bars, status badges, compact summaries, and purposeful loading/empty/offline states.
+  - The existing title-specific panel uses the compact variant of the same card.
+- Known UX limitation and follow-up:
+  - Current records do not contain poster or episode-thumbnail metadata, so the global page is still text/record-oriented and downloads from different titles share the same flat status sections.
+  - The next pass should add media artwork to the frontend payload/backend record, preserve it through persistence, and group the library by movie/show with expandable or clearly nested episodes.
+  - This media-first pass should happen before debrid/hash highlighting so later availability states attach to a stable, browseable library design.
+- Tests:
+  - Added pure coverage for record grouping, newest-first sorting, and title/episode detail links.
+  - Extended route tests for the exact `/downloads` route.
+- Deferred behavior:
+  - Debrid/hash availability, open folder, pause/resume, watched integration, media-file deletion, and filesystem discovery remain deferred.
+  - No backend or `stremio-core` files were changed in this milestone.
 
 ## Milestone 6B Findings: Persistent Download Records
 

@@ -17,6 +17,10 @@ const routesRegexp = {
         regexp: /^\/library(?:\/([^/]*))?$/,
         urlParamsNames: ['type']
     },
+    downloads: {
+        regexp: /^\/downloads$/,
+        urlParamsNames: []
+    },
     calendar: {
         regexp: /^\/calendar(?:\/([^/]*)\/([^/]*))?$/,
         urlParamsNames: ['year', 'month']

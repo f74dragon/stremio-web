@@ -1,0 +1,219 @@
+@import (reference) '~@stremio/stremio-colors/less/stremio-colors.less';
+
+.record-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+    min-width: 0;
+    padding: 0.75rem 0.85rem;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: var(--border-radius);
+    color: var(--primary-foreground-color);
+    background-color: rgba(255, 255, 255, 0.07);
+    transition: border-color 0.18s ease, background-color 0.18s ease, transform 0.18s ease;
+}
+
+.record-card-library {
+    min-height: 15rem;
+    padding: 1rem;
+    background: linear-gradient(145deg, rgba(255, 255, 255, 0.095), rgba(255, 255, 255, 0.045));
+
+    &:hover {
+        border-color: rgba(255, 255, 255, 0.14);
+        background-color: rgba(255, 255, 255, 0.1);
+        transform: translateY(-0.1rem);
+    }
+}
+
+.record-heading {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.75rem;
+}
+
+.record-title-group {
+    min-width: 0;
+}
+
+.record-title,
+.record-title-link {
+    display: block;
+    min-width: 0;
+    padding: 0;
+    overflow: hidden;
+    color: var(--primary-foreground-color);
+    font-size: 0.95rem;
+    font-weight: 600;
+    line-height: 1.35;
+    text-align: left;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.record-title-link {
+    &:hover,
+    &:focus {
+        color: var(--primary-accent-color);
+    }
+}
+
+.record-card-library .record-title,
+.record-card-library .record-title-link {
+    font-size: 1.1rem;
+}
+
+.record-subtitle {
+    margin-top: 0.2rem;
+    overflow: hidden;
+    font-size: 0.84rem;
+    line-height: 1.35;
+    opacity: 0.72;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.record-status {
+    flex: none;
+    padding: 0.2rem 0.55rem;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    line-height: 1.2;
+    background-color: rgba(255, 255, 255, 0.08);
+    text-transform: capitalize;
+}
+
+.record-status-queued,
+.record-status-downloading,
+.record-status-paused {
+    border-color: rgba(130, 110, 255, 0.45);
+    background-color: rgba(130, 110, 255, 0.18);
+}
+
+.record-status-completed {
+    border-color: rgba(68, 201, 137, 0.42);
+    background-color: rgba(68, 201, 137, 0.16);
+}
+
+.record-status-failed,
+.record-status-canceled {
+    border-color: rgba(255, 117, 117, 0.38);
+    background-color: rgba(255, 117, 117, 0.14);
+}
+
+.record-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem 1rem;
+    font-size: 0.82rem;
+    opacity: 0.8;
+}
+
+.progress-track {
+    height: 0.3rem;
+    overflow: hidden;
+    border-radius: 999px;
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+.progress-value {
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, var(--secondary-accent-color), var(--primary-accent-color));
+    transition: width 0.3s ease;
+}
+
+.record-path,
+.record-created,
+.record-error {
+    font-size: 0.78rem;
+    line-height: 1.35;
+    opacity: 0.68;
+}
+
+.record-path {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.record-error {
+    color: var(--danger-accent-color);
+    opacity: 1;
+}
+
+.record-action-error {
+    padding: 0.45rem 0.6rem;
+    border-radius: calc(var(--border-radius) * 0.65);
+    font-size: 0.8rem;
+    color: var(--secondary-accent-color);
+    background-color: rgba(255, 255, 255, 0.06);
+}
+
+.record-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    margin-top: auto;
+    padding-top: 0.35rem;
+}
+
+.record-action-note {
+    margin-right: auto;
+    font-size: 0.72rem;
+    opacity: 0.55;
+}
+
+.play-button,
+.cancel-button,
+.remove-button {
+    flex: none;
+    padding: 0.38rem 0.78rem;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 999px;
+    font-size: 0.8rem;
+    color: var(--primary-foreground-color);
+    background-color: rgba(255, 255, 255, 0.08);
+    transition: border-color 0.15s ease, background-color 0.15s ease, opacity 0.15s ease;
+
+    &:hover,
+    &:focus {
+        border-color: rgba(255, 255, 255, 0.3);
+        background-color: rgba(255, 255, 255, 0.14);
+    }
+
+    &:global(.disabled) {
+        cursor: wait;
+        opacity: 0.58;
+    }
+}
+
+.play-button {
+    border-color: rgba(130, 110, 255, 0.55);
+    background-color: rgba(130, 110, 255, 0.3);
+
+    &:hover,
+    &:focus {
+        border-color: rgba(155, 140, 255, 0.8);
+        background-color: rgba(130, 110, 255, 0.45);
+    }
+}
+
+.remove-button {
+    color: var(--secondary-accent-color);
+}
+
+@media only screen and (max-width: 600px) {
+    .record-heading,
+    .record-actions {
+        align-items: flex-start;
+    }
+
+    .record-action-note {
+        flex-basis: 100%;
+    }
+}

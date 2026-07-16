@@ -7,7 +7,7 @@ const { default: Icon } = require('@stremio/stremio-icons/react');
 const { Button, Image } = require('stremio/components');
 const styles = require('./styles');
 
-const NavTabButton = ({ className, logo, icon, label, href, selected, onClick }) => {
+const NavTabButton = ({ className, logo, icon, inactiveIcon, label, href, selected, onClick }) => {
     const renderLogoFallback = React.useCallback(() => (
         typeof icon === 'string' && icon.length > 0 ?
             <Icon className={styles['icon']} name={icon} />
@@ -35,7 +35,7 @@ const NavTabButton = ({ className, logo, icon, label, href, selected, onClick })
                     />
                     :
                     typeof icon === 'string' && icon.length > 0 ?
-                        <Icon className={styles['icon']} name={selected ? icon : `${icon}-outline`} />
+                        <Icon className={styles['icon']} name={selected ? icon : (inactiveIcon || `${icon}-outline`)} />
                         :
                         null
             }
@@ -53,6 +53,7 @@ NavTabButton.propTypes = {
     className: PropTypes.string,
     logo: PropTypes.string,
     icon: PropTypes.string,
+    inactiveIcon: PropTypes.string,
     label: PropTypes.string,
     href: PropTypes.string,
     selected: PropTypes.bool,
