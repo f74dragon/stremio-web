@@ -25,6 +25,7 @@ const Downloads = () => {
         actionErrors,
         refresh,
         cancel,
+        retry,
         play,
         openLocation,
         remove
@@ -84,6 +85,7 @@ const Downloads = () => {
                                 actionErrors={actionErrors}
                                 onBack={handleBackToLibrary}
                                 onCancel={cancel}
+                                onRetry={retry}
                                 onPlay={play}
                                 onOpenLocation={openLocation}
                                 onRemove={remove}

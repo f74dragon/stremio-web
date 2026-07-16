@@ -51,6 +51,7 @@ const DownloadMediaDetails = ({
     actionErrors,
     onBack,
     onCancel,
+    onRetry,
     onPlay,
     onOpenLocation,
     onRemove
@@ -243,6 +244,7 @@ const DownloadMediaDetails = ({
                                     action={record.id ? actionStates[record.id] : null}
                                     actionError={record.id ? actionErrors[record.id] : null}
                                     onCancel={onCancel}
+                                    onRetry={onRetry}
                                     onPlay={onPlay}
                                     onOpenLocation={onOpenLocation}
                                     onRemove={onRemove}
@@ -282,6 +284,7 @@ DownloadMediaDetails.propTypes = {
     actionErrors: PropTypes.object.isRequired,
     onBack: PropTypes.func.isRequired,
     onCancel: PropTypes.func,
+    onRetry: PropTypes.func,
     onPlay: PropTypes.func,
     onOpenLocation: PropTypes.func,
     onRemove: PropTypes.func

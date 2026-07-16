@@ -8,6 +8,7 @@ const styles = require('./DownloadRecordCard.less');
 
 const CANCELABLE_STATUSES = new Set(['queued', 'downloading', 'paused']);
 const REMOVABLE_STATUSES = new Set(['completed', 'failed', 'canceled']);
+const RETRYABLE_STATUSES = new Set(['failed', 'canceled']);
 
 const formatProgress = (value) => {
     const numericValue = Number(value);
@@ -77,6 +78,7 @@ const DownloadRecordCard = ({
     action,
     actionError,
     onCancel,
+    onRetry,
     onPlay,
     onOpenLocation,
     onRemove
@@ -93,6 +95,7 @@ const DownloadRecordCard = ({
     const canPlay = recordId && status === 'completed';
     const canOpenLocation = recordId && variant === 'library' && Boolean(record?.localPath);
     const canRemove = recordId && REMOVABLE_STATUSES.has(status);
+    const canRetry = recordId && RETRYABLE_STATUSES.has(status);
     const playTitle = t('CUSTOM_DOWNLOAD_PLAY_TITLE', {
         defaultValue: 'Play {{title}} in MPC-HC',
         title: labels.title
@@ -168,7 +171,7 @@ const DownloadRecordCard = ({
             }
             {actionError ? <div className={styles['record-action-error']} role={'alert'}>{actionError}</div> : null}
             {
-                canCancel || canPlay || canOpenLocation || canRemove ?
+                canCancel || canRetry || canPlay || canOpenLocation || canRemove ?
                     <div className={styles['record-actions']}>
                         {
                             canOpenLocation ?
@@ -187,6 +190,27 @@ const DownloadRecordCard = ({
                                         t('CUSTOM_DOWNLOAD_OPENING_LOCATION', { defaultValue: 'Opening folder...' })
                                         :
                                         t('CUSTOM_DOWNLOAD_OPEN_LOCATION', { defaultValue: 'Open location' })}
+                                </Button>
+                                :
+                                null
+                        }
+                        {
+                            canRetry ?
+                                <Button
+                                    className={styles['retry-download-button']}
+                                    title={t('CUSTOM_DOWNLOAD_RETRY_TITLE', {
+                                        defaultValue: 'Retry {{title}} from the beginning',
+                                        title: labels.title
+                                    })}
+                                    aria-disabled={actionInProgress}
+                                    disabled={actionInProgress}
+                                    tabIndex={actionInProgress ? -1 : 0}
+                                    onClick={() => !actionInProgress && onRetry?.(recordId)}
+                                >
+                                    {action === 'retry' ?
+                                        t('CUSTOM_DOWNLOAD_RETRYING', { defaultValue: 'Retrying...' })
+                                        :
+                                        t('CUSTOM_DOWNLOAD_RETRY', { defaultValue: 'Retry' })}
                                 </Button>
                                 :
                                 null
@@ -271,9 +295,10 @@ const DownloadRecordCard = ({
 DownloadRecordCard.propTypes = {
     record: PropTypes.object.isRequired,
     variant: PropTypes.oneOf(['compact', 'library']),
-    action: PropTypes.oneOf(['cancel', 'play', 'location', 'remove']),
+    action: PropTypes.oneOf(['cancel', 'retry', 'play', 'location', 'remove']),
     actionError: PropTypes.string,
     onCancel: PropTypes.func,
+    onRetry: PropTypes.func,
     onPlay: PropTypes.func,
     onOpenLocation: PropTypes.func,
     onRemove: PropTypes.func

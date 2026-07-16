@@ -85,6 +85,10 @@ const resumeDownload = async (id) => requestJson(`/downloads/${requireDownloadId
     method: 'POST'
 });
 
+const retryDownload = async (id) => requestJson(`/downloads/${requireDownloadId(id, 'retryDownload')}/retry`, {
+    method: 'POST'
+});
+
 const cancelDownload = async (id) => requestJson(`/downloads/${requireDownloadId(id, 'cancelDownload')}/cancel`, {
     method: 'POST'
 });
@@ -113,6 +117,7 @@ module.exports = {
     getDownload,
     pauseDownload,
     resumeDownload,
+    retryDownload,
     cancelDownload,
     deleteDownload,
     playDownload,

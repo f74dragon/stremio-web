@@ -2,7 +2,7 @@
 
 Development-only local backend for the custom Stremio download flow.
 
-It performs real direct HTTP/HTTPS file downloads in the background, persists download records locally, updates progress fields over time, and can launch completed local files in an explicitly configured media player. Pause/resume is not implemented yet.
+It performs real direct HTTP/HTTPS file downloads in the background, persists download records locally, updates progress fields over time, retries failed/canceled transfers, and can launch completed local files in an explicitly configured media player. Pause/resume is not implemented yet.
 
 ## Install
 
@@ -82,10 +82,13 @@ Restart behavior:
 - Duplicate prevention still applies before a new download starts.
 - Only `http` and `https` source URLs are accepted.
 
-## Cancel / Pause / Resume
+## Cancel / Retry / Pause / Resume
 
 - `POST /downloads/:id/cancel` stops an active download and marks the record `canceled`.
-- Partial files may remain on disk after cancel or failure in this milestone.
+- `POST /downloads/:id/retry` resets an inactive `failed` or `canceled` record and starts it again from byte zero.
+- Retry reuses the same record id, preserves its media metadata, increments `attemptCount`, and persists `queued` before restarting the background transfer.
+- Retry derives the destination from stored record metadata and removes that derived partial file first; callers cannot supply a filesystem path.
+- Partial files may remain after cancel or failure until the record is retried or removed manually.
 - `POST /downloads/:id/pause` and `POST /downloads/:id/resume` currently return `501 Not Implemented`.
 
 ## PowerShell Test: Health
@@ -168,6 +171,12 @@ Expected:
 Invoke-RestMethod -Uri ("http://127.0.0.1:5577/downloads/{0}/cancel" -f $created.id) -Method Post | ConvertTo-Json -Depth 8
 ```
 
+## PowerShell Test: Retry a Failed or Canceled Download
+
+```powershell
+Invoke-RestMethod -Uri ("http://127.0.0.1:5577/downloads/{0}/retry" -f $created.id) -Method Post | ConvertTo-Json -Depth 8
+```
+
 ## PowerShell Test: Play Completed Download
 
 After `$created` reaches `completed`:
@@ -203,6 +212,7 @@ Invoke-RestMethod -Uri 'http://127.0.0.1:5577/downloads' -Method Post -ContentTy
 ## Notes
 
 - Download records persist across backend restarts.
+- Failed and canceled records can be retried from the frontend or through `POST /downloads/:id/retry`; completed and active records cannot be retried.
 - New records preserve optional title posters/backgrounds, logos, summaries, runtime/release information, metadata links, and episode thumbnails for the media-first Downloads Library. Older records without rich metadata remain valid and use frontend fallbacks.
 - `POST /downloads/:id/open-location` opens only locations derived from stored records; it does not accept caller-supplied paths.
 - The first restart after upgrading from the older in-memory backend cannot recover records that were never written by that older process; their media files remain on disk.

@@ -6,7 +6,7 @@ The local backend will run on the user’s machine and handle:
 
 - direct video file downloads from resolved Stremio/RealDebrid stream URLs
 - progress tracking
-- pause/resume/cancel/delete
+- pause/resume/retry/cancel/delete
 - organized file paths
 - launching MPC-HC for completed downloads
 - later watched/progress integration
@@ -61,6 +61,8 @@ The backend will generate and maintain these backend-only fields later:
 - `updatedAt`
 - `completedAt`
 - `error`
+- `attemptCount`
+- `lastAttemptAt`
 
 Example combined download record shape:
 
@@ -106,6 +108,8 @@ Example combined download record shape:
   "updatedAt": "2026-05-23T12:00:00.000Z",
   "completedAt": null,
   "error": null,
+  "attemptCount": 1,
+  "lastAttemptAt": "2026-05-23T12:00:00.000Z",
   "duplicate": false
 }
 ```
@@ -234,7 +238,27 @@ Response shape:
 }
 ```
 
-### 7. `POST /downloads/:id/cancel`
+### 7. `POST /downloads/:id/retry`
+
+Purpose:
+- Retry an inactive `failed` or `canceled` download from the beginning without creating a duplicate record.
+
+Request body:
+- none
+
+Response shape:
+- HTTP `202` with the same full download record reset to `queued`.
+
+Behavior notes:
+- Only `failed` and `canceled` records are accepted; other statuses return HTTP `409`.
+- The backend requires the stored record to retain a supported HTTP/HTTPS `sourceUrl`.
+- The destination is derived again from trusted record metadata. The API does not accept a caller-supplied path.
+- Any file at that derived destination is removed before restarting so stale partial bytes cannot be mistaken for completed media.
+- Progress, byte totals, speed, ETA, completion time, and error state are reset.
+- `attemptCount` increments and `lastAttemptAt` records the retry time. Legacy records without attempt metadata begin their retry as attempt `2`.
+- The queued retry is persisted before its background transfer starts.
+
+### 8. `POST /downloads/:id/cancel`
 
 Purpose:
 - Cancel a queued or active download without deleting the record immediately.
@@ -247,10 +271,10 @@ Response shape:
 
 Behavior notes:
 - If the download is actively running, the backend aborts the active transfer and updates the record to `canceled`.
-- Partial files may remain on disk for now.
+- Partial files may remain on disk until the record is retried or removed manually. Retry removes the derived partial artifact before starting again.
 - The canceled state is persisted across backend restarts.
 
-### 8. `DELETE /downloads/:id`
+### 9. `DELETE /downloads/:id`
 
 Purpose:
 - Delete a download record and, depending on later backend policy, optionally remove the local file.
@@ -272,7 +296,7 @@ Behavior notes:
 - The record is removed from persistent metadata.
 - The downloaded or partial media file remains on disk.
 
-### 9. `POST /downloads/:id/open-location`
+### 10. `POST /downloads/:id/open-location`
 
 Purpose:
 - Open the stored media file's location in Windows File Explorer.
@@ -286,7 +310,7 @@ Response shape:
 - Success: `{ "ok": true, "downloadId": "dl_0001", "directoryPath": "C:\\Downloads\\Stremio Downloads", "opened": true }`
 - Missing/invalid stored location: HTTP `409` or `410` with an error message.
 
-### 10. `POST /play`
+### 11. `POST /play`
 
 Purpose:
 - Launch MPC-HC or the configured external player for a completed local file.

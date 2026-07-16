@@ -85,6 +85,7 @@ const MetaDetails = ({ urlParams, queryParams }) => {
         refresh: loadTitleDownloads,
         onDownloadCreated: handleDownloadCreated,
         cancel: handleCancelDownload,
+        retry: handleRetryDownload,
         play: handlePlayDownload,
         remove: handleRemoveDownloadRecord
     } = useDownloadRecords({
@@ -326,6 +327,7 @@ const MetaDetails = ({ urlParams, queryParams }) => {
                                                             actionErrors={titleDownloadActionErrors}
                                                             onRefresh={loadTitleDownloads}
                                                             onCancel={handleCancelDownload}
+                                                            onRetry={handleRetryDownload}
                                                             onPlay={handlePlayDownload}
                                                             onRemove={handleRemoveDownloadRecord}
                                                         />

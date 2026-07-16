@@ -225,6 +225,7 @@
 
 .play-button,
 .cancel-button,
+.retry-download-button,
 .location-button,
 .remove-button {
     flex: none;
@@ -256,6 +257,17 @@
     &:focus {
         border-color: rgba(155, 140, 255, 0.8);
         background-color: rgba(130, 110, 255, 0.45);
+    }
+}
+
+.retry-download-button {
+    border-color: rgba(130, 110, 255, 0.55);
+    background-color: rgba(130, 110, 255, 0.24);
+
+    &:hover,
+    &:focus {
+        border-color: rgba(155, 140, 255, 0.8);
+        background-color: rgba(130, 110, 255, 0.4);
     }
 }
 

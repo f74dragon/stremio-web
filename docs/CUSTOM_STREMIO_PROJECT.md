@@ -59,7 +59,7 @@ Notes:
 - `4. Add placeholder Download / Play Download buttons`: In progress (`Milestone 4A` implemented)
 - `5. Create local backend prototype`: In progress (`Milestone 5B` backend skeleton created)
 - `7. Add title-specific downloads panel`: In progress (`Milestone 7A` implemented)
-- `6. Implement real download manager`: In progress (`Milestones 6A-6B` real downloads and persistent records implemented)
+- `6. Implement real download manager`: In progress (`Milestones 6A-6C.1` real downloads, persistence, and retry implemented)
 - `8. Add global downloads page`: In progress (`Milestones 8A-8C.2` implemented)
 - `9. Add MPC-HC launch support`: In progress (`Milestones 9A-9B` panel and stream-row playback implemented)
 - `10. Add watched/unwatched integration`: Not started
@@ -78,7 +78,29 @@ Notes:
 
 ## Next Recommended Step
 
-Implement the download transfer-lifecycle pass in small stages: add Retry for failed/canceled records first, then design real HTTP Range-based Pause/Resume and partial-file recovery. Queue ordering and configurable concurrency should follow after transfer resumption is reliable. Debrid/hash availability remains the next discovery/availability feature after download lifecycle controls are stable.
+Design the real HTTP Range-based Pause/Resume and partial-file recovery pass. Queue ordering and configurable concurrency should follow after transfer resumption is reliable. Debrid/hash availability remains the next discovery/availability feature after download lifecycle controls are stable.
+
+## Milestone 6C.1 Findings: Retry Failed and Canceled Downloads
+
+- Backend lifecycle:
+  - Added `POST /downloads/:id/retry` for inactive `failed` and `canceled` records. Active and completed records return a conflict instead of starting an invalid duplicate transfer.
+  - Retry reuses the existing record id and preserves title, episode, artwork, source, and destination metadata so failed rows do not accumulate as duplicates.
+  - Progress, byte totals, speed, ETA, completion time, and error state reset before the record returns to `queued`.
+  - New records track `attemptCount` and `lastAttemptAt`; legacy records remain compatible and treat their first retry as attempt two.
+- File and persistence safety:
+  - The retry destination is derived from trusted record metadata rather than accepting the stored or caller-supplied path as a deletion target.
+  - A stale partial artifact at that derived destination is removed before retrying, and a cleanup failure leaves the record failed/canceled with an actionable API error.
+  - The reset `queued` record is persisted before the background transfer restarts. Persistence failure restores the previous in-memory record and does not launch the retry.
+- Frontend behavior:
+  - Failed and canceled records expose a shared `Retry` action in both title-specific panels and focused global Downloads details.
+  - Retry uses the same per-record action lock and inline failure treatment as Cancel, Play, Open Location, and Remove Record.
+  - Successful retry immediately updates the existing row; normal active polling then supplies live progress and the global activity bar.
+- Tests and remaining work:
+  - Added coverage for retry status guards, legacy attempt metadata, trusted derived-path cleanup, transfer-state reset, and completed-file protection.
+  - Added an end-to-end backend test that fails a real local HTTP transfer, retries the same record after the source recovers, and verifies the completed replacement file.
+  - Full ESLint passes, all 100 Jest tests pass, backend syntax checks pass, and the production webpack build completes with only the existing size warnings.
+  - Pause/Resume remains deferred until the downloader supports validated HTTP byte ranges, append-safe writes, partial-file state, and restart recovery.
+  - Queue ordering and configurable concurrency follow resumable transfers; debrid/hash availability, watched progress, filesystem discovery, and media-file deletion remain tracked.
 
 ## Milestone 8C.2 Findings: Global Download Activity and Library Status Polish
 

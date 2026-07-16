@@ -2,6 +2,7 @@ const React = require('react');
 const {
     listDownloads,
     cancelDownload,
+    retryDownload,
     deleteDownload,
     playDownload,
     openDownloadLocation
@@ -172,6 +173,31 @@ const useDownloadRecords = ({ metaId, enabled = true, pollInterval = DEFAULT_POL
         }
     }, [clearActionError, load, setAction, updateItems]);
 
+    const retry = React.useCallback(async (recordId) => {
+        if (!recordId || actionsRef.current[recordId]) {
+            return;
+        }
+
+        clearActionError(recordId);
+        setAction(recordId, 'retry');
+        try {
+            const retriedRecord = await retryDownload(recordId);
+            updateItems((currentItems) => currentItems.map((record) => record?.id === recordId ?
+                { ...record, ...retriedRecord }
+                :
+                record
+            ));
+            await load({ silent: true });
+        } catch (requestError) {
+            setActionErrors((currentErrors) => ({
+                ...currentErrors,
+                [recordId]: requestError?.backendError || 'Could not retry this download. Check that the local backend is running.'
+            }));
+        } finally {
+            setAction(recordId, null);
+        }
+    }, [clearActionError, load, setAction, updateItems]);
+
     const play = React.useCallback(async (recordId) => {
         if (!recordId || actionsRef.current[recordId]) {
             return;
@@ -245,6 +271,7 @@ const useDownloadRecords = ({ metaId, enabled = true, pollInterval = DEFAULT_POL
         refresh: load,
         onDownloadCreated,
         cancel,
+        retry,
         play,
         openLocation,
         remove

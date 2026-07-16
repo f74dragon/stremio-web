@@ -3,6 +3,7 @@
 const express = require('express');
 const cors = require('cors');
 const { startDownload, cancelDownload, isDownloadActive, isSupportedSourceUrl } = require('./downloadManager');
+const { isDownloadRetryable, prepareDownloadRetry } = require('./downloadRetry');
 const { launchMediaFile } = require('./playerLauncher');
 const { openDownloadLocation } = require('./fileExplorerLauncher');
 const { DownloadRecordStore, recoverInterruptedDownloadRecords } = require('./downloadRecordStore');
@@ -79,7 +80,9 @@ const createDownloadRecord = (payload) => {
         createdAt: now,
         updatedAt: now,
         completedAt: null,
-        error: null
+        error: null,
+        attemptCount: 1,
+        lastAttemptAt: now
     };
 };
 
@@ -297,6 +300,59 @@ app.post('/downloads/:id/resume', (request, response) => {
         ok: false,
         error: 'Resume is not implemented yet'
     });
+});
+
+app.post('/downloads/:id/retry', async (request, response) => {
+    const record = getDownloadRecordOrSend404(request.params.id, response);
+    if (!record) {
+        return;
+    }
+
+    if (!isDownloadRetryable(record) || isDownloadActive(record.id)) {
+        response.status(409).json({
+            ok: false,
+            error: 'Only inactive failed or canceled downloads can be retried'
+        });
+        return;
+    }
+
+    if (!isSupportedSourceUrl(record.sourceUrl)) {
+        response.status(409).json({
+            ok: false,
+            error: 'This download no longer has a usable HTTP or HTTPS source URL'
+        });
+        return;
+    }
+
+    let retriedRecord;
+    try {
+        retriedRecord = await prepareDownloadRetry(record, getNowIso());
+    } catch (error) {
+        console.error('Could not prepare download retry:', error);
+        response.status(error?.code === 'DOWNLOAD_NOT_RETRYABLE' ? 409 : 500).json({
+            ok: false,
+            errorCode: error?.code || 'DOWNLOAD_RETRY_PREPARATION_FAILED',
+            error: error?.message || 'Could not prepare the download for retry'
+        });
+        return;
+    }
+
+    downloads.set(record.id, retriedRecord);
+    try {
+        await persistDownloadRecordsNow();
+    } catch (error) {
+        downloads.set(record.id, record);
+        scheduleDownloadRecordsPersistence();
+        console.error('Could not persist retried download record:', error);
+        response.status(500).json({
+            ok: false,
+            error: 'Could not save the retried download record'
+        });
+        return;
+    }
+
+    startBackgroundDownload(retriedRecord);
+    response.status(202).json(retriedRecord);
 });
 
 app.post('/downloads/:id/cancel', async (request, response) => {
