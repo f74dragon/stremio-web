@@ -5,12 +5,17 @@ const { useTranslation } = require('react-i18next');
 const { default: Icon } = require('@stremio/stremio-icons/react');
 const { Button, MainNavBars } = require('stremio/components');
 const useDownloadRecords = require('stremio/customStremio/useDownloadRecords');
-const { groupDownloadRecords } = require('stremio/customStremio/downloadRecordPresentation');
-const DownloadRecordCard = require('stremio/customStremio/components/DownloadRecordCard');
+const { groupDownloadRecords, groupDownloadRecordsByMedia } = require('stremio/customStremio/downloadRecordPresentation');
+const DownloadMediaGroup = require('stremio/customStremio/components/DownloadMediaGroup');
+const DownloadMediaDetails = require('stremio/customStremio/components/DownloadMediaDetails');
+const DownloadActivityPanel = require('stremio/customStremio/components/DownloadActivityPanel');
 const styles = require('./styles.less');
 
 const Downloads = () => {
     const { t } = useTranslation();
+    const contentRef = React.useRef(null);
+    const libraryScrollPositionRef = React.useRef(0);
+    const [selectedMediaKey, setSelectedMediaKey] = React.useState(null);
     const {
         items,
         initialLoading,
@@ -21,142 +26,169 @@ const Downloads = () => {
         refresh,
         cancel,
         play,
+        openLocation,
         remove
     } = useDownloadRecords();
     const groups = React.useMemo(() => groupDownloadRecords(items), [items]);
+    const mediaGroups = React.useMemo(() => groupDownloadRecordsByMedia(items), [items]);
+    const selectedMediaGroup = React.useMemo(() => {
+        return selectedMediaKey ? mediaGroups.find((group) => group.key === selectedMediaKey) || null : null;
+    }, [mediaGroups, selectedMediaKey]);
     const hasItems = items.length > 0;
-    const sections = [
-        {
-            id: 'active',
-            title: t('CUSTOM_DOWNLOADS_ACTIVE', { defaultValue: 'Active' }),
-            description: t('CUSTOM_DOWNLOADS_ACTIVE_DESCRIPTION', { defaultValue: 'Downloads currently queued or in progress.' }),
-            items: groups.active
-        },
-        {
-            id: 'completed',
-            title: t('CUSTOM_DOWNLOADS_COMPLETED', { defaultValue: 'Ready to play' }),
-            description: t('CUSTOM_DOWNLOADS_COMPLETED_DESCRIPTION', { defaultValue: 'Completed files available on this device.' }),
-            items: groups.completed
-        },
-        {
-            id: 'attention',
-            title: t('CUSTOM_DOWNLOADS_ATTENTION', { defaultValue: 'Needs attention' }),
-            description: t('CUSTOM_DOWNLOADS_ATTENTION_DESCRIPTION', { defaultValue: 'Failed or canceled records you may want to review.' }),
-            items: groups.attention
+    const updateScrollPosition = React.useCallback((scrollTop) => {
+        const applyScrollPosition = () => {
+            if (contentRef.current) {
+                contentRef.current.scrollTop = scrollTop;
+            }
+        };
+
+        if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+            window.requestAnimationFrame(applyScrollPosition);
+        } else {
+            applyScrollPosition();
         }
-    ];
+    }, []);
+    const handleOpenMedia = React.useCallback((mediaKey) => {
+        libraryScrollPositionRef.current = contentRef.current?.scrollTop || 0;
+        setSelectedMediaKey(mediaKey);
+        updateScrollPosition(0);
+    }, [updateScrollPosition]);
+    const handleBackToLibrary = React.useCallback(() => {
+        setSelectedMediaKey(null);
+        updateScrollPosition(libraryScrollPositionRef.current);
+    }, [updateScrollPosition]);
+
+    React.useEffect(() => {
+        if (selectedMediaKey && !selectedMediaGroup && !initialLoading) {
+            handleBackToLibrary();
+        }
+    }, [handleBackToLibrary, initialLoading, selectedMediaGroup, selectedMediaKey]);
 
     return (
         <MainNavBars className={styles['downloads-container']} route={'downloads'}>
-            <main className={styles['downloads-content']}>
-                <header className={styles['page-header']}>
-                    <div className={styles['heading-group']}>
-                        <div className={styles['eyebrow']}>
-                            {t('CUSTOM_DOWNLOADS_LOCAL_LIBRARY', { defaultValue: 'On this device' })}
-                        </div>
-                        <h1 className={styles['page-title']}>
-                            {t('CUSTOM_DOWNLOADS_PAGE_TITLE', { defaultValue: 'Downloads' })}
-                        </h1>
-                        <p className={styles['page-description']}>
-                            {t('CUSTOM_DOWNLOADS_PAGE_DESCRIPTION', {
-                                defaultValue: 'Manage downloaded movies and episodes, monitor active transfers, and open completed files.'
-                            })}
-                        </p>
-                    </div>
-                    <div className={styles['header-actions']}>
-                        {refreshing ? <span className={styles['refreshing-label']}>{t('CUSTOM_DOWNLOADS_REFRESHING', { defaultValue: 'Refreshing...' })}</span> : null}
-                        <Button
-                            className={styles['refresh-button']}
-                            title={t('CUSTOM_DOWNLOADS_REFRESH_TITLE', { defaultValue: 'Refresh downloads' })}
-                            aria-disabled={refreshing}
-                            disabled={refreshing}
-                            onClick={() => refresh()}
-                        >
-                            {t('CUSTOM_DOWNLOADS_REFRESH', { defaultValue: 'Refresh' })}
-                        </Button>
-                    </div>
-                </header>
-
+            <main className={styles['downloads-content']} ref={contentRef}>
                 {
-                    hasItems ?
-                        <div className={styles['summary-grid']} aria-label={t('CUSTOM_DOWNLOADS_SUMMARY', { defaultValue: 'Download summary' })}>
-                            <div className={styles['summary-card']}>
-                                <span className={styles['summary-value']}>{items.length}</span>
-                                <span className={styles['summary-label']}>{t('CUSTOM_DOWNLOADS_ALL', { defaultValue: 'All records' })}</span>
-                            </div>
-                            <div className={styles['summary-card']}>
-                                <span className={styles['summary-value']}>{groups.active.length}</span>
-                                <span className={styles['summary-label']}>{t('CUSTOM_DOWNLOADS_ACTIVE', { defaultValue: 'Active' })}</span>
-                            </div>
-                            <div className={styles['summary-card']}>
-                                <span className={styles['summary-value']}>{groups.completed.length}</span>
-                                <span className={styles['summary-label']}>{t('CUSTOM_DOWNLOADS_READY', { defaultValue: 'Ready' })}</span>
-                            </div>
-                            <div className={styles['summary-card']}>
-                                <span className={styles['summary-value']}>{groups.attention.length}</span>
-                                <span className={styles['summary-label']}>{t('CUSTOM_DOWNLOADS_ATTENTION', { defaultValue: 'Needs attention' })}</span>
-                            </div>
-                        </div>
+                    selectedMediaGroup ?
+                        <React.Fragment>
+                            <DownloadActivityPanel
+                                records={items}
+                                actionStates={actionStates}
+                                actionErrors={actionErrors}
+                                onCancel={cancel}
+                            />
+                            <DownloadMediaDetails
+                                group={selectedMediaGroup}
+                                refreshing={refreshing}
+                                error={error}
+                                actionStates={actionStates}
+                                actionErrors={actionErrors}
+                                onBack={handleBackToLibrary}
+                                onCancel={cancel}
+                                onPlay={play}
+                                onOpenLocation={openLocation}
+                                onRemove={remove}
+                            />
+                        </React.Fragment>
                         :
-                        null
-                }
-
-                {hasItems && error ? <div className={styles['offline-banner']} role={'status'}>{error}</div> : null}
-
-                {
-                    initialLoading && !hasItems ?
-                        <div className={styles['page-state']} aria-live={'polite'}>
-                            <div className={styles['state-icon']}><Icon name={'download'} /></div>
-                            <div className={styles['state-title']}>{t('CUSTOM_DOWNLOADS_LOADING', { defaultValue: 'Loading downloads...' })}</div>
-                        </div>
-                        :
-                        error && !hasItems ?
-                            <div className={styles['page-state']} role={'alert'}>
-                                <div className={styles['state-icon-error']}><Icon name={'warning'} /></div>
-                                <div className={styles['state-title']}>{t('CUSTOM_DOWNLOADS_OFFLINE', { defaultValue: 'Download backend unavailable' })}</div>
-                                <div className={styles['state-description']}>{error}</div>
-                                <Button className={styles['retry-button']} onClick={() => refresh()}>
-                                    {t('CUSTOM_DOWNLOADS_RETRY', { defaultValue: 'Try again' })}
-                                </Button>
-                            </div>
-                            :
-                            !hasItems ?
-                                <div className={styles['page-state']}>
-                                    <div className={styles['state-icon']}><Icon name={'download'} /></div>
-                                    <div className={styles['state-title']}>{t('CUSTOM_DOWNLOADS_EMPTY_TITLE', { defaultValue: 'Your downloads will appear here' })}</div>
-                                    <div className={styles['state-description']}>
-                                        {t('CUSTOM_DOWNLOADS_EMPTY_DESCRIPTION', { defaultValue: 'Choose Download from any available stream to add it to this device.' })}
+                        <React.Fragment>
+                            <header className={styles['page-header']}>
+                                <div className={styles['heading-group']}>
+                                    <div className={styles['eyebrow']}>
+                                        {t('CUSTOM_DOWNLOADS_LOCAL_LIBRARY', { defaultValue: 'On this device' })}
                                     </div>
+                                    <h1 className={styles['page-title']}>
+                                        {t('CUSTOM_DOWNLOADS_PAGE_TITLE', { defaultValue: 'Downloads' })}
+                                    </h1>
                                 </div>
-                                :
-                                <div className={styles['sections-container']}>
-                                    {sections.map((section) => section.items.length > 0 ?
-                                        <section className={styles['download-section']} key={section.id}>
-                                            <div className={styles['section-header']}>
-                                                <div>
-                                                    <h2 className={styles['section-title']}>{section.title}</h2>
-                                                    <p className={styles['section-description']}>{section.description}</p>
-                                                </div>
-                                                <div className={styles['section-count']}>{section.items.length}</div>
-                                            </div>
-                                            <div className={styles['records-grid']}>
-                                                {section.items.map((record) => (
-                                                    <DownloadRecordCard
-                                                        key={record.id || `${record.videoId}-${record.createdAt}`}
-                                                        record={record}
-                                                        variant={'library'}
-                                                        action={record.id ? actionStates[record.id] : null}
-                                                        actionError={record.id ? actionErrors[record.id] : null}
-                                                        onCancel={cancel}
-                                                        onPlay={play}
-                                                        onRemove={remove}
-                                                    />
-                                                ))}
-                                            </div>
-                                        </section>
+                                <div className={styles['header-actions']}>
+                                    {refreshing ? <span className={styles['refreshing-label']}>{t('CUSTOM_DOWNLOADS_REFRESHING', { defaultValue: 'Refreshing...' })}</span> : null}
+                                    <Button
+                                        className={styles['refresh-button']}
+                                        title={t('CUSTOM_DOWNLOADS_REFRESH_TITLE', { defaultValue: 'Refresh downloads' })}
+                                        aria-disabled={refreshing}
+                                        disabled={refreshing}
+                                        onClick={() => refresh()}
+                                    >
+                                        {t('CUSTOM_DOWNLOADS_REFRESH', { defaultValue: 'Refresh' })}
+                                    </Button>
+                                </div>
+                            </header>
+
+                            <DownloadActivityPanel
+                                records={items}
+                                actionStates={actionStates}
+                                actionErrors={actionErrors}
+                                onCancel={cancel}
+                            />
+
+                            {
+                                groups.attention.length > 0 ?
+                                    <div className={styles['status-strip']} aria-label={t('CUSTOM_DOWNLOADS_SUMMARY', { defaultValue: 'Download activity' })}>
+                                        <div className={styles['status-item-attention']}>
+                                            <Icon name={'warning'} />
+                                            <strong>{groups.attention.length}</strong>
+                                            <span>{t('CUSTOM_DOWNLOADS_FILES_NEED_ATTENTION', { defaultValue: groups.attention.length === 1 ? 'record needs attention' : 'records need attention' })}</span>
+                                        </div>
+                                    </div>
+                                    :
+                                    null
+                            }
+
+                            {hasItems && error ? <div className={styles['offline-banner']} role={'status'}>{error}</div> : null}
+
+                            {
+                                initialLoading && !hasItems ?
+                                    <div className={styles['page-state']} aria-live={'polite'}>
+                                        <div className={styles['state-icon']}><Icon name={'download'} /></div>
+                                        <div className={styles['state-title']}>{t('CUSTOM_DOWNLOADS_LOADING', { defaultValue: 'Loading downloads...' })}</div>
+                                    </div>
+                                    :
+                                    error && !hasItems ?
+                                        <div className={styles['page-state']} role={'alert'}>
+                                            <div className={styles['state-icon-error']}><Icon name={'warning'} /></div>
+                                            <div className={styles['state-title']}>{t('CUSTOM_DOWNLOADS_OFFLINE', { defaultValue: 'Download backend unavailable' })}</div>
+                                            <div className={styles['state-description']}>{error}</div>
+                                            <Button className={styles['retry-button']} onClick={() => refresh()}>
+                                                {t('CUSTOM_DOWNLOADS_RETRY', { defaultValue: 'Try again' })}
+                                            </Button>
+                                        </div>
                                         :
-                                        null)}
-                                </div>
+                                        !hasItems ?
+                                            <div className={styles['page-state']}>
+                                                <div className={styles['state-icon']}><Icon name={'download'} /></div>
+                                                <div className={styles['state-title']}>{t('CUSTOM_DOWNLOADS_EMPTY_TITLE', { defaultValue: 'Your downloads will appear here' })}</div>
+                                                <div className={styles['state-description']}>
+                                                    {t('CUSTOM_DOWNLOADS_EMPTY_DESCRIPTION', { defaultValue: 'Choose Download from any available stream to add it to this device.' })}
+                                                </div>
+                                            </div>
+                                            :
+                                            <div className={styles['sections-container']}>
+                                                <section className={styles['download-section']}>
+                                                    <div className={styles['section-header']}>
+                                                        <div>
+                                                            <h2 className={styles['section-title']}>{t('CUSTOM_DOWNLOADS_LIBRARY_TITLE', { defaultValue: 'Your downloaded titles' })}</h2>
+                                                            <p className={styles['section-description']}>
+                                                                {t('CUSTOM_DOWNLOADS_LIBRARY_DESCRIPTION', { defaultValue: 'Select a movie or show to see its downloads and available actions.' })}
+                                                            </p>
+                                                        </div>
+                                                        <div className={styles['section-count']}>{mediaGroups.length}</div>
+                                                    </div>
+                                                    <div className={styles['media-grid']}>
+                                                        {mediaGroups.map((group) => (
+                                                            <DownloadMediaGroup
+                                                                key={group.key}
+                                                                group={group}
+                                                                actionStates={actionStates}
+                                                                actionErrors={actionErrors}
+                                                                onPlay={play}
+                                                                onOpen={handleOpenMedia}
+                                                            />
+                                                        ))}
+                                                    </div>
+                                                </section>
+                                            </div>
+                            }
+                        </React.Fragment>
                 }
             </main>
         </MainNavBars>

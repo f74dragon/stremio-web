@@ -10,6 +10,9 @@ const buildDownloadPayload = (input) => {
     const type = input?.type ?? null;
     const video = input?.video ?? null;
     const parentTitle = input?.parentTitle ?? null;
+    const mediaMetadata = input?.mediaMetadata ?? null;
+    const poster = input?.poster ?? null;
+    const background = input?.background ?? null;
     const addonName = input?.addonName ?? null;
     const stream = input?.stream ?? null;
     const deepLinks = stream?.deepLinks ?? null;
@@ -19,8 +22,21 @@ const buildDownloadPayload = (input) => {
         metaId,
         type,
         parentTitle: parentTitle || video?.title || null,
+        poster,
+        background,
+        logo: mediaMetadata?.logo ?? null,
+        description: mediaMetadata?.description ?? null,
+        runtime: mediaMetadata?.runtime ?? null,
+        releaseInfo: mediaMetadata?.releaseInfo ?? null,
+        titleReleased: toIsoDateOrNull(mediaMetadata?.released),
+        metaLinks: Array.isArray(mediaMetadata?.links) ? mediaMetadata.links.map((link) => ({
+            category: link?.category ?? null,
+            name: link?.name ?? null,
+            url: link?.url ?? null
+        })) : [],
         videoId: video?.id ?? null,
         videoTitle: video?.title ?? null,
+        videoThumbnail: video?.thumbnail ?? null,
         season: typeof video?.season === 'number' ? video.season : null,
         episode: typeof video?.episode === 'number' ? video.episode : null,
         videoReleased: toIsoDateOrNull(video?.released),

@@ -3,7 +3,8 @@ const {
     listDownloads,
     cancelDownload,
     deleteDownload,
-    playDownload
+    playDownload,
+    openDownloadLocation
 } = require('./localBackendClient');
 const { ACTIVE_DOWNLOAD_STATUSES } = require('./downloadRecordPresentation');
 
@@ -190,6 +191,25 @@ const useDownloadRecords = ({ metaId, enabled = true, pollInterval = DEFAULT_POL
         }
     }, [clearActionError, setAction]);
 
+    const openLocation = React.useCallback(async (recordId) => {
+        if (!recordId || actionsRef.current[recordId]) {
+            return;
+        }
+
+        clearActionError(recordId);
+        setAction(recordId, 'location');
+        try {
+            await openDownloadLocation(recordId);
+        } catch (requestError) {
+            setActionErrors((currentErrors) => ({
+                ...currentErrors,
+                [recordId]: requestError?.backendError || 'Could not open this download location. Check that the local backend is running.'
+            }));
+        } finally {
+            setAction(recordId, null);
+        }
+    }, [clearActionError, setAction]);
+
     const hasActiveRecords = React.useMemo(() => {
         return items.some((record) => ACTIVE_DOWNLOAD_STATUSES.has(record?.status));
     }, [items]);
@@ -226,6 +246,7 @@ const useDownloadRecords = ({ metaId, enabled = true, pollInterval = DEFAULT_POL
         onDownloadCreated,
         cancel,
         play,
+        openLocation,
         remove
     };
 };

@@ -31,14 +31,30 @@ describe('downloadRecordStore', () => {
 
     test('writes and loads records while omitting deleted and invalid entries', async () => {
         await writeDownloadRecords(recordsPath, [
-            { id: 'dl_completed', status: 'completed', localPath: 'C:\\Videos\\Movie.mkv' },
+            {
+                id: 'dl_completed',
+                status: 'completed',
+                localPath: 'C:\\Videos\\Movie.mkv',
+                poster: 'https://images.example/movie-poster.jpg',
+                logo: 'https://images.example/movie-logo.png',
+                description: 'Movie summary',
+                videoThumbnail: 'https://images.example/movie-thumbnail.jpg'
+            },
             { id: 'dl_deleted', status: 'deleted' },
             { status: 'failed' },
             null
         ]);
 
         await expect(readDownloadRecords(recordsPath)).resolves.toEqual([
-            { id: 'dl_completed', status: 'completed', localPath: 'C:\\Videos\\Movie.mkv' }
+            {
+                id: 'dl_completed',
+                status: 'completed',
+                localPath: 'C:\\Videos\\Movie.mkv',
+                poster: 'https://images.example/movie-poster.jpg',
+                logo: 'https://images.example/movie-logo.png',
+                description: 'Movie summary',
+                videoThumbnail: 'https://images.example/movie-thumbnail.jpg'
+            }
         ]);
 
         const document = JSON.parse(fs.readFileSync(recordsPath, 'utf8'));

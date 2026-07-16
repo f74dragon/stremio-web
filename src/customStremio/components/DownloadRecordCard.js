@@ -27,6 +27,27 @@ const formatCreatedAt = (value) => {
     return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 };
 
+const formatBytes = (value) => {
+    const bytes = Number(value);
+    if (!Number.isFinite(bytes) || bytes < 0) {
+        return null;
+    }
+
+    if (bytes < 1024) {
+        return `${Math.round(bytes)} B`;
+    }
+
+    const units = ['KB', 'MB', 'GB', 'TB'];
+    let amount = bytes / 1024;
+    let unitIndex = 0;
+    while (amount >= 1024 && unitIndex < units.length - 1) {
+        amount /= 1024;
+        unitIndex += 1;
+    }
+
+    return `${amount >= 10 ? amount.toFixed(1) : amount.toFixed(2)} ${units[unitIndex]}`;
+};
+
 const getEpisodeLabel = (record) => {
     if (typeof record?.season !== 'number' || typeof record?.episode !== 'number') {
         return record?.videoTitle || null;
@@ -37,9 +58,11 @@ const getEpisodeLabel = (record) => {
 
 const getRecordLabels = (record, variant, untitledLabel) => {
     if (variant === 'library') {
-        const title = record?.parentTitle || record?.videoTitle || record?.streamName || untitledLabel;
-        const subtitle = record?.type === 'series' ? getEpisodeLabel(record) : null;
-        return { title, subtitle: subtitle !== title ? subtitle : null };
+        const title = record?.type === 'series' ?
+            getEpisodeLabel(record)
+            :
+            record?.videoTitle || record?.parentTitle || record?.streamName;
+        return { title: title || untitledLabel, subtitle: null };
     }
 
     return {
@@ -55,6 +78,7 @@ const DownloadRecordCard = ({
     actionError,
     onCancel,
     onPlay,
+    onOpenLocation,
     onRemove
 }) => {
     const { t } = useTranslation();
@@ -63,9 +87,11 @@ const DownloadRecordCard = ({
     const labels = getRecordLabels(record, variant, t('CUSTOM_DOWNLOAD_UNTITLED', { defaultValue: 'Untitled download' }));
     const detailsHref = variant === 'library' ? getDownloadDetailsHref(record) : null;
     const progress = formatProgress(record?.progress);
+    const fileSize = formatBytes(record?.bytesTotal ?? record?.bytesDownloaded);
     const actionInProgress = typeof action === 'string';
     const canCancel = recordId && CANCELABLE_STATUSES.has(status);
     const canPlay = recordId && status === 'completed';
+    const canOpenLocation = recordId && variant === 'library' && Boolean(record?.localPath);
     const canRemove = recordId && REMOVABLE_STATUSES.has(status);
     const playTitle = t('CUSTOM_DOWNLOAD_PLAY_TITLE', {
         defaultValue: 'Play {{title}} in MPC-HC',
@@ -91,41 +117,80 @@ const DownloadRecordCard = ({
                 </div>
                 <div className={classnames(styles['record-status'], styles[`record-status-${status}`])}>{status}</div>
             </div>
-            <div className={styles['record-meta']}>
-                <span>{record?.addonName || t('CUSTOM_DOWNLOAD_UNKNOWN_ADDON', { defaultValue: 'Unknown addon' })}</span>
-                <span>{record?.streamName || t('CUSTOM_DOWNLOAD_UNKNOWN_STREAM', { defaultValue: 'Unknown stream' })}</span>
-                <span>
-                    {t('CUSTOM_DOWNLOAD_PROGRESS', {
-                        defaultValue: 'Progress: {{progress}}',
-                        progress: progress.label
-                    })}
-                </span>
-            </div>
+            {
+                variant === 'library' ?
+                    <div className={styles['record-essential-meta']}>
+                        <span>{fileSize || t('CUSTOM_DOWNLOAD_SIZE_UNKNOWN', { defaultValue: 'Size unavailable' })}</span>
+                        <span>{progress.label}</span>
+                    </div>
+                    :
+                    <div className={styles['record-meta']}>
+                        <span>{record?.addonName || t('CUSTOM_DOWNLOAD_UNKNOWN_ADDON', { defaultValue: 'Unknown addon' })}</span>
+                        <span>{record?.streamName || t('CUSTOM_DOWNLOAD_UNKNOWN_STREAM', { defaultValue: 'Unknown stream' })}</span>
+                        <span>
+                            {t('CUSTOM_DOWNLOAD_PROGRESS', {
+                                defaultValue: 'Progress: {{progress}}',
+                                progress: progress.label
+                            })}
+                        </span>
+                    </div>
+            }
             <div className={styles['progress-track']} aria-hidden={'true'}>
                 <div className={styles['progress-value']} style={{ width: `${progress.value}%` }} />
             </div>
             {record?.error ? <div className={styles['record-error']}>{record.error}</div> : null}
             {
-                record?.localPath ?
-                    <div className={styles['record-path']} title={record.localPath}>{record.localPath}</div>
+                variant === 'library' ?
+                    <details className={styles['download-info']}>
+                        <summary>{t('CUSTOM_DOWNLOAD_INFO', { defaultValue: 'Download info' })}</summary>
+                        <div className={styles['download-info-content']}>
+                            <div><span>{t('CUSTOM_DOWNLOAD_ADDON_LABEL', { defaultValue: 'Addon' })}</span><strong>{record?.addonName || t('CUSTOM_DOWNLOAD_UNKNOWN_ADDON', { defaultValue: 'Unknown addon' })}</strong></div>
+                            <div><span>{t('CUSTOM_DOWNLOAD_STREAM_LABEL', { defaultValue: 'Stream' })}</span><strong>{record?.streamName || t('CUSTOM_DOWNLOAD_UNKNOWN_STREAM', { defaultValue: 'Unknown stream' })}</strong></div>
+                            {record?.createdAt ? <div><span>{t('CUSTOM_DOWNLOAD_CREATED_LABEL', { defaultValue: 'Added' })}</span><strong>{formatCreatedAt(record.createdAt)}</strong></div> : null}
+                            {record?.localPath ? <div className={styles['record-path']} title={record.localPath}><span>{t('CUSTOM_DOWNLOAD_PATH_LABEL', { defaultValue: 'File' })}</span><strong>{record.localPath}</strong></div> : null}
+                        </div>
+                    </details>
                     :
-                    null
-            }
-            {
-                record?.createdAt ?
-                    <div className={styles['record-created']}>
-                        {t('CUSTOM_DOWNLOAD_CREATED', {
-                            defaultValue: 'Created: {{createdAt}}',
-                            createdAt: formatCreatedAt(record.createdAt)
-                        })}
-                    </div>
-                    :
-                    null
+                    <React.Fragment>
+                        {record?.localPath ? <div className={styles['record-path']} title={record.localPath}>{record.localPath}</div> : null}
+                        {
+                            record?.createdAt ?
+                                <div className={styles['record-created']}>
+                                    {t('CUSTOM_DOWNLOAD_CREATED', {
+                                        defaultValue: 'Created: {{createdAt}}',
+                                        createdAt: formatCreatedAt(record.createdAt)
+                                    })}
+                                </div>
+                                :
+                                null
+                        }
+                    </React.Fragment>
             }
             {actionError ? <div className={styles['record-action-error']} role={'alert'}>{actionError}</div> : null}
             {
-                canCancel || canPlay || canRemove ?
+                canCancel || canPlay || canOpenLocation || canRemove ?
                     <div className={styles['record-actions']}>
+                        {
+                            canOpenLocation ?
+                                <Button
+                                    className={styles['location-button']}
+                                    title={t('CUSTOM_DOWNLOAD_OPEN_LOCATION_TITLE', {
+                                        defaultValue: 'Open the location of {{title}} in File Explorer',
+                                        title: labels.title
+                                    })}
+                                    aria-disabled={actionInProgress}
+                                    disabled={actionInProgress}
+                                    tabIndex={actionInProgress ? -1 : 0}
+                                    onClick={() => !actionInProgress && onOpenLocation?.(recordId)}
+                                >
+                                    {action === 'location' ?
+                                        t('CUSTOM_DOWNLOAD_OPENING_LOCATION', { defaultValue: 'Opening folder...' })
+                                        :
+                                        t('CUSTOM_DOWNLOAD_OPEN_LOCATION', { defaultValue: 'Open location' })}
+                                </Button>
+                                :
+                                null
+                        }
                         {
                             canRemove ?
                                 <div className={styles['record-action-note']}>
@@ -206,10 +271,11 @@ const DownloadRecordCard = ({
 DownloadRecordCard.propTypes = {
     record: PropTypes.object.isRequired,
     variant: PropTypes.oneOf(['compact', 'library']),
-    action: PropTypes.oneOf(['cancel', 'play', 'remove']),
+    action: PropTypes.oneOf(['cancel', 'play', 'location', 'remove']),
     actionError: PropTypes.string,
     onCancel: PropTypes.func,
     onPlay: PropTypes.func,
+    onOpenLocation: PropTypes.func,
     onRemove: PropTypes.func
 };
 

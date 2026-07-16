@@ -10,6 +10,178 @@ const sortDownloadRecordsNewestFirst = (records) => {
     return [...records].sort((left, right) => getTimestamp(right) - getTimestamp(left));
 };
 
+const getLatestCompletedRecord = (records) => {
+    if (!Array.isArray(records)) {
+        return null;
+    }
+
+    return sortDownloadRecordsNewestFirst(records.filter((record) => record?.status === 'completed'))[0] || null;
+};
+
+const normalizeGroupValue = (value) => typeof value === 'string' ? value.trim() : '';
+
+const getDownloadMediaKey = (record, index) => {
+    const type = normalizeGroupValue(record?.type).toLowerCase() || 'unknown';
+    const metaId = normalizeGroupValue(record?.metaId);
+    if (metaId) {
+        return `${type}:id:${metaId}`;
+    }
+
+    const title = normalizeGroupValue(record?.parentTitle || record?.videoTitle).toLowerCase();
+    if (title) {
+        return `${type}:title:${title}`;
+    }
+
+    return `record:${normalizeGroupValue(record?.id) || index}`;
+};
+
+const sortMediaGroupRecords = (records, type) => {
+    if (type !== 'series') {
+        return sortDownloadRecordsNewestFirst(records);
+    }
+
+    return [...records].sort((left, right) => {
+        const leftSeason = typeof left?.season === 'number' ? left.season : Number.MAX_SAFE_INTEGER;
+        const rightSeason = typeof right?.season === 'number' ? right.season : Number.MAX_SAFE_INTEGER;
+        const leftEpisode = typeof left?.episode === 'number' ? left.episode : Number.MAX_SAFE_INTEGER;
+        const rightEpisode = typeof right?.episode === 'number' ? right.episode : Number.MAX_SAFE_INTEGER;
+
+        return leftSeason - rightSeason || leftEpisode - rightEpisode || getTimestamp(right) - getTimestamp(left);
+    });
+};
+
+const getSeriesEpisodeCount = (records) => {
+    if (!Array.isArray(records)) {
+        return 0;
+    }
+
+    const episodeKeys = new Set();
+    records.forEach((record, index) => {
+        const videoId = normalizeGroupValue(record?.videoId);
+        const hasSeasonAndEpisode = typeof record?.season === 'number' && typeof record?.episode === 'number';
+        const key = videoId || (hasSeasonAndEpisode ? `${record.season}:${record.episode}` : normalizeGroupValue(record?.id) || `record:${index}`);
+        episodeKeys.add(key);
+    });
+
+    return episodeKeys.size;
+};
+
+const groupSeriesRecordsBySeason = (records) => {
+    if (!Array.isArray(records)) {
+        return [];
+    }
+
+    const seasonGroups = new Map();
+    sortMediaGroupRecords(records, 'series').forEach((record) => {
+        const season = typeof record?.season === 'number' ? record.season : null;
+        const key = season === null ? 'season:unknown' : `season:${season}`;
+        const existingGroup = seasonGroups.get(key);
+        if (existingGroup) {
+            existingGroup.records.push(record);
+        } else {
+            seasonGroups.set(key, { key, season, records: [record] });
+        }
+    });
+
+    return Array.from(seasonGroups.values());
+};
+
+const getDownloadActivitySummary = (records) => {
+    const activeRecords = groupDownloadRecords(records).active;
+    const hasKnownTotals = activeRecords.length > 0 && activeRecords.every((record) => Number(record?.bytesTotal) > 0);
+    const bytesTotal = hasKnownTotals ? activeRecords.reduce((total, record) => total + Number(record.bytesTotal), 0) : null;
+    const bytesDownloaded = activeRecords.reduce((total, record) => {
+        const value = Number(record?.bytesDownloaded);
+        return total + (Number.isFinite(value) && value > 0 ? value : 0);
+    }, 0);
+    const speedBytesPerSecond = activeRecords.reduce((total, record) => {
+        const value = Number(record?.speedBytesPerSecond);
+        return total + (Number.isFinite(value) && value > 0 ? value : 0);
+    }, 0);
+    const progress = bytesTotal ? Math.min(100, Math.max(0, (bytesDownloaded / bytesTotal) * 100)) : null;
+    const remainingBytes = bytesTotal === null ? null : Math.max(0, bytesTotal - bytesDownloaded);
+    const etaSeconds = remainingBytes !== null && speedBytesPerSecond > 0 ? remainingBytes / speedBytesPerSecond : null;
+
+    return {
+        records: activeRecords,
+        count: activeRecords.length,
+        bytesDownloaded,
+        bytesTotal,
+        speedBytesPerSecond,
+        progress,
+        etaSeconds,
+        indeterminate: activeRecords.length > 0 && bytesTotal === null
+    };
+};
+
+const getFirstStringValue = (records, field) => {
+    return records.reduce((result, record) => result || normalizeGroupValue(record?.[field]), '');
+};
+
+const getFirstArrayValue = (records, field) => {
+    return records.reduce((result, record) => result.length > 0 ? result : (Array.isArray(record?.[field]) ? record[field] : []), []);
+};
+
+const groupDownloadRecordsByMedia = (records) => {
+    if (!Array.isArray(records)) {
+        return [];
+    }
+
+    const mediaByKey = new Map();
+    records.forEach((record, index) => {
+        if (!record || typeof record !== 'object') {
+            return;
+        }
+
+        const key = getDownloadMediaKey(record, index);
+        const existingGroup = mediaByKey.get(key);
+        if (existingGroup) {
+            existingGroup.records.push(record);
+            existingGroup.latestTimestamp = Math.max(existingGroup.latestTimestamp, getTimestamp(record));
+            return;
+        }
+
+        mediaByKey.set(key, {
+            key,
+            type: normalizeGroupValue(record.type).toLowerCase() || null,
+            metaId: normalizeGroupValue(record.metaId) || null,
+            records: [record],
+            latestTimestamp: getTimestamp(record)
+        });
+    });
+
+    return Array.from(mediaByKey.values()).map((group) => {
+        const recordsNewestFirst = sortDownloadRecordsNewestFirst(group.records);
+        const type = group.type || getFirstStringValue(recordsNewestFirst, 'type').toLowerCase() || null;
+        const recordsForDisplay = sortMediaGroupRecords(group.records, type);
+        const statusGroups = groupDownloadRecords(group.records);
+        const firstLinkableRecord = recordsNewestFirst.find((record) => getDownloadTitleHref(record) !== null);
+
+        return {
+            ...group,
+            type,
+            title: getFirstStringValue(recordsNewestFirst, 'parentTitle') ||
+                getFirstStringValue(recordsNewestFirst, 'videoTitle') ||
+                'Untitled download',
+            poster: getFirstStringValue(recordsNewestFirst, 'poster') || null,
+            background: getFirstStringValue(recordsNewestFirst, 'background') || null,
+            logo: getFirstStringValue(recordsNewestFirst, 'logo') || null,
+            description: getFirstStringValue(recordsNewestFirst, 'description') || null,
+            runtime: getFirstStringValue(recordsNewestFirst, 'runtime') || null,
+            releaseInfo: getFirstStringValue(recordsNewestFirst, 'releaseInfo') || null,
+            titleReleased: getFirstStringValue(recordsNewestFirst, 'titleReleased') || null,
+            metaLinks: getFirstArrayValue(recordsNewestFirst, 'metaLinks'),
+            records: recordsForDisplay,
+            episodeCount: type === 'series' ? getSeriesEpisodeCount(group.records) : 0,
+            activeCount: statusGroups.active.length,
+            completedCount: statusGroups.completed.length,
+            attentionCount: statusGroups.attention.length,
+            latestCompletedRecord: getLatestCompletedRecord(group.records),
+            href: firstLinkableRecord ? getDownloadTitleHref(firstLinkableRecord) : null
+        };
+    }).sort((left, right) => right.latestTimestamp - left.latestTimestamp);
+};
+
 const groupDownloadRecords = (records) => {
     const groups = {
         active: [],
@@ -37,14 +209,23 @@ const groupDownloadRecords = (records) => {
     return groups;
 };
 
-const getDownloadDetailsHref = (record) => {
+const getDownloadTitleHref = (record) => {
     const type = typeof record?.type === 'string' ? record.type.trim() : '';
     const metaId = typeof record?.metaId === 'string' ? record.metaId.trim() : '';
     if (!type || !metaId) {
         return null;
     }
 
-    const baseHref = `#/metadetails/${encodeURIComponent(type)}/${encodeURIComponent(metaId)}`;
+    return `#/metadetails/${encodeURIComponent(type)}/${encodeURIComponent(metaId)}`;
+};
+
+const getDownloadDetailsHref = (record) => {
+    const baseHref = getDownloadTitleHref(record);
+    if (!baseHref) {
+        return null;
+    }
+
+    const type = typeof record?.type === 'string' ? record.type.trim() : '';
     const videoId = typeof record?.videoId === 'string' ? record.videoId.trim() : '';
     return type === 'series' && videoId ? `${baseHref}/${encodeURIComponent(videoId)}` : baseHref;
 };
@@ -52,6 +233,13 @@ const getDownloadDetailsHref = (record) => {
 module.exports = {
     ACTIVE_DOWNLOAD_STATUSES,
     sortDownloadRecordsNewestFirst,
+    getLatestCompletedRecord,
     groupDownloadRecords,
+    groupDownloadRecordsByMedia,
+    sortMediaGroupRecords,
+    getSeriesEpisodeCount,
+    groupSeriesRecordsBySeason,
+    getDownloadActivitySummary,
+    getDownloadTitleHref,
     getDownloadDetailsHref
 };

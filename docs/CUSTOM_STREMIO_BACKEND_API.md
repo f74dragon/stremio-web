@@ -24,8 +24,17 @@ The frontend will send `POST /downloads` using the current `buildDownloadPayload
 - `metaId`
 - `type`
 - `parentTitle`
+- `poster`
+- `background`
+- `logo`
+- `description`
+- `runtime`
+- `releaseInfo`
+- `titleReleased`
+- `metaLinks`
 - `videoId`
 - `videoTitle`
+- `videoThumbnail`
 - `season`
 - `episode`
 - `videoReleased`
@@ -61,8 +70,20 @@ Example combined download record shape:
   "metaId": "tt1234567",
   "type": "series",
   "parentTitle": "Show Title",
+  "poster": "https://images.example/show-poster.jpg",
+  "background": "https://images.example/show-background.jpg",
+  "logo": "https://images.example/show-logo.png",
+  "description": "Series summary.",
+  "runtime": "52 min",
+  "releaseInfo": "2024-",
+  "titleReleased": "2024-01-01T00:00:00.000Z",
+  "metaLinks": [
+    { "category": "Genres", "name": "Drama", "url": "stremio:///discover/drama" },
+    { "category": "imdb", "name": "8.4", "url": "https://imdb.com/title/tt1234567" }
+  ],
   "videoId": "tt1234567:1:2",
   "videoTitle": "Episode Title",
+  "videoThumbnail": "https://images.example/episode-thumbnail.jpg",
   "season": 1,
   "episode": 2,
   "videoReleased": "2024-03-01T00:00:00.000Z",
@@ -251,7 +272,21 @@ Behavior notes:
 - The record is removed from persistent metadata.
 - The downloaded or partial media file remains on disk.
 
-### 9. `POST /play`
+### 9. `POST /downloads/:id/open-location`
+
+Purpose:
+- Open the stored media file's location in Windows File Explorer.
+
+Security and behavior:
+- Accepts only a stored download id in the route; callers cannot submit an arbitrary filesystem path.
+- Selects the media file when it exists.
+- Opens the known parent directory when the expected file is absent but its directory remains available.
+
+Response shape:
+- Success: `{ "ok": true, "downloadId": "dl_0001", "directoryPath": "C:\\Downloads\\Stremio Downloads", "opened": true }`
+- Missing/invalid stored location: HTTP `409` or `410` with an error message.
+
+### 10. `POST /play`
 
 Purpose:
 - Launch MPC-HC or the configured external player for a completed local file.

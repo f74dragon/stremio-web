@@ -4,6 +4,7 @@ const express = require('express');
 const cors = require('cors');
 const { startDownload, cancelDownload, isDownloadActive, isSupportedSourceUrl } = require('./downloadManager');
 const { launchMediaFile } = require('./playerLauncher');
+const { openDownloadLocation } = require('./fileExplorerLauncher');
 const { DownloadRecordStore, recoverInterruptedDownloadRecords } = require('./downloadRecordStore');
 
 const HOST = '127.0.0.1';
@@ -44,8 +45,17 @@ const createDownloadRecord = (payload) => {
         metaId: payload?.metaId ?? null,
         type: payload?.type ?? null,
         parentTitle: payload?.parentTitle ?? payload?.videoTitle ?? null,
+        poster: payload?.poster ?? null,
+        background: payload?.background ?? null,
+        logo: payload?.logo ?? null,
+        description: payload?.description ?? null,
+        runtime: payload?.runtime ?? null,
+        releaseInfo: payload?.releaseInfo ?? null,
+        titleReleased: payload?.titleReleased ?? null,
+        metaLinks: Array.isArray(payload?.metaLinks) ? payload.metaLinks : [],
         videoId: payload?.videoId ?? null,
         videoTitle: payload?.videoTitle ?? null,
+        videoThumbnail: payload?.videoThumbnail ?? null,
         season: typeof payload?.season === 'number' ? payload.season : null,
         episode: typeof payload?.episode === 'number' ? payload.episode : null,
         videoReleased: payload?.videoReleased ?? null,
@@ -365,6 +375,38 @@ app.delete('/downloads/:id', async (request, response) => {
         id: latestRecord.id,
         status: 'deleted'
     });
+});
+
+app.post('/downloads/:id/open-location', async (request, response) => {
+    const record = getDownloadRecordOrSend404(request.params.id, response);
+    if (!record) {
+        return;
+    }
+
+    if (!record.localPath) {
+        response.status(409).json({
+            ok: false,
+            error: 'This download does not have a local path yet'
+        });
+        return;
+    }
+
+    try {
+        const result = await openDownloadLocation(record.localPath);
+        response.json({
+            ok: true,
+            downloadId: record.id,
+            directoryPath: result.directoryPath,
+            opened: true
+        });
+    } catch (error) {
+        const status = ['DOWNLOAD_PATH_INVALID', 'DOWNLOAD_DIRECTORY_NOT_FOUND'].includes(error?.code) ? 410 : 500;
+        response.status(status).json({
+            ok: false,
+            errorCode: error?.code || 'FILE_EXPLORER_LAUNCH_FAILED',
+            error: error?.message || 'Could not open the download location'
+        });
+    }
 });
 
 app.post('/play', async (request, response) => {

@@ -352,6 +352,9 @@ const MetaDetails = ({ urlParams, queryParams }) => {
                                 className={styles['streams-list']}
                                 metaId={titleDownloadsMetaId}
                                 parentTitle={metaItemContent?.name ?? video?.title ?? null}
+                                poster={metaItemContent?.poster ?? null}
+                                background={metaItemContent?.background ?? null}
+                                mediaMetadata={metaItemContent}
                                 streams={metaDetails.streams}
                                 downloadRecords={titleDownloadRecords}
                                 downloadActionStates={titleDownloadActions}

@@ -102,8 +102,21 @@ Replace `downloadUrl` with a real direct video URL.
 $payload = @{
   metaId = 'tt1234567'
   type = 'movie'
+  parentTitle = 'Test Movie'
+  poster = 'https://images.example/test-movie-poster.jpg'
+  background = 'https://images.example/test-movie-background.jpg'
+  logo = 'https://images.example/test-movie-logo.png'
+  description = 'Test movie summary.'
+  runtime = '112 min'
+  releaseInfo = '2026'
+  titleReleased = '2026-01-01T00:00:00.000Z'
+  metaLinks = @(
+    @{ category = 'Genres'; name = 'Drama'; url = 'stremio:///discover/drama' }
+    @{ category = 'imdb'; name = '8.1'; url = 'https://imdb.com/title/tt1234567' }
+  )
   videoId = $null
   videoTitle = 'Test Movie'
+  videoThumbnail = 'https://images.example/test-movie-thumbnail.jpg'
   season = $null
   episode = $null
   videoReleased = '2024-03-01T00:00:00.000Z'
@@ -167,6 +180,12 @@ $playPayload = @{
 Invoke-RestMethod -Uri 'http://127.0.0.1:5577/play' -Method Post -ContentType 'application/json' -Body $playPayload | ConvertTo-Json -Depth 8
 ```
 
+## PowerShell Test: Open Download Location
+
+```powershell
+Invoke-RestMethod -Uri ("http://127.0.0.1:5577/downloads/{0}/open-location" -f $created.id) -Method Post | ConvertTo-Json -Depth 8
+```
+
 ## PowerShell Test: Unsupported Protocol
 
 ```powershell
@@ -184,6 +203,8 @@ Invoke-RestMethod -Uri 'http://127.0.0.1:5577/downloads' -Method Post -ContentTy
 ## Notes
 
 - Download records persist across backend restarts.
+- New records preserve optional title posters/backgrounds, logos, summaries, runtime/release information, metadata links, and episode thumbnails for the media-first Downloads Library. Older records without rich metadata remain valid and use frontend fallbacks.
+- `POST /downloads/:id/open-location` opens only locations derived from stored records; it does not accept caller-supplied paths.
 - The first restart after upgrading from the older in-memory backend cannot recover records that were never written by that older process; their media files remain on disk.
 - Interrupted active transfers are marked `failed` on the next startup; automatic resume is still deferred.
 - Real file downloading is implemented only for direct `http`/`https` URLs in this milestone.

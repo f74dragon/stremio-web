@@ -14,7 +14,7 @@
 }
 
 .record-card-library {
-    min-height: 15rem;
+    min-height: 9rem;
     padding: 1rem;
     background: linear-gradient(145deg, rgba(255, 255, 255, 0.095), rgba(255, 255, 255, 0.045));
 
@@ -111,6 +111,14 @@
     opacity: 0.8;
 }
 
+.record-essential-meta {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem 1rem;
+    font-size: 0.8rem;
+    opacity: 0.7;
+}
+
 .progress-track {
     height: 0.3rem;
     overflow: hidden;
@@ -137,6 +145,53 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.download-info {
+    font-size: 0.76rem;
+
+    > summary {
+        width: max-content;
+        color: var(--primary-accent-color);
+        cursor: pointer;
+        font-weight: 600;
+        opacity: 0.84;
+
+        &:hover,
+        &:focus-visible {
+            opacity: 1;
+        }
+    }
+}
+
+.download-info-content {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.5rem 1rem;
+    margin-top: 0.65rem;
+    padding: 0.65rem;
+    border-radius: calc(var(--border-radius) * 0.75);
+    background-color: rgba(0, 0, 0, 0.16);
+
+    > div {
+        display: flex;
+        min-width: 0;
+        flex-direction: column;
+        gap: 0.15rem;
+
+        > span {
+            font-size: 0.68rem;
+            opacity: 0.56;
+            text-transform: uppercase;
+        }
+
+        > strong {
+            overflow: hidden;
+            font-weight: 500;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+    }
 }
 
 .record-error {
@@ -170,6 +225,7 @@
 
 .play-button,
 .cancel-button,
+.location-button,
 .remove-button {
     flex: none;
     padding: 0.38rem 0.78rem;
@@ -215,5 +271,9 @@
 
     .record-action-note {
         flex-basis: 100%;
+    }
+
+    .download-info-content {
+        grid-template-columns: minmax(0, 1fr);
     }
 }

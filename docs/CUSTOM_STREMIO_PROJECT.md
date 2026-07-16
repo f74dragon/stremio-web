@@ -60,7 +60,7 @@ Notes:
 - `5. Create local backend prototype`: In progress (`Milestone 5B` backend skeleton created)
 - `7. Add title-specific downloads panel`: In progress (`Milestone 7A` implemented)
 - `6. Implement real download manager`: In progress (`Milestones 6A-6B` real downloads and persistent records implemented)
-- `8. Add global downloads page`: In progress (`Milestone 8A` implemented)
+- `8. Add global downloads page`: In progress (`Milestones 8A-8C.2` implemented)
 - `9. Add MPC-HC launch support`: In progress (`Milestones 9A-9B` panel and stream-row playback implemented)
 - `10. Add watched/unwatched integration`: Not started
 - `11. Package as Windows app`: Not started
@@ -78,7 +78,102 @@ Notes:
 
 ## Next Recommended Step
 
-Improve the global Downloads Library into a media-first browsing experience: persist poster/thumbnail metadata, group records by movie/show, and expose episodes clearly before adding debrid/hash availability highlighting.
+Implement the download transfer-lifecycle pass in small stages: add Retry for failed/canceled records first, then design real HTTP Range-based Pause/Resume and partial-file recovery. Queue ordering and configurable concurrency should follow after transfer resumption is reliable. Debrid/hash availability remains the next discovery/availability feature after download lifecycle controls are stable.
+
+## Milestone 8C.2 Findings: Global Download Activity and Library Status Polish
+
+- Global activity:
+  - Active transfers now produce one compact, byte-weighted progress bar at the top of the Downloads page instead of a redundant Active count chip.
+  - The aggregate percentage uses total downloaded bytes divided by total expected bytes across all active transfers. It becomes indeterminate when any active response has no known total rather than displaying a misleading percentage.
+  - Expanding the bar shows every active file with title/episode context, individual progress, transferred size, combined speed/ETA context, action errors, and the existing real Cancel action.
+  - The activity bar remains available while browsing a focused movie/show detail page.
+- Poster library cleanup:
+  - Removed the explanatory page paragraph, media-type subtitle, and separate details chevron. The poster is the single entry point into title details.
+  - Increased spacing above the poster grid so hover elevation does not crowd the section description.
+  - Downloading movies show a circular progress treatment in the poster's top-right; completed movies show the direct Play control instead of a redundant Ready badge.
+  - Shows display a unique downloaded-episode count in the top-right. Attention remains a separate warning only when a record actually needs intervention.
+- Season browsing:
+  - Show details now separate records with a season selector and display one season at a time.
+  - Records without season metadata remain accessible under `Other episodes`.
+  - Episode badges count unique episodes rather than duplicate local versions of the same episode.
+- Deferred transfer controls:
+  - Cancel is available now because the backend can abort an active transfer safely.
+  - Retry should be the next small lifecycle feature for failed/canceled records.
+  - Real Pause/Resume requires byte-range requests, resumable partial-file state, validation of remote range support, and restart recovery; the current placeholder endpoints must continue returning `501` until that backend work is complete.
+  - Queue ordering, multi-file batch downloads, and a user-selectable concurrency limit (`1`, `2`, or more simultaneous transfers) follow the resumable-transfer work.
+  - Watched/continue state, debrid/hash availability, metadata backfill, media-file deletion, filesystem discovery, and automatic partial-file cleanup remain tracked and deferred.
+
+## Milestone 8C.1 Findings: Downloads Detail Polish
+
+- Rich title metadata:
+  - New download records now preserve the title logo, summary, runtime, release information, released date, and Stremio metadata links in addition to poster/background/episode artwork.
+  - The focused detail hero derives and displays year/release range, runtime, IMDb score, genres, cast, and directors from the same metadata used by the normal Stremio title page.
+  - Older persisted records remain valid but are not retroactively enriched; their detail pages omit metadata that was not present when they were created.
+- Interaction and layout:
+  - Clicking the poster surface or title enters the focused detail view, while the explicit poster Play button remains the movie quick-play action.
+  - Replaced the always-visible Titles/Active/Ready/Needs Attention dashboard with a compact contextual strip that appears only for active transfers or records needing attention.
+  - Added responsive content gutters and contained the detail hero so controls and text no longer sit directly against viewport edges.
+- File location:
+  - Added `POST /downloads/:id/open-location` and a detail-row `Open location` action.
+  - The backend resolves the path only from the stored record, selects an existing media file in Windows File Explorer, and otherwise opens its known parent folder.
+  - Arbitrary caller-supplied filesystem paths are not accepted.
+- Validation:
+  - Added File Explorer launcher tests plus rich metadata payload/grouping/persistence coverage.
+  - Full ESLint passes, all 92 Jest tests pass, backend syntax checks pass, and the production webpack build completes with only the existing size warnings.
+
+## Milestone 8C Findings: Streaming-Style Library Navigation
+
+- Library navigation:
+  - Movies and shows are now presented as poster media cards rather than visible download jobs.
+  - Removed inline card expansion/accordions. A separate focused title view prevents one show from creating an indefinitely tall mixed-title library page.
+  - Returning from the focused title view restores the previous library-grid scroll position.
+- Movie behavior:
+  - A movie card's primary poster/title action plays the newest completed local file immediately.
+  - The newest completed selection is deterministic and ignores newer active/failed records.
+  - A separate chevron opens the focused title view to choose another version or manage active/failed records; single-file movies no longer require an episode-style expansion interaction.
+  - Active or failed movies without a playable record open their focused detail view instead of offering a misleading Play action.
+- Show behavior:
+  - A show's primary Browse Episodes action and secondary chevron open a focused title view containing its downloaded episodes.
+  - Episode lists no longer expand inside the main poster grid.
+  - Episode rows prioritize thumbnail, episode title, season/episode number, file size, playable state, and a direct Play action.
+  - The future primary Continue/Play action should use watched/progress history to select the correct episode and resume point. Do not guess and label an arbitrary episode as Continue before that data exists.
+  - Until history integration is implemented, the show card uses the safe Browse Episodes label and does not guess a continuation target.
+- Card and detail presentation:
+  - Added a clear primary action overlay to posters and a visually separate chevron for entering title details.
+  - Long media and episode titles are clamped to the available width while preserving full text through labels/tooltips.
+  - Default record surfaces show thumbnail, title, season/episode, file size, progress/state, and primary actions.
+  - Addon name, stream name, local path, and timestamps now live behind a secondary `Download info` disclosure.
+  - Existing Play, Cancel, and Remove Record actions remain available, including the explicit notice that removing a record leaves the media file on disk.
+- Tests and validation:
+  - Added coverage for newest-completed playback selection, title-level Stremio links, and media-group playable-record presentation.
+  - ESLint, the complete Jest suite, and the production webpack build pass.
+- Future integration points:
+  - Watched/progress integration supplies Continue Watching target selection, resume time, progress bars, and next-episode behavior.
+  - Debrid/hash availability should decorate the stable poster/title/detail model instead of adding more information to raw download cards.
+  - The title view should be designed so movie versions, episode downloads, availability, and later file-management actions can coexist without returning to inline accordions.
+
+## Milestone 8B Findings: Media-First Downloads Library
+
+- Artwork data flow:
+  - Added optional `poster`, `background`, and `videoThumbnail` fields to the frontend download payload and backend record shape.
+  - New records preserve title and episode artwork through the existing persistent record store without a storage-version migration.
+  - Existing records remain compatible; missing artwork uses a branded fallback instead of breaking or hiding the record.
+- Media grouping:
+  - The global Downloads page now groups records by `type + metaId`, with a normalized title fallback for legacy records lacking an id.
+  - Each movie/show is represented once with a poster-led media card rather than being repeated across flat status sections.
+  - Groups are ordered by latest activity; series episodes are ordered by season and episode for predictable browsing.
+- Browsing and actions:
+  - Selecting a title expands its movie/episode downloads with landscape thumbnails, progress, status, errors, file information, and existing Play/Cancel/Remove controls.
+  - Active title groups start expanded so transfer progress remains visible.
+  - Cards expose aggregate Active, Ready, and Needs Attention counts and retain a link to the matching Stremio title or episode.
+  - Responsive layouts preserve the poster hierarchy and collapse detail rows cleanly on smaller screens.
+- Tests:
+  - Added payload coverage for optional artwork metadata.
+  - Added media grouping, aggregate-state, series ordering, legacy fallback, and non-mutation coverage.
+  - Extended persistence coverage to confirm artwork survives record-store round trips.
+- Deferred behavior:
+  - Existing persisted records are not retroactively backfilled from Stremio metadata; they use artwork fallbacks. Downloads created after this milestone carry artwork automatically.
+  - Debrid/hash availability, metadata backfill, open folder, pause/resume, watched integration, media-file deletion, and filesystem discovery remain deferred.
 
 ## Milestone 8A Findings: Global Downloads Library
 

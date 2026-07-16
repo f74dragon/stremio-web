@@ -100,6 +100,10 @@ const playDownload = async (id) => requestJson('/play', {
     }
 });
 
+const openDownloadLocation = async (id) => requestJson(`/downloads/${requireDownloadId(id, 'openDownloadLocation')}/open-location`, {
+    method: 'POST'
+});
+
 module.exports = {
     LOCAL_BACKEND_BASE_URL,
     requestJson,
@@ -111,5 +115,6 @@ module.exports = {
     resumeDownload,
     cancelDownload,
     deleteDownload,
-    playDownload
+    playDownload,
+    openDownloadLocation
 };
