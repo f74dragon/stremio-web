@@ -100,6 +100,7 @@ Restart behavior:
 - `POST /downloads` returns immediately with a queued record. The FIFO scheduler starts it when a concurrency slot is available.
 - Records update in memory and are persisted as the download moves through `queued`, `downloading`, `paused`, `completed`, `failed`, or `canceled`.
 - New downloads, retries, and resumes use the same queue. Retry and Resume enter at the back with a refreshed `queuedAt` timestamp.
+- `GET /downloads` and `GET /downloads/:id` decorate waiting records with live one-based `queuePosition` and `queueLength` values. These derived fields are never persisted.
 - Finishing, failing, pausing, or canceling an active transfer releases its scheduler slot for the next waiting job.
 - Duplicate prevention still applies before a new download starts.
 - Only `http` and `https` source URLs are accepted.

@@ -11,6 +11,37 @@ const sortDownloadRecordsNewestFirst = (records) => {
     return [...records].sort((left, right) => getTimestamp(right) - getTimestamp(left));
 };
 
+const getQueuePosition = (record) => {
+    const position = Number(record?.queuePosition);
+    return Number.isSafeInteger(position) && position >= 1 ? position : null;
+};
+
+const sortActiveDownloadRecords = (records) => {
+    const statusOrder = new Map([
+        ['downloading', 0],
+        ['queued', 1],
+        ['paused', 2]
+    ]);
+
+    return [...records].sort((left, right) => {
+        const leftStatusOrder = statusOrder.get(left?.status) ?? Number.MAX_SAFE_INTEGER;
+        const rightStatusOrder = statusOrder.get(right?.status) ?? Number.MAX_SAFE_INTEGER;
+        if (leftStatusOrder !== rightStatusOrder) {
+            return leftStatusOrder - rightStatusOrder;
+        }
+
+        if (left?.status === 'queued' && right?.status === 'queued') {
+            const leftPosition = getQueuePosition(left) ?? Number.MAX_SAFE_INTEGER;
+            const rightPosition = getQueuePosition(right) ?? Number.MAX_SAFE_INTEGER;
+            if (leftPosition !== rightPosition) {
+                return leftPosition - rightPosition;
+            }
+        }
+
+        return getTimestamp(right) - getTimestamp(left);
+    });
+};
+
 const getLatestCompletedRecord = (records) => {
     if (!Array.isArray(records)) {
         return null;
@@ -89,13 +120,14 @@ const groupSeriesRecordsBySeason = (records) => {
 
 const getDownloadActivitySummary = (records) => {
     const activeRecords = groupDownloadRecords(records).active;
-    const hasKnownTotals = activeRecords.length > 0 && activeRecords.every((record) => Number(record?.bytesTotal) > 0);
-    const bytesTotal = hasKnownTotals ? activeRecords.reduce((total, record) => total + Number(record.bytesTotal), 0) : null;
-    const bytesDownloaded = activeRecords.reduce((total, record) => {
+    const downloadingRecords = activeRecords.filter((record) => record?.status === 'downloading');
+    const hasKnownTotals = downloadingRecords.length > 0 && downloadingRecords.every((record) => Number(record?.bytesTotal) > 0);
+    const bytesTotal = hasKnownTotals ? downloadingRecords.reduce((total, record) => total + Number(record.bytesTotal), 0) : null;
+    const bytesDownloaded = downloadingRecords.reduce((total, record) => {
         const value = Number(record?.bytesDownloaded);
         return total + (Number.isFinite(value) && value > 0 ? value : 0);
     }, 0);
-    const speedBytesPerSecond = activeRecords.reduce((total, record) => {
+    const speedBytesPerSecond = downloadingRecords.reduce((total, record) => {
         const value = Number(record?.speedBytesPerSecond);
         return total + (Number.isFinite(value) && value > 0 ? value : 0);
     }, 0);
@@ -106,13 +138,15 @@ const getDownloadActivitySummary = (records) => {
     return {
         records: activeRecords,
         count: activeRecords.length,
+        downloadingCount: downloadingRecords.length,
+        queuedCount: activeRecords.filter((record) => record?.status === 'queued').length,
         pausedCount: activeRecords.filter((record) => record?.status === 'paused').length,
         bytesDownloaded,
         bytesTotal,
         speedBytesPerSecond,
         progress,
         etaSeconds,
-        indeterminate: activeRecords.length > 0 && bytesTotal === null
+        indeterminate: downloadingRecords.length > 0 && bytesTotal === null
     };
 };
 
@@ -205,7 +239,7 @@ const groupDownloadRecords = (records) => {
         }
     });
 
-    groups.active = sortDownloadRecordsNewestFirst(groups.active);
+    groups.active = sortActiveDownloadRecords(groups.active);
     groups.completed = sortDownloadRecordsNewestFirst(groups.completed);
     groups.attention = sortDownloadRecordsNewestFirst(groups.attention);
     return groups;
@@ -236,6 +270,8 @@ module.exports = {
     ACTIVE_DOWNLOAD_STATUSES,
     POLLING_DOWNLOAD_STATUSES,
     sortDownloadRecordsNewestFirst,
+    getQueuePosition,
+    sortActiveDownloadRecords,
     getLatestCompletedRecord,
     groupDownloadRecords,
     groupDownloadRecordsByMedia,

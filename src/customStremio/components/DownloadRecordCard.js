@@ -3,7 +3,7 @@ const PropTypes = require('prop-types');
 const classnames = require('classnames');
 const { useTranslation } = require('react-i18next');
 const { Button } = require('stremio/components');
-const { getDownloadDetailsHref } = require('../downloadRecordPresentation');
+const { getDownloadDetailsHref, getQueuePosition } = require('../downloadRecordPresentation');
 const styles = require('./DownloadRecordCard.less');
 
 const CANCELABLE_STATUSES = new Set(['queued', 'downloading', 'paused']);
@@ -73,6 +73,46 @@ const getRecordLabels = (record, variant, untitledLabel) => {
     };
 };
 
+const getQueueLabels = (record, t) => {
+    if (record?.status !== 'queued') {
+        return { status: record?.status || 'unknown', detail: null };
+    }
+
+    const position = getQueuePosition(record);
+    const queueLength = Number(record?.queueLength);
+    if (position === 1) {
+        return {
+            status: t('CUSTOM_DOWNLOADS_NEXT_IN_QUEUE', { defaultValue: 'Next in queue' }),
+            detail: Number.isSafeInteger(queueLength) && queueLength > 0 ?
+                t('CUSTOM_DOWNLOADS_QUEUE_POSITION_DETAIL', {
+                    defaultValue: 'Queue position {{position}} of {{count}}',
+                    position,
+                    count: queueLength
+                })
+                :
+                t('CUSTOM_DOWNLOADS_WAITING_FOR_SLOT', { defaultValue: 'Waiting for an available download slot' })
+        };
+    }
+    if (position !== null) {
+        return {
+            status: t('CUSTOM_DOWNLOADS_QUEUED_POSITION', { defaultValue: 'Queued #{{position}}', position }),
+            detail: Number.isSafeInteger(queueLength) && queueLength >= position ?
+                t('CUSTOM_DOWNLOADS_QUEUE_POSITION_DETAIL', {
+                    defaultValue: 'Queue position {{position}} of {{count}}',
+                    position,
+                    count: queueLength
+                })
+                :
+                t('CUSTOM_DOWNLOADS_QUEUE_POSITION', { defaultValue: 'Queue position #{{position}}', position })
+        };
+    }
+
+    return {
+        status: t('CUSTOM_DOWNLOADS_STARTING', { defaultValue: 'Starting...' }),
+        detail: t('CUSTOM_DOWNLOADS_WAITING_FOR_SCHEDULER', { defaultValue: 'Waiting for the download scheduler' })
+    };
+};
+
 const DownloadRecordCard = ({
     record,
     variant = 'compact',
@@ -93,6 +133,7 @@ const DownloadRecordCard = ({
     const detailsHref = variant === 'library' ? getDownloadDetailsHref(record) : null;
     const progress = formatProgress(record?.progress);
     const fileSize = formatBytes(record?.bytesTotal ?? record?.bytesDownloaded);
+    const queueLabels = getQueueLabels(record, t);
     const actionInProgress = typeof action === 'string';
     const canCancel = recordId && CANCELABLE_STATUSES.has(status);
     const canPause = recordId && PAUSABLE_STATUSES.has(status);
@@ -123,16 +164,18 @@ const DownloadRecordCard = ({
                     }
                     {labels.subtitle ? <div className={styles['record-subtitle']}>{labels.subtitle}</div> : null}
                 </div>
-                <div className={classnames(styles['record-status'], styles[`record-status-${status}`])}>{status}</div>
+                <div className={classnames(styles['record-status'], styles[`record-status-${status}`])}>{queueLabels.status}</div>
             </div>
             {
                 variant === 'library' ?
                     <div className={styles['record-essential-meta']}>
+                        {queueLabels.detail ? <span className={styles['queue-meta']}>{queueLabels.detail}</span> : null}
                         <span>{fileSize || t('CUSTOM_DOWNLOAD_SIZE_UNKNOWN', { defaultValue: 'Size unavailable' })}</span>
                         <span>{progress.label}</span>
                     </div>
                     :
                     <div className={styles['record-meta']}>
+                        {queueLabels.detail ? <span className={styles['queue-meta']}>{queueLabels.detail}</span> : null}
                         <span>{record?.addonName || t('CUSTOM_DOWNLOAD_UNKNOWN_ADDON', { defaultValue: 'Unknown addon' })}</span>
                         <span>{record?.streamName || t('CUSTOM_DOWNLOAD_UNKNOWN_STREAM', { defaultValue: 'Unknown stream' })}</span>
                         <span>
@@ -154,6 +197,7 @@ const DownloadRecordCard = ({
                         <div className={styles['download-info-content']}>
                             <div><span>{t('CUSTOM_DOWNLOAD_ADDON_LABEL', { defaultValue: 'Addon' })}</span><strong>{record?.addonName || t('CUSTOM_DOWNLOAD_UNKNOWN_ADDON', { defaultValue: 'Unknown addon' })}</strong></div>
                             <div><span>{t('CUSTOM_DOWNLOAD_STREAM_LABEL', { defaultValue: 'Stream' })}</span><strong>{record?.streamName || t('CUSTOM_DOWNLOAD_UNKNOWN_STREAM', { defaultValue: 'Unknown stream' })}</strong></div>
+                            {queueLabels.detail ? <div><span>{t('CUSTOM_DOWNLOAD_QUEUE_LABEL', { defaultValue: 'Queue' })}</span><strong>{queueLabels.detail}</strong></div> : null}
                             {record?.createdAt ? <div><span>{t('CUSTOM_DOWNLOAD_CREATED_LABEL', { defaultValue: 'Added' })}</span><strong>{formatCreatedAt(record.createdAt)}</strong></div> : null}
                             {record?.localPath ? <div className={styles['record-path']} title={record.localPath}><span>{t('CUSTOM_DOWNLOAD_PATH_LABEL', { defaultValue: 'File' })}</span><strong>{record.localPath}</strong></div> : null}
                         </div>

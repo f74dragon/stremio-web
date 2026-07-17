@@ -206,6 +206,32 @@ const enqueueDownload = (record, options) => {
     return downloadScheduler.enqueue(record.id, () => runScheduledDownload(record.id, scheduledOptions));
 };
 
+const createQueueMetadata = () => {
+    const queuedIds = downloadScheduler.getSnapshot().queuedIds;
+    return {
+        queueLength: queuedIds.length,
+        positions: new Map(queuedIds.map((id, index) => [id, index + 1]))
+    };
+};
+
+const getDownloadRecordResponse = (record, queueMetadata = createQueueMetadata()) => {
+    if (!record || record.status !== 'queued') {
+        return record;
+    }
+
+    const queuePosition = queueMetadata.positions.get(record.id);
+    return {
+        ...record,
+        queuePosition: Number.isSafeInteger(queuePosition) ? queuePosition : null,
+        queueLength: queueMetadata.queueLength
+    };
+};
+
+const getDownloadRecordsResponse = (records) => {
+    const queueMetadata = createQueueMetadata();
+    return records.map((record) => getDownloadRecordResponse(record, queueMetadata));
+};
+
 const getBackendSettingsResponse = () => ({
     downloads: {
         maxConcurrentDownloads: backendSettings.downloads.maxConcurrentDownloads,
@@ -299,7 +325,7 @@ app.post('/downloads', async (request, response) => {
     const duplicateRecord = findActiveDuplicateDownload(payload, sourceUrl);
     if (duplicateRecord) {
         response.status(200).json({
-            ...duplicateRecord,
+            ...getDownloadRecordResponse(duplicateRecord),
             duplicate: true
         });
         return;
@@ -321,7 +347,7 @@ app.post('/downloads', async (request, response) => {
 
     enqueueDownload(record);
     response.status(201).json({
-        ...record,
+        ...getDownloadRecordResponse(downloads.get(record.id) || record),
         duplicate: false
     });
 });
@@ -340,7 +366,7 @@ app.get('/downloads', (request, response) => {
         return true;
     });
 
-    response.json({ items });
+    response.json({ items: getDownloadRecordsResponse(items) });
 });
 
 app.get('/downloads/:id', (request, response) => {
@@ -349,7 +375,7 @@ app.get('/downloads/:id', (request, response) => {
         return;
     }
 
-    response.json(record);
+    response.json(getDownloadRecordResponse(record));
 });
 
 app.post('/downloads/:id/pause', async (request, response) => {
@@ -458,7 +484,7 @@ app.post('/downloads/:id/resume', async (request, response) => {
     }
 
     enqueueDownload(resumePreparation.record, { resumeOffset: resumePreparation.resumeOffset });
-    response.status(202).json(resumePreparation.record);
+    response.status(202).json(getDownloadRecordResponse(downloads.get(record.id) || resumePreparation.record));
 });
 
 app.post('/downloads/:id/retry', async (request, response) => {
@@ -511,7 +537,7 @@ app.post('/downloads/:id/retry', async (request, response) => {
     }
 
     enqueueDownload(retriedRecord);
-    response.status(202).json(retriedRecord);
+    response.status(202).json(getDownloadRecordResponse(downloads.get(record.id) || retriedRecord));
 });
 
 app.post('/downloads/:id/cancel', async (request, response) => {

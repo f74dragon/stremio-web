@@ -59,6 +59,8 @@ The backend will generate and maintain these backend-only fields later:
 - `speedBytesPerSecond`
 - `etaSeconds`
 - `queuedAt`
+- `queuePosition` (runtime-only for `queued` records; `1` is next to start)
+- `queueLength` (runtime-only total waiting count)
 - `createdAt`
 - `updatedAt`
 - `completedAt`
@@ -111,6 +113,8 @@ Example combined download record shape:
   "speedBytesPerSecond": 0,
   "etaSeconds": null,
   "queuedAt": "2026-05-23T12:00:00.000Z",
+  "queuePosition": 1,
+  "queueLength": 3,
   "createdAt": "2026-05-23T12:00:00.000Z",
   "updatedAt": "2026-05-23T12:00:00.000Z",
   "completedAt": null,
@@ -245,11 +249,20 @@ Response shape:
     {
       "id": "dl_0001",
       "metaId": "tt1234567",
-      "status": "downloading"
+      "status": "queued",
+      "queuePosition": 1,
+      "queueLength": 3
     }
   ]
 }
 ```
+
+Queue metadata behavior:
+- `queuePosition` is one-based among waiting FIFO records; position `1` is the next waiting record that will receive a free slot.
+- `queueLength` is the current total number of records waiting in the scheduler.
+- The fields are derived from the live scheduler for API responses and are not persisted in `download-records.json`.
+- Positions update automatically after dispatch, pause, cancel, retry, resume, deletion, concurrency changes, and restart recovery.
+- A record can briefly report `status: "queued"` with `queuePosition: null` while it is moving from the waiting queue into active startup. Frontends should present this as Starting rather than a numbered position.
 
 ### 4. `GET /downloads/:id`
 

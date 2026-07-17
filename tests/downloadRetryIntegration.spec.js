@@ -393,6 +393,17 @@ describe('download lifecycle API integration', () => {
         });
         expect(canceledWaitingResponse.body.status).toBe('queued');
 
+        const queuedList = await requestJson(backendPort, '/downloads');
+        const queuedItems = queuedList.body.items.filter((record) => record.status === 'queued');
+        expect(queuedItems).toEqual(expect.arrayContaining([
+            expect.objectContaining({ id: secondResponse.body.id, queuePosition: 1, queueLength: 2 }),
+            expect.objectContaining({ id: canceledWaitingResponse.body.id, queuePosition: 2, queueLength: 2 })
+        ]));
+        expect((await requestJson(backendPort, `/downloads/${secondResponse.body.id}`)).body).toMatchObject({
+            queuePosition: 1,
+            queueLength: 2
+        });
+
         const healthWhileQueued = await requestJson(backendPort, '/health');
         expect(healthWhileQueued.body.downloads).toEqual({ maxConcurrent: 1, active: 1, queued: 2 });
         expect(sourceRequests.some((request) => request.path === '/queue-second.mp4')).toBe(false);
@@ -405,6 +416,10 @@ describe('download lifecycle API integration', () => {
         );
         expect(canceledWaiting.body.status).toBe('canceled');
         expect((await requestJson(backendPort, '/health')).body.downloads).toEqual({ maxConcurrent: 1, active: 1, queued: 1 });
+        expect((await requestJson(backendPort, `/downloads/${secondResponse.body.id}`)).body).toMatchObject({
+            queuePosition: 1,
+            queueLength: 1
+        });
 
         const pausedFirst = await requestJson(backendPort, `/downloads/${firstResponse.body.id}/pause`, { method: 'POST' });
         expect(pausedFirst.body.status).toBe('paused');
@@ -415,7 +430,7 @@ describe('download lifecycle API integration', () => {
         });
 
         const resumedFirst = await requestJson(backendPort, `/downloads/${firstResponse.body.id}/resume`, { method: 'POST' });
-        expect(resumedFirst.body.status).toBe('queued');
+        expect(resumedFirst.body).toMatchObject({ status: 'queued', queuePosition: 1, queueLength: 1 });
         expect((await requestJson(backendPort, '/health')).body.downloads).toEqual({ maxConcurrent: 1, active: 1, queued: 1 });
 
         const completedSecond = await waitFor(async () => {

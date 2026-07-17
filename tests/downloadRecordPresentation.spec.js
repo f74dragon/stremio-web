@@ -2,6 +2,8 @@
 
 const {
     sortDownloadRecordsNewestFirst,
+    getQueuePosition,
+    sortActiveDownloadRecords,
     getLatestCompletedRecord,
     groupDownloadRecords,
     groupDownloadRecordsByMedia,
@@ -37,6 +39,25 @@ describe('downloadRecordPresentation', () => {
 
         expect(sortDownloadRecordsNewestFirst(records).map(({ id }) => id)).toEqual(['newer', 'older']);
         expect(records.map(({ id }) => id)).toEqual(['older', 'newer']);
+    });
+
+    test('orders active transfers before FIFO queue positions and paused work', () => {
+        const records = [
+            { id: 'paused', status: 'paused', updatedAt: '2026-07-17T12:05:00.000Z' },
+            { id: 'queued-second', status: 'queued', queuePosition: 2, updatedAt: '2026-07-17T12:04:00.000Z' },
+            { id: 'downloading', status: 'downloading', updatedAt: '2026-07-17T12:01:00.000Z' },
+            { id: 'queued-first', status: 'queued', queuePosition: 1, updatedAt: '2026-07-17T12:03:00.000Z' }
+        ];
+
+        expect(sortActiveDownloadRecords(records).map(({ id }) => id)).toEqual([
+            'downloading',
+            'queued-first',
+            'queued-second',
+            'paused'
+        ]);
+        expect(getQueuePosition(records[1])).toBe(2);
+        expect(getQueuePosition({ queuePosition: 0 })).toBe(null);
+        expect(records.map(({ id }) => id)).toEqual(['paused', 'queued-second', 'downloading', 'queued-first']);
     });
 
     test('selects the newest completed record for direct movie playback', () => {
@@ -188,6 +209,9 @@ describe('downloadRecordPresentation', () => {
 
         expect(summary).toMatchObject({
             count: 2,
+            downloadingCount: 2,
+            queuedCount: 0,
+            pausedCount: 0,
             bytesDownloaded: 300,
             bytesTotal: 1000,
             speedBytesPerSecond: 30,
@@ -198,12 +222,34 @@ describe('downloadRecordPresentation', () => {
         expect(summary.records.map(({ id }) => id)).toEqual(['small', 'large']);
     });
 
-    test('uses an indeterminate aggregate when any active transfer has no known total', () => {
+    test('calculates transfer progress independently from queued work', () => {
         expect(getDownloadActivitySummary([
             { id: 'known', status: 'downloading', bytesDownloaded: 50, bytesTotal: 100 },
-            { id: 'unknown', status: 'queued', bytesDownloaded: 0, bytesTotal: null }
+            { id: 'unknown', status: 'queued', queuePosition: 1, bytesDownloaded: 0, bytesTotal: null }
         ])).toMatchObject({
             count: 2,
+            downloadingCount: 1,
+            queuedCount: 1,
+            bytesTotal: 100,
+            progress: 50,
+            indeterminate: false,
+            records: [
+                expect.objectContaining({ id: 'known' }),
+                expect.objectContaining({ id: 'unknown' })
+            ]
+        });
+    });
+
+    test('keeps an unknown-size active transfer indeterminate without counting paused bytes', () => {
+        expect(getDownloadActivitySummary([
+            { id: 'unknown', status: 'downloading', bytesDownloaded: 25, bytesTotal: null },
+            { id: 'paused', status: 'paused', bytesDownloaded: 500, bytesTotal: 1000 }
+        ])).toMatchObject({
+            count: 2,
+            downloadingCount: 1,
+            queuedCount: 0,
+            pausedCount: 1,
+            bytesDownloaded: 25,
             bytesTotal: null,
             progress: null,
             indeterminate: true

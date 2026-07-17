@@ -4,7 +4,7 @@ const classnames = require('classnames');
 const { useTranslation } = require('react-i18next');
 const { default: Icon } = require('@stremio/stremio-icons/react');
 const { Button, Image } = require('stremio/components');
-const { getDownloadActivitySummary } = require('../downloadRecordPresentation');
+const { getDownloadActivitySummary, getQueuePosition } = require('../downloadRecordPresentation');
 const styles = require('./DownloadActivityPanel.less');
 
 const formatBytes = (value) => {
@@ -68,6 +68,25 @@ const getRecordProgress = (record) => {
     return Number.isFinite(value) ? Math.min(100, Math.max(0, value)) : 0;
 };
 
+const getQueueLabel = (record, t) => {
+    const position = getQueuePosition(record);
+    const queueLength = Number(record?.queueLength);
+    if (position === 1) {
+        return t('CUSTOM_DOWNLOADS_NEXT_IN_QUEUE', { defaultValue: 'Next in queue' });
+    }
+    if (position !== null && Number.isSafeInteger(queueLength) && queueLength >= position) {
+        return t('CUSTOM_DOWNLOADS_QUEUE_POSITION_OF_TOTAL', {
+            defaultValue: '#{{position}} of {{count}} in queue',
+            position,
+            count: queueLength
+        });
+    }
+    if (position !== null) {
+        return t('CUSTOM_DOWNLOADS_QUEUE_POSITION', { defaultValue: 'Queue position #{{position}}', position });
+    }
+    return t('CUSTOM_DOWNLOADS_STARTING', { defaultValue: 'Starting...' });
+};
+
 const DownloadActivityPanel = ({ records, actionStates, actionErrors, onPause, onResume, onCancel }) => {
     const { t } = useTranslation();
     const [expanded, setExpanded] = React.useState(false);
@@ -78,24 +97,45 @@ const DownloadActivityPanel = ({ records, actionStates, actionErrors, onPause, o
     }
 
     const totalProgress = summary.progress === null ? null : Math.round(summary.progress);
-    const transferredLabel = summary.bytesTotal === null ?
+    const transferredLabel = summary.downloadingCount === 0 ? null : (summary.bytesTotal === null ?
         formatBytes(summary.bytesDownloaded)
         :
-        `${formatBytes(summary.bytesDownloaded)} / ${formatBytes(summary.bytesTotal)}`;
+        `${formatBytes(summary.bytesDownloaded)} / ${formatBytes(summary.bytesTotal)}`);
     const speedLabel = summary.speedBytesPerSecond > 0 ? `${formatBytes(summary.speedBytesPerSecond)}/s` : null;
     const etaLabel = formatDuration(summary.etaSeconds);
-    const summaryMetrics = [transferredLabel, speedLabel, etaLabel ? `${etaLabel} left` : null].filter(Boolean);
-    const allPaused = summary.pausedCount === summary.count;
-    const activityLabel = allPaused ?
-        t('CUSTOM_DOWNLOADS_PAUSED_ACTIVITY', {
-            defaultValue: summary.count === 1 ? '{{count}} paused download' : '{{count}} paused downloads',
-            count: summary.count
+    const queuedLabel = summary.queuedCount > 0 ?
+        t('CUSTOM_DOWNLOADS_QUEUED_COUNT', {
+            defaultValue: summary.queuedCount === 1 ? '{{count}} queued' : '{{count}} queued',
+            count: summary.queuedCount
         })
         :
-        t('CUSTOM_DOWNLOADS_GLOBAL_ACTIVITY', {
-            defaultValue: summary.count === 1 ? '{{count}} active download' : '{{count}} active downloads',
-            count: summary.count
-        });
+        null;
+    const pausedLabel = summary.pausedCount > 0 ?
+        t('CUSTOM_DOWNLOADS_PAUSED_COUNT', { defaultValue: '{{count}} paused', count: summary.pausedCount })
+        :
+        null;
+    const summaryMetrics = [transferredLabel, speedLabel, etaLabel ? `${etaLabel} left` : null, queuedLabel, pausedLabel].filter(Boolean);
+    const activityLabel = summary.downloadingCount > 0 ?
+        t('CUSTOM_DOWNLOADS_TRANSFERRING_ACTIVITY', {
+            defaultValue: summary.downloadingCount === 1 ? '{{count}} downloading' : '{{count}} downloading',
+            count: summary.downloadingCount
+        })
+        :
+        summary.queuedCount > 0 ?
+            t('CUSTOM_DOWNLOADS_QUEUED_ACTIVITY', {
+                defaultValue: summary.queuedCount === 1 ? '{{count}} queued download' : '{{count}} queued downloads',
+                count: summary.queuedCount
+            })
+            :
+            t('CUSTOM_DOWNLOADS_PAUSED_ACTIVITY', {
+                defaultValue: summary.count === 1 ? '{{count}} paused download' : '{{count}} paused downloads',
+                count: summary.count
+            });
+    const progressLabel = summary.downloadingCount > 0 ?
+        (totalProgress === null ? t('CUSTOM_DOWNLOADS_PREPARING', { defaultValue: 'Preparing' }) : `${totalProgress}%`)
+        :
+        summary.queuedCount > 0 ? t('CUSTOM_DOWNLOADS_WAITING', { defaultValue: 'Waiting' }) : t('CUSTOM_DOWNLOADS_PAUSED', { defaultValue: 'Paused' });
+    const waitingIndeterminate = summary.downloadingCount === 0 && summary.queuedCount > 0;
 
     return (
         <section className={styles['activity-panel']} aria-label={activityLabel}>
@@ -111,14 +151,14 @@ const DownloadActivityPanel = ({ records, actionStates, actionErrors, onPause, o
                     {summaryMetrics.length > 0 ? <small>{summaryMetrics.join(' · ')}</small> : null}
                 </span>
                 <span className={styles['activity-progress-label']}>
-                    {totalProgress === null ? t('CUSTOM_DOWNLOADS_PREPARING', { defaultValue: 'Preparing' }) : `${totalProgress}%`}
+                    {progressLabel}
                 </span>
                 <span className={classnames(styles['activity-chevron'], expanded && styles['activity-chevron-expanded'])} aria-hidden={'true'} />
             </button>
             <div className={styles['total-progress-track']} aria-hidden={'true'}>
                 <div
-                    className={classnames(styles['total-progress-value'], summary.indeterminate && styles['total-progress-value-indeterminate'])}
-                    style={summary.indeterminate ? undefined : { width: `${totalProgress}%` }}
+                    className={classnames(styles['total-progress-value'], (summary.indeterminate || waitingIndeterminate) && styles['total-progress-value-indeterminate'])}
+                    style={summary.indeterminate || waitingIndeterminate ? undefined : { width: `${totalProgress || 0}%` }}
                 />
             </div>
             {
@@ -132,13 +172,16 @@ const DownloadActivityPanel = ({ records, actionStates, actionErrors, onPause, o
                             const action = recordId ? actionStates[recordId] : null;
                             const actionInProgress = typeof action === 'string';
                             const isPaused = record?.status === 'paused';
+                            const isQueued = record?.status === 'queued';
+                            const queueLabel = isQueued ? getQueueLabel(record, t) : null;
                             const recordSpeed = Number(record?.speedBytesPerSecond) > 0 ? `${formatBytes(record.speedBytesPerSecond)}/s` : null;
                             const recordEta = formatDuration(record?.etaSeconds);
                             const recordBytes = Number(record?.bytesTotal) > 0 ?
                                 `${formatBytes(record.bytesDownloaded || 0)} / ${formatBytes(record.bytesTotal)}`
                                 :
                                 formatBytes(record?.bytesDownloaded);
-                            const recordMetrics = [recordBytes, recordSpeed, recordEta ? `${recordEta} left` : null].filter(Boolean);
+                            const waitingLabel = isQueued ? t('CUSTOM_DOWNLOADS_WAITING_FOR_SLOT', { defaultValue: 'Waiting for an available download slot' }) : null;
+                            const recordMetrics = [waitingLabel, recordBytes, recordSpeed, recordEta ? `${recordEta} left` : null].filter(Boolean);
 
                             return (
                                 <article className={styles['activity-record']} key={recordId || `${record?.sourceUrl}-${record?.createdAt}`} aria-busy={actionInProgress}>
@@ -151,7 +194,9 @@ const DownloadActivityPanel = ({ records, actionStates, actionErrors, onPause, o
                                                 <strong title={labels.title}>{labels.title}</strong>
                                                 {labels.subtitle ? <span title={labels.subtitle}>{labels.subtitle}</span> : null}
                                             </div>
-                                            <span className={styles['record-percent']}>{Math.round(progress)}%</span>
+                                            <span className={classnames(styles['record-percent'], isQueued && styles['record-percent-queued'])}>
+                                                {isQueued ? queueLabel : `${Math.round(progress)}%`}
+                                            </span>
                                         </div>
                                         <div className={styles['record-progress-track']} aria-hidden={'true'}>
                                             <div className={styles['record-progress-value']} style={{ width: `${progress}%` }} />

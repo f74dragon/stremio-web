@@ -78,7 +78,24 @@ Notes:
 
 ## Next Recommended Step
 
-Add clear queue-position treatment for waiting downloads in the global activity panel and download detail rows. Manual queue reordering and multi-title/episode batch selection can follow that presentation foundation. Debrid/hash availability remains the next discovery/availability feature after download scheduling UX is stable.
+Add manual queue reordering controls for waiting records while preserving FIFO as the default. Multi-title/episode batch selection can follow that queue-management foundation. Debrid/hash availability remains the next discovery/availability feature after download scheduling UX is stable.
+
+## Milestone 6G Findings: Visible Download Queue Positions
+
+- Live backend queue metadata:
+  - `GET /downloads`, `GET /downloads/:id`, new-download responses, Retry, and Resume now decorate waiting records with a one-based `queuePosition` and current `queueLength`.
+  - Position `1` means the record is next to receive a free scheduler slot. Positions are derived from the live FIFO scheduler and are never written into persistent download records.
+  - The API safely represents the brief queued-to-active handoff as a queued record with no numbered position, allowing the frontend to display Starting instead of stale queue information.
+- Downloads experience:
+  - The global activity panel distinguishes actively downloading, queued, and paused work instead of grouping every lifecycle state under a generic Active label.
+  - Waiting rows display Next in queue or their numbered position, remain ordered by the real FIFO scheduler, and retain Pause and Cancel actions.
+  - Title download panels and focused movie/show detail rows use the same queue labels and expose the full `position of total` context.
+  - Aggregate transfer percentage, speed, and ETA now use only genuinely downloading records, so queued and paused bytes do not distort active progress.
+- Validation and remaining work:
+  - Added frontend presentation coverage for active/queued/paused ordering, queue position validation, and transfer-only aggregate progress.
+  - Extended backend integration coverage for initial positions, position compaction after cancellation, and Resume entering at the back of the queue.
+  - Backend syntax checks pass, all 131 Jest tests pass, ESLint passes, and the production webpack build completes with only the existing bundle-size warnings.
+  - Manual reordering, batch downloads, debrid/hash availability, watched progress, filesystem discovery, metadata backfill, and media-file deletion remain separate passes.
 
 ## Milestone 6F Findings: Download-Manager Concurrency Setting
 
