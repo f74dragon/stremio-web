@@ -404,6 +404,30 @@ describe('download lifecycle API integration', () => {
             queueLength: 2
         });
 
+        const rejectActiveReorder = await requestJson(backendPort, `/downloads/${firstResponse.body.id}/queue`, {
+            method: 'PATCH',
+            body: { position: 1 }
+        });
+        expect(rejectActiveReorder.statusCode).toBe(409);
+        const rejectInvalidPosition = await requestJson(backendPort, `/downloads/${secondResponse.body.id}/queue`, {
+            method: 'PATCH',
+            body: { position: 3 }
+        });
+        expect(rejectInvalidPosition.statusCode).toBe(400);
+
+        const movedToTop = await requestJson(backendPort, `/downloads/${canceledWaitingResponse.body.id}/queue`, {
+            method: 'PATCH',
+            body: { position: 1 }
+        });
+        expect(movedToTop.body).toMatchObject({ queuePosition: 1, queueLength: 2 });
+        expect((await requestJson(backendPort, `/downloads/${secondResponse.body.id}`)).body.queuePosition).toBe(2);
+
+        const movedBack = await requestJson(backendPort, `/downloads/${canceledWaitingResponse.body.id}/queue`, {
+            method: 'PATCH',
+            body: { position: 2 }
+        });
+        expect(movedBack.body).toMatchObject({ queuePosition: 2, queueLength: 2 });
+
         const healthWhileQueued = await requestJson(backendPort, '/health');
         expect(healthWhileQueued.body.downloads).toEqual({ maxConcurrent: 1, active: 1, queued: 2 });
         expect(sourceRequests.some((request) => request.path === '/queue-second.mp4')).toBe(false);
@@ -485,6 +509,33 @@ describe('download lifecycle API integration', () => {
         expect(waitingResponse.body.status).toBe('queued');
         expect(sourceRequests.some((request) => request.path === '/restart-waiting.mp4')).toBe(false);
 
+        const secondWaitingResponse = await requestJson(backendPort, '/downloads', {
+            method: 'POST',
+            body: {
+                metaId: 'tt-restart-second',
+                type: 'movie',
+                parentTitle: 'Restart Second Movie',
+                downloadUrl: `http://127.0.0.1:${sourcePort}/restart-second.mp4`
+            }
+        });
+        const priorityWaitingResponse = await requestJson(backendPort, '/downloads', {
+            method: 'POST',
+            body: {
+                metaId: 'tt-restart-priority',
+                type: 'movie',
+                parentTitle: 'Restart Priority Movie',
+                downloadUrl: `http://127.0.0.1:${sourcePort}/restart-priority.mp4`
+            }
+        });
+        expect(secondWaitingResponse.body).toMatchObject({ status: 'queued', queuePosition: 2, queueLength: 2 });
+        expect(priorityWaitingResponse.body).toMatchObject({ status: 'queued', queuePosition: 3, queueLength: 3 });
+
+        const priorityMoved = await requestJson(backendPort, `/downloads/${priorityWaitingResponse.body.id}/queue`, {
+            method: 'PATCH',
+            body: { position: 1 }
+        });
+        expect(priorityMoved.body).toMatchObject({ queuePosition: 1, queueLength: 3 });
+
         await stopChildProcess(backendProcess);
         backendProcess = null;
         await startBackend();
@@ -499,8 +550,24 @@ describe('download lifecycle API integration', () => {
             const response = await requestJson(backendPort, `/downloads/${waitingResponse.body.id}`);
             return response.body?.status === 'completed' ? response.body : null;
         });
+        const completedSecondWaiting = await waitFor(async () => {
+            const response = await requestJson(backendPort, `/downloads/${secondWaitingResponse.body.id}`);
+            return response.body?.status === 'completed' ? response.body : null;
+        });
+        const completedPriorityWaiting = await waitFor(async () => {
+            const response = await requestJson(backendPort, `/downloads/${priorityWaitingResponse.body.id}`);
+            return response.body?.status === 'completed' ? response.body : null;
+        });
         expect(fs.readFileSync(completedWaiting.localPath)).toEqual(sourceMedia);
+        expect(fs.readFileSync(completedSecondWaiting.localPath)).toEqual(sourceMedia);
+        expect(fs.readFileSync(completedPriorityWaiting.localPath)).toEqual(sourceMedia);
         expect(sourceRequests.filter((request) => request.path === '/restart-waiting.mp4')).toHaveLength(1);
+        expect(sourceRequests.map((request) => request.path)).toEqual([
+            '/restart-active.mp4',
+            '/restart-priority.mp4',
+            '/restart-waiting.mp4',
+            '/restart-second.mp4'
+        ]);
     });
 
     test('updates concurrency at runtime and preserves the in-app setting across restart', async () => {

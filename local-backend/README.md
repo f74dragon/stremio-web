@@ -101,6 +101,7 @@ Restart behavior:
 - Records update in memory and are persisted as the download moves through `queued`, `downloading`, `paused`, `completed`, `failed`, or `canceled`.
 - New downloads, retries, and resumes use the same queue. Retry and Resume enter at the back with a refreshed `queuedAt` timestamp.
 - `GET /downloads` and `GET /downloads/:id` decorate waiting records with live one-based `queuePosition` and `queueLength` values. These derived fields are never persisted.
+- `PATCH /downloads/:id/queue` with `{ "position": 1 }` moves a waiting record and persists the resulting order across backend restarts. Active and non-queued records cannot be reordered.
 - Finishing, failing, pausing, or canceling an active transfer releases its scheduler slot for the next waiting job.
 - Duplicate prevention still applies before a new download starts.
 - Only `http` and `https` source URLs are accepted.
@@ -279,7 +280,7 @@ Invoke-RestMethod -Uri 'http://127.0.0.1:5577/downloads' -Method Post -ContentTy
 - New records preserve optional title posters/backgrounds, logos, summaries, runtime/release information, metadata links, and episode thumbnails for the media-first Downloads Library. Older records without rich metadata remain valid and use frontend fallbacks.
 - `POST /downloads/:id/open-location` opens only locations derived from stored records; it does not accept caller-supplied paths.
 - The first restart after upgrading from the older in-memory backend cannot recover records that were never written by that older process; their media files remain on disk.
-- Waiting queued work is restored automatically in FIFO order; interrupted active transfers are restored as `paused` and can be resumed explicitly.
+- Waiting queued work is restored in saved manual order when present and FIFO order otherwise; interrupted active transfers are restored as `paused` and can be resumed explicitly.
 - Real file downloading is implemented only for direct `http`/`https` URLs in this milestone.
 - Pause/resume requires the remote direct-file source to honor HTTP byte ranges. Unsupported sources fail safely and can still use Retry from byte zero.
 - Completed records can be opened through `POST /play` when `CUSTOM_STREMIO_PLAYER_PATH` points to a valid player executable.

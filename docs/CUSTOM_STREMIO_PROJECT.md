@@ -78,7 +78,25 @@ Notes:
 
 ## Next Recommended Step
 
-Add manual queue reordering controls for waiting records while preserving FIFO as the default. Multi-title/episode batch selection can follow that queue-management foundation. Debrid/hash availability remains the next discovery/availability feature after download scheduling UX is stable.
+Add multi-title/episode batch download selection on top of the completed scheduler and queue-management foundation. Debrid/hash availability remains the next discovery/availability feature after batch download UX is stable.
+
+## Milestone 6H Findings: Manual Download Queue Reordering
+
+- Persistent queue ordering:
+  - Added a scheduler move operation for exact one-based positions plus complete-order restoration for persistence rollback.
+  - The backend stores `queueOrder` only when the user manually changes the waiting order. Untouched and newly appended records continue using `queuedAt` FIFO.
+  - Retry and Resume clear any previous manual position and enter at the back. When a queued transfer starts, its obsolete stored order is removed.
+  - Restart recovery prioritizes saved manual order, preserves it for resumable partial records, and uses timestamp ordering as the legacy/default fallback.
+- Reorder API and Downloads experience:
+  - Added `PATCH /downloads/:id/queue` with a validated one-based `position`; only genuinely waiting queued records are accepted.
+  - Expanded global activity rows now expose compact Top, Up, and Down controls where each action is valid.
+  - Reorder actions use the existing per-record action lock, inline error treatment, silent refresh, and live queue-position response model.
+  - Active, paused, completed, failed, and canceled records remain non-reorderable. A single waiting record shows no redundant movement controls.
+- Validation and remaining work:
+  - Added scheduler coverage for movement, bounds, dispatch order, complete-order restoration, and persisted manual-order sorting.
+  - Added client request validation and lifecycle integration coverage for rejected active/out-of-range moves, live position changes, actual dispatch order, and persistence across backend restart.
+  - Backend syntax checks pass, all 135 Jest tests pass, ESLint passes, and the production webpack build completes with only the existing bundle-size warnings.
+  - Multi-title/episode batch downloads, debrid/hash availability, watched progress, filesystem discovery, metadata backfill, and media-file deletion remain separate passes.
 
 ## Milestone 6G Findings: Visible Download Queue Positions
 

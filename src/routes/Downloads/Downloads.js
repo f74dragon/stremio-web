@@ -26,6 +26,7 @@ const Downloads = () => {
         actionStates,
         actionErrors,
         refresh,
+        moveInQueue,
         pause,
         resume,
         cancel,
@@ -79,6 +80,7 @@ const Downloads = () => {
                                 records={items}
                                 actionStates={actionStates}
                                 actionErrors={actionErrors}
+                                onReorder={moveInQueue}
                                 onPause={pause}
                                 onResume={resume}
                                 onCancel={cancel}
@@ -137,6 +139,7 @@ const Downloads = () => {
                                 records={items}
                                 actionStates={actionStates}
                                 actionErrors={actionErrors}
+                                onReorder={moveInQueue}
                                 onPause={pause}
                                 onResume={resume}
                                 onCancel={cancel}

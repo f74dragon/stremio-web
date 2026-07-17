@@ -94,6 +94,7 @@ const createDownloadRecord = (payload) => {
         speedBytesPerSecond: 0,
         etaSeconds: null,
         queuedAt: now,
+        queueOrder: null,
         createdAt: now,
         updatedAt: now,
         completedAt: null,
@@ -175,9 +176,14 @@ const getDownloadRecordOrSend404 = (id, response) => {
 };
 
 const runScheduledDownload = async (recordId, options) => {
-    const record = downloads.get(recordId);
+    let record = downloads.get(recordId);
     if (!record || record.status !== 'queued') {
         return;
+    }
+
+    if (record.queueOrder !== null && record.queueOrder !== undefined) {
+        record = { ...record, queueOrder: null };
+        downloads.set(record.id, record);
     }
 
     try {
@@ -230,6 +236,26 @@ const getDownloadRecordResponse = (record, queueMetadata = createQueueMetadata()
 const getDownloadRecordsResponse = (records) => {
     const queueMetadata = createQueueMetadata();
     return records.map((record) => getDownloadRecordResponse(record, queueMetadata));
+};
+
+const applyPersistedQueueOrder = (queuedIds) => {
+    const previousRecords = new Map();
+    queuedIds.forEach((id, index) => {
+        const record = downloads.get(id);
+        if (record?.status === 'queued') {
+            previousRecords.set(id, record);
+            downloads.set(id, { ...record, queueOrder: index + 1 });
+        }
+    });
+    return previousRecords;
+};
+
+const restoreDownloadRecords = (recordsById) => {
+    recordsById.forEach((record, id) => {
+        if (downloads.has(id)) {
+            downloads.set(id, record);
+        }
+    });
 };
 
 const getBackendSettingsResponse = () => ({
@@ -376,6 +402,66 @@ app.get('/downloads/:id', (request, response) => {
     }
 
     response.json(getDownloadRecordResponse(record));
+});
+
+app.patch('/downloads/:id/queue', async (request, response) => {
+    const record = getDownloadRecordOrSend404(request.params.id, response);
+    if (!record) {
+        return;
+    }
+
+    const position = request.body?.position;
+    if (!Number.isSafeInteger(position) || position < 1) {
+        response.status(400).json({
+            ok: false,
+            error: 'position must be a positive integer'
+        });
+        return;
+    }
+
+    const previousSnapshot = downloadScheduler.getSnapshot();
+    if (record.status !== 'queued' || !previousSnapshot.queuedIds.includes(record.id)) {
+        response.status(409).json({
+            ok: false,
+            error: 'Only waiting queued downloads can be reordered'
+        });
+        return;
+    }
+    if (position > previousSnapshot.queuedCount) {
+        response.status(400).json({
+            ok: false,
+            error: `position must be between 1 and ${previousSnapshot.queuedCount}`
+        });
+        return;
+    }
+
+    const currentPosition = previousSnapshot.queuedIds.indexOf(record.id) + 1;
+    if (position === currentPosition) {
+        response.json(getDownloadRecordResponse(record));
+        return;
+    }
+
+    const nextSnapshot = downloadScheduler.move(record.id, position);
+    const previousRecords = applyPersistedQueueOrder(nextSnapshot.queuedIds);
+    try {
+        await persistDownloadRecordsNow();
+    } catch (error) {
+        restoreDownloadRecords(previousRecords);
+        try {
+            downloadScheduler.setQueueOrder(previousSnapshot.queuedIds);
+        } catch {
+            // A slot changed while persistence was in progress; preserve the live scheduler state.
+        }
+        scheduleDownloadRecordsPersistence();
+        console.error('Could not persist reordered download queue:', error);
+        response.status(500).json({
+            ok: false,
+            error: 'Could not save the new download queue order'
+        });
+        return;
+    }
+
+    response.json(getDownloadRecordResponse(downloads.get(record.id) || record));
 });
 
 app.post('/downloads/:id/pause', async (request, response) => {
@@ -762,7 +848,8 @@ const startServer = async () => {
                 const preparation = await prepareDownloadResume({ ...queuedRecord, status: 'paused' }, getNowIso());
                 recordToQueue = {
                     ...preparation.record,
-                    queuedAt: queuedRecord.queuedAt || queuedRecord.createdAt || getNowIso()
+                    queuedAt: queuedRecord.queuedAt || queuedRecord.createdAt || getNowIso(),
+                    queueOrder: queuedRecord.queueOrder ?? null
                 };
                 downloads.set(recordToQueue.id, recordToQueue);
                 options = { resumeOffset: preparation.resumeOffset };

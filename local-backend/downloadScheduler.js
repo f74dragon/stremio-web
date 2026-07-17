@@ -35,10 +35,25 @@ const getQueueTimestamp = (record) => {
     return Number.MAX_SAFE_INTEGER;
 };
 
+const getPersistedQueueOrder = (record) => {
+    const queueOrder = Number(record?.queueOrder);
+    return Number.isSafeInteger(queueOrder) && queueOrder >= 1 ? queueOrder : null;
+};
+
 const sortQueuedDownloadRecords = (records) => {
     return records
         .map((record, index) => ({ record, index }))
-        .sort((left, right) => getQueueTimestamp(left.record) - getQueueTimestamp(right.record) || left.index - right.index)
+        .sort((left, right) => {
+            const leftOrder = getPersistedQueueOrder(left.record);
+            const rightOrder = getPersistedQueueOrder(right.record);
+            if (leftOrder !== null || rightOrder !== null) {
+                if (leftOrder === null) return 1;
+                if (rightOrder === null) return -1;
+                if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+            }
+
+            return getQueueTimestamp(left.record) - getQueueTimestamp(right.record) || left.index - right.index;
+        })
         .map(({ record }) => record);
 };
 
@@ -75,6 +90,39 @@ class DownloadScheduler {
 
         this.queue.splice(queueIndex, 1);
         return true;
+    }
+
+    move(id, targetPosition) {
+        if (!Number.isSafeInteger(targetPosition) || targetPosition < 1 || targetPosition > this.queue.length) {
+            throw new RangeError(`Queue position must be an integer from 1 through ${this.queue.length}`);
+        }
+
+        const currentIndex = this.queue.findIndex((entry) => entry.id === id);
+        if (currentIndex === -1) {
+            return false;
+        }
+
+        const targetIndex = targetPosition - 1;
+        if (currentIndex !== targetIndex) {
+            const [entry] = this.queue.splice(currentIndex, 1);
+            this.queue.splice(targetIndex, 0, entry);
+        }
+
+        return this.getSnapshot();
+    }
+
+    setQueueOrder(orderedIds) {
+        if (!Array.isArray(orderedIds) || orderedIds.length !== this.queue.length || new Set(orderedIds).size !== orderedIds.length) {
+            throw new TypeError('Queue order must contain every waiting download id exactly once');
+        }
+
+        const entriesById = new Map(this.queue.map((entry) => [entry.id, entry]));
+        if (orderedIds.some((id) => !entriesById.has(id))) {
+            throw new TypeError('Queue order contains an unknown waiting download id');
+        }
+
+        this.queue = orderedIds.map((id) => entriesById.get(id));
+        return this.getSnapshot();
     }
 
     isQueued(id) {
@@ -144,6 +192,7 @@ module.exports = {
     isValidMaxConcurrentDownloads,
     parseMaxConcurrentDownloads,
     getConfiguredMaxConcurrentDownloads,
+    getPersistedQueueOrder,
     sortQueuedDownloadRecords,
     DownloadScheduler
 };

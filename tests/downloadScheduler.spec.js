@@ -4,6 +4,7 @@ const {
     DEFAULT_MAX_CONCURRENT_DOWNLOADS,
     UNLIMITED_CONCURRENT_DOWNLOADS,
     parseMaxConcurrentDownloads,
+    getPersistedQueueOrder,
     sortQueuedDownloadRecords,
     DownloadScheduler
 } = require('../local-backend/downloadScheduler');
@@ -69,6 +70,46 @@ describe('DownloadScheduler', () => {
         activeGate.resolve();
         await waitFor(() => scheduler.getSnapshot().activeCount === 0);
         expect(started).toEqual(['active']);
+    });
+
+    test('moves waiting tasks without affecting the active transfer', async () => {
+        const scheduler = new DownloadScheduler({ maxConcurrentDownloads: 1 });
+        const activeGate = createDeferred();
+        const started = [];
+
+        scheduler.enqueue('active', async () => {
+            started.push('active');
+            await activeGate.promise;
+        });
+        scheduler.enqueue('first', () => started.push('first'));
+        scheduler.enqueue('second', () => started.push('second'));
+        scheduler.enqueue('third', () => started.push('third'));
+
+        expect(scheduler.move('third', 1).queuedIds).toEqual(['third', 'first', 'second']);
+        expect(scheduler.move('third', 2).queuedIds).toEqual(['first', 'third', 'second']);
+        expect(scheduler.move('missing', 1)).toBe(false);
+        expect(() => scheduler.move('first', 0)).toThrow(RangeError);
+        expect(() => scheduler.move('first', 4)).toThrow(RangeError);
+
+        activeGate.resolve();
+        await waitFor(() => scheduler.getSnapshot().activeCount === 0);
+        expect(started).toEqual(['active', 'first', 'third', 'second']);
+    });
+
+    test('restores a complete waiting order for persistence rollback', async () => {
+        const scheduler = new DownloadScheduler({ maxConcurrentDownloads: 1 });
+        const activeGate = createDeferred();
+        scheduler.enqueue('active', () => activeGate.promise);
+        scheduler.enqueue('first', () => undefined);
+        scheduler.enqueue('second', () => undefined);
+        scheduler.enqueue('third', () => undefined);
+
+        expect(scheduler.setQueueOrder(['third', 'first', 'second']).queuedIds).toEqual(['third', 'first', 'second']);
+        expect(() => scheduler.setQueueOrder(['first', 'second'])).toThrow(TypeError);
+        expect(() => scheduler.setQueueOrder(['first', 'second', 'unknown'])).toThrow(TypeError);
+
+        activeGate.resolve();
+        await waitFor(() => scheduler.getSnapshot().activeCount === 0);
     });
 
     test('releases a slot after task failure and reports the error', async () => {
@@ -198,11 +239,11 @@ describe('download scheduler configuration', () => {
         expect(parseMaxConcurrentDownloads('invalid', 4)).toBe(4);
     });
 
-    test('sorts persisted queued records by queued time with stable fallbacks', () => {
+    test('sorts persisted queue choices before FIFO fallbacks', () => {
         const records = [
             { id: 'third', queuedAt: '2026-07-16T12:03:00.000Z' },
-            { id: 'first', queuedAt: '2026-07-16T12:01:00.000Z' },
-            { id: 'second', createdAt: '2026-07-16T12:02:00.000Z' },
+            { id: 'first', queueOrder: 1, queuedAt: '2026-07-16T12:04:00.000Z' },
+            { id: 'second', queueOrder: 2, createdAt: '2026-07-16T12:05:00.000Z' },
             { id: 'fallback', queuedAt: 'invalid', createdAt: '2026-07-16T12:02:30.000Z' },
             { id: 'legacy-a' },
             { id: 'legacy-b' }
@@ -216,5 +257,7 @@ describe('download scheduler configuration', () => {
             'legacy-a',
             'legacy-b'
         ]);
+        expect(getPersistedQueueOrder(records[1])).toBe(1);
+        expect(getPersistedQueueOrder({ queueOrder: 0 })).toBe(null);
     });
 });

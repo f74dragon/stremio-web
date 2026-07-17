@@ -228,6 +228,45 @@
     flex: none;
 }
 
+.queue-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.2rem;
+    padding: 0.18rem 0.25rem 0.18rem 0.5rem;
+    border: 1px solid rgba(164, 146, 255, 0.2);
+    border-radius: 999px;
+    background-color: rgba(105, 81, 226, 0.1);
+}
+
+.queue-controls-label {
+    margin-right: 0.15rem;
+    font-size: 0.64rem;
+    font-weight: 650;
+    opacity: 0.66;
+    text-transform: uppercase;
+}
+
+.queue-button {
+    flex: none;
+    padding: 0.22rem 0.48rem;
+    border-radius: 999px;
+    color: var(--primary-foreground-color);
+    font-size: 0.65rem;
+    font-weight: 600;
+    background-color: rgba(255, 255, 255, 0.075);
+
+    &:hover,
+    &:focus-visible {
+        color: white;
+        background-color: rgba(124, 96, 244, 0.42);
+    }
+
+    &:global(.disabled) {
+        cursor: wait;
+        opacity: 0.45;
+    }
+}
+
 .pause-button,
 .resume-button,
 .cancel-button {
@@ -304,5 +343,15 @@
 
     .record-footer {
         align-items: flex-start;
+    }
+
+    .record-actions {
+        flex-wrap: wrap;
+        justify-content: flex-end;
+    }
+
+    .queue-controls {
+        flex-basis: 100%;
+        justify-content: flex-end;
     }
 }

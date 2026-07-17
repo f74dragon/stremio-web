@@ -1,6 +1,7 @@
 const React = require('react');
 const {
     listDownloads,
+    moveDownloadInQueue,
     pauseDownload,
     resumeDownload,
     cancelDownload,
@@ -153,6 +154,26 @@ const useDownloadRecords = ({ metaId, enabled = true, pollInterval = DEFAULT_POL
             setAction(recordId, null);
         }
     }, [clearActionError, load, setAction, updateItems]);
+
+    const moveInQueue = React.useCallback(async (recordId, position) => {
+        if (!recordId || actionsRef.current[recordId]) {
+            return;
+        }
+
+        clearActionError(recordId);
+        setAction(recordId, 'queue');
+        try {
+            await moveDownloadInQueue(recordId, position);
+            await load({ silent: true });
+        } catch (requestError) {
+            setActionErrors((currentErrors) => ({
+                ...currentErrors,
+                [recordId]: requestError?.backendError || 'Could not reorder this download. Check that the local backend is running.'
+            }));
+        } finally {
+            setAction(recordId, null);
+        }
+    }, [clearActionError, load, setAction]);
 
     const resume = React.useCallback(async (recordId) => {
         if (!recordId || actionsRef.current[recordId]) {
@@ -326,6 +347,7 @@ const useDownloadRecords = ({ metaId, enabled = true, pollInterval = DEFAULT_POL
         hasPollingRecords,
         refresh: load,
         onDownloadCreated,
+        moveInQueue,
         pause,
         resume,
         cancel,

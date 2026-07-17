@@ -380,7 +380,7 @@ const DownloadRecordCard = ({
 DownloadRecordCard.propTypes = {
     record: PropTypes.object.isRequired,
     variant: PropTypes.oneOf(['compact', 'library']),
-    action: PropTypes.oneOf(['pause', 'resume', 'cancel', 'retry', 'play', 'location', 'remove']),
+    action: PropTypes.oneOf(['queue', 'pause', 'resume', 'cancel', 'retry', 'play', 'location', 'remove']),
     actionError: PropTypes.string,
     onPause: PropTypes.func,
     onResume: PropTypes.func,

@@ -90,6 +90,17 @@ const requireDownloadId = (id, functionName) => encodeURIComponent(requireDownlo
 
 const getDownload = async (id) => requestJson(`/downloads/${requireDownloadId(id, 'getDownload')}`);
 
+const moveDownloadInQueue = async (id, position) => {
+    if (!Number.isSafeInteger(position) || position < 1) {
+        throw new Error('moveDownloadInQueue requires a positive integer position');
+    }
+
+    return requestJson(`/downloads/${requireDownloadId(id, 'moveDownloadInQueue')}/queue`, {
+        method: 'PATCH',
+        body: { position }
+    });
+};
+
 const pauseDownload = async (id) => requestJson(`/downloads/${requireDownloadId(id, 'pauseDownload')}/pause`, {
     method: 'POST'
 });
@@ -130,6 +141,7 @@ module.exports = {
     createDownload,
     listDownloads,
     getDownload,
+    moveDownloadInQueue,
     pauseDownload,
     resumeDownload,
     retryDownload,

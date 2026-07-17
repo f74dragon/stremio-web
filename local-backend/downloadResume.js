@@ -72,6 +72,7 @@ const prepareDownloadResume = async (record, now = new Date().toISOString()) => 
             speedBytesPerSecond: 0,
             etaSeconds: null,
             queuedAt: now,
+            queueOrder: null,
             updatedAt: now,
             completedAt: null,
             error: null

@@ -3,7 +3,8 @@
 const {
     LOCAL_BACKEND_BASE_URL,
     getBackendSettings,
-    updateBackendSettings
+    updateBackendSettings,
+    moveDownloadInQueue
 } = require('../src/customStremio/localBackendClient');
 
 const createJsonResponse = (body, { ok = true, status = 200 } = {}) => ({
@@ -46,6 +47,23 @@ describe('localBackendClient settings', () => {
 
     test('rejects invalid settings before making a request', async () => {
         await expect(updateBackendSettings(null)).rejects.toThrow('updateBackendSettings requires a settings object');
+        expect(global.fetch).not.toHaveBeenCalled();
+    });
+
+    test('moves a waiting download to a one-based queue position', async () => {
+        const responseBody = { id: 'queue-id', status: 'queued', queuePosition: 1, queueLength: 3 };
+        global.fetch.mockResolvedValue(createJsonResponse(responseBody));
+
+        await expect(moveDownloadInQueue('queue-id', 1)).resolves.toEqual(responseBody);
+        expect(global.fetch).toHaveBeenCalledWith(`${LOCAL_BACKEND_BASE_URL}/downloads/queue-id/queue`, {
+            method: 'PATCH',
+            body: JSON.stringify({ position: 1 }),
+            headers: { 'Content-Type': 'application/json' }
+        });
+    });
+
+    test('rejects invalid queue positions before making a request', async () => {
+        await expect(moveDownloadInQueue('queue-id', 0)).rejects.toThrow('positive integer position');
         expect(global.fetch).not.toHaveBeenCalled();
     });
 });

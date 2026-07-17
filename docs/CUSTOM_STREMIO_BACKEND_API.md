@@ -59,6 +59,7 @@ The backend will generate and maintain these backend-only fields later:
 - `speedBytesPerSecond`
 - `etaSeconds`
 - `queuedAt`
+- `queueOrder` (optional persisted manual ordering; normally `null`)
 - `queuePosition` (runtime-only for `queued` records; `1` is next to start)
 - `queueLength` (runtime-only total waiting count)
 - `createdAt`
@@ -113,6 +114,7 @@ Example combined download record shape:
   "speedBytesPerSecond": 0,
   "etaSeconds": null,
   "queuedAt": "2026-05-23T12:00:00.000Z",
+  "queueOrder": null,
   "queuePosition": 1,
   "queueLength": 3,
   "createdAt": "2026-05-23T12:00:00.000Z",
@@ -271,6 +273,27 @@ Purpose:
 
 Response shape:
 - Full download record.
+
+### 4A. `PATCH /downloads/:id/queue`
+
+Purpose:
+- Move one waiting download to a new one-based position in the queue.
+
+Request shape:
+
+```json
+{
+  "position": 1
+}
+```
+
+Behavior notes:
+- Only records that are currently waiting in `queued` state can be reordered. Active, paused, completed, failed, and canceled records return HTTP `409`.
+- `position` must be a positive integer within the current waiting queue length; invalid or out-of-range values return HTTP `400`.
+- Position `1` moves the record to the top of the waiting queue. Moving up or down uses the same endpoint with the adjacent position.
+- The scheduler order changes immediately and the full waiting order is persisted before success is returned.
+- Persistence failure attempts to restore both the prior scheduler order and stored records, then returns HTTP `500`.
+- The response is the moved download record with updated live `queuePosition` and `queueLength` fields.
 
 ### 5. `POST /downloads/:id/pause`
 
@@ -440,7 +463,7 @@ Notes:
 - `CUSTOM_STREMIO_DATA_DIR` overrides the metadata directory.
 - Writes use an atomic temporary-file replacement, and frequent progress changes are coalesced.
 - `completed`, `failed`, `canceled`, and already `paused` records are restored unchanged after restart.
-- Waiting `queued` records are restored in `queuedAt` order and automatically dispatched as slots become available.
+- Waiting `queued` records with a saved manual `queueOrder` are restored in that order. Records without manual order continue using `queuedAt` FIFO and are dispatched as slots become available.
 - Restored `downloading` records become `paused` with an interruption note and can be resumed explicitly.
 - `deleted` records are omitted from storage.
 - Invalid or unsupported metadata documents stop backend startup rather than being silently overwritten.

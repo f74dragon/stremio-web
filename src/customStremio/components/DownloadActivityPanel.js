@@ -87,7 +87,7 @@ const getQueueLabel = (record, t) => {
     return t('CUSTOM_DOWNLOADS_STARTING', { defaultValue: 'Starting...' });
 };
 
-const DownloadActivityPanel = ({ records, actionStates, actionErrors, onPause, onResume, onCancel }) => {
+const DownloadActivityPanel = ({ records, actionStates, actionErrors, onReorder, onPause, onResume, onCancel }) => {
     const { t } = useTranslation();
     const [expanded, setExpanded] = React.useState(false);
     const summary = React.useMemo(() => getDownloadActivitySummary(records), [records]);
@@ -174,6 +174,9 @@ const DownloadActivityPanel = ({ records, actionStates, actionErrors, onPause, o
                             const isPaused = record?.status === 'paused';
                             const isQueued = record?.status === 'queued';
                             const queueLabel = isQueued ? getQueueLabel(record, t) : null;
+                            const queuePosition = isQueued ? getQueuePosition(record) : null;
+                            const queueLength = Number(record?.queueLength);
+                            const canReorder = queuePosition !== null && Number.isSafeInteger(queueLength) && queueLength > 1;
                             const recordSpeed = Number(record?.speedBytesPerSecond) > 0 ? `${formatBytes(record.speedBytesPerSecond)}/s` : null;
                             const recordEta = formatDuration(record?.etaSeconds);
                             const recordBytes = Number(record?.bytesTotal) > 0 ?
@@ -204,6 +207,58 @@ const DownloadActivityPanel = ({ records, actionStates, actionErrors, onPause, o
                                         <div className={styles['record-footer']}>
                                             <span className={styles['record-metrics']}>{recordMetrics.join(' · ')}</span>
                                             <span className={styles['record-actions']}>
+                                                {
+                                                    canReorder ?
+                                                        <span className={styles['queue-controls']} aria-label={t('CUSTOM_DOWNLOADS_QUEUE_CONTROLS', { defaultValue: 'Queue position controls' })}>
+                                                            <span className={styles['queue-controls-label']}>
+                                                                {action === 'queue' ? t('CUSTOM_DOWNLOADS_QUEUE_MOVING', { defaultValue: 'Moving...' }) : t('CUSTOM_DOWNLOADS_QUEUE_LABEL', { defaultValue: 'Queue' })}
+                                                            </span>
+                                                            {
+                                                                queuePosition > 1 ?
+                                                                    <Button
+                                                                        className={styles['queue-button']}
+                                                                        title={t('CUSTOM_DOWNLOADS_MOVE_TO_TOP_TITLE', { defaultValue: 'Move to the top of the waiting queue' })}
+                                                                        aria-disabled={actionInProgress}
+                                                                        disabled={actionInProgress}
+                                                                        onClick={() => !actionInProgress && onReorder?.(recordId, 1)}
+                                                                    >
+                                                                        {t('CUSTOM_DOWNLOADS_MOVE_TO_TOP', { defaultValue: 'Top' })}
+                                                                    </Button>
+                                                                    :
+                                                                    null
+                                                            }
+                                                            {
+                                                                queuePosition > 1 ?
+                                                                    <Button
+                                                                        className={styles['queue-button']}
+                                                                        title={t('CUSTOM_DOWNLOADS_MOVE_UP_TITLE', { defaultValue: 'Move up one position' })}
+                                                                        aria-disabled={actionInProgress}
+                                                                        disabled={actionInProgress}
+                                                                        onClick={() => !actionInProgress && onReorder?.(recordId, queuePosition - 1)}
+                                                                    >
+                                                                        {t('CUSTOM_DOWNLOADS_MOVE_UP', { defaultValue: 'Up' })}
+                                                                    </Button>
+                                                                    :
+                                                                    null
+                                                            }
+                                                            {
+                                                                queuePosition < queueLength ?
+                                                                    <Button
+                                                                        className={styles['queue-button']}
+                                                                        title={t('CUSTOM_DOWNLOADS_MOVE_DOWN_TITLE', { defaultValue: 'Move down one position' })}
+                                                                        aria-disabled={actionInProgress}
+                                                                        disabled={actionInProgress}
+                                                                        onClick={() => !actionInProgress && onReorder?.(recordId, queuePosition + 1)}
+                                                                    >
+                                                                        {t('CUSTOM_DOWNLOADS_MOVE_DOWN', { defaultValue: 'Down' })}
+                                                                    </Button>
+                                                                    :
+                                                                    null
+                                                            }
+                                                        </span>
+                                                        :
+                                                        null
+                                                }
                                                 <Button
                                                     className={isPaused ? styles['resume-button'] : styles['pause-button']}
                                                     aria-disabled={actionInProgress}
@@ -245,6 +300,7 @@ DownloadActivityPanel.propTypes = {
     records: PropTypes.arrayOf(PropTypes.object).isRequired,
     actionStates: PropTypes.object.isRequired,
     actionErrors: PropTypes.object.isRequired,
+    onReorder: PropTypes.func,
     onPause: PropTypes.func,
     onResume: PropTypes.func,
     onCancel: PropTypes.func
