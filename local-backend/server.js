@@ -2,7 +2,14 @@
 
 const express = require('express');
 const cors = require('cors');
-const { startDownload, pauseDownload, cancelDownload, isDownloadActive, isSupportedSourceUrl } = require('./downloadManager');
+const {
+    startDownload,
+    pauseDownload,
+    cancelDownload,
+    isDownloadActive,
+    isSupportedSourceUrl,
+    isKnownNotReadySourceUrl
+} = require('./downloadManager');
 const { isDownloadRetryable, prepareDownloadRetry } = require('./downloadRetry');
 const { isDownloadResumable, prepareDownloadResume } = require('./downloadResume');
 const {
@@ -13,6 +20,10 @@ const {
     sortQueuedDownloadRecords
 } = require('./downloadScheduler');
 const { createBackendSettings, BackendSettingsStore } = require('./backendSettingsStore');
+const { AllDebridClient } = require('./allDebridClient');
+const { AllDebridCleanupStore } = require('./allDebridCleanupStore');
+const { AllDebridAvailabilityStore } = require('./allDebridAvailabilityStore');
+const { AllDebridAvailabilityService } = require('./allDebridAvailability');
 const { launchMediaFile } = require('./playerLauncher');
 const { openDownloadLocation } = require('./fileExplorerLauncher');
 const { DownloadRecordStore, recoverInterruptedDownloadRecords } = require('./downloadRecordStore');
@@ -22,6 +33,17 @@ const PORT = Number(process.env.PORT) || 5577;
 const SERVICE_NAME = 'custom-stremio-local-backend';
 const SERVICE_VERSION = 'dev';
 const ACTIVE_DUPLICATE_STATUSES = new Set(['queued', 'downloading', 'paused', 'completed']);
+const DEFAULT_TRUSTED_DEBRID_ORIGINS = new Set([
+    'http://localhost:8080',
+    'https://localhost:8080',
+    'http://127.0.0.1:8080',
+    'https://127.0.0.1:8080'
+]);
+const TRUSTED_DEBRID_ORIGINS = new Set([
+    ...DEFAULT_TRUSTED_DEBRID_ORIGINS,
+    ...String(process.env.CUSTOM_STREMIO_ALLOWED_ORIGINS || '').split(',').map((origin) => origin.trim()).filter(Boolean)
+]);
+const ALLDEBRID_STREAM_MARKER = /(?:^|[^a-z0-9])ad\s*(?:\+|download)(?:$|[^a-z0-9])/i;
 
 const app = express();
 const downloads = new Map();
@@ -33,7 +55,18 @@ const downloadScheduler = new DownloadScheduler({
     onTaskError: (error, recordId) => console.error(`Scheduled download ${recordId} failed unexpectedly:`, error)
 });
 const settingsStore = new BackendSettingsStore();
+const allDebridClient = new AllDebridClient();
+const allDebridCleanupStore = new AllDebridCleanupStore();
+const allDebridAvailabilityStore = new AllDebridAvailabilityStore();
+const allDebridAvailability = new AllDebridAvailabilityService({
+    client: allDebridClient,
+    cleanupStore: allDebridCleanupStore,
+    historyStore: allDebridAvailabilityStore,
+    onWarning: (message) => console.warn(message)
+});
 let backendSettings = createBackendSettings(downloadScheduler.maxConcurrentDownloads);
+let allDebridPinSession = null;
+let allDebridPendingCleanupCount = 0;
 let downloadCounter = 0;
 let httpServer = null;
 let shuttingDown = false;
@@ -46,6 +79,13 @@ const pickSourceUrl = (payload) => {
         payload?.streamUrl ||
         payload?.externalUrl ||
         null;
+};
+
+const isAllDebridResolverRecord = (record) => {
+    const searchableText = [record?.streamName, record?.streamDescription]
+        .filter((value) => typeof value === 'string')
+        .join('\n');
+    return Boolean(record?.infoHash) && ALLDEBRID_STREAM_MARKER.test(searchableText);
 };
 
 const createDownloadId = () => {
@@ -78,6 +118,13 @@ const createDownloadRecord = (payload) => {
         addonName: payload?.addonName ?? null,
         streamName: payload?.streamName ?? null,
         streamDescription: payload?.streamDescription ?? null,
+        sourceReadiness: payload?.sourceReadiness ?? 'unknown',
+        infoHash: payload?.infoHash ?? null,
+        fileIdx: Number.isSafeInteger(payload?.fileIdx) ? payload.fileIdx : null,
+        behaviorHints: {
+            filename: payload?.behaviorHints?.filename ?? null,
+            videoSize: Number.isFinite(payload?.behaviorHints?.videoSize) ? payload.behaviorHints.videoSize : null
+        },
         streamUrl: payload?.streamUrl ?? null,
         externalUrl: payload?.externalUrl ?? null,
         downloadUrl: payload?.downloadUrl ?? null,
@@ -99,6 +146,7 @@ const createDownloadRecord = (payload) => {
         updatedAt: now,
         completedAt: null,
         error: null,
+        errorCode: null,
         resumeSupported: null,
         sourceEtag: null,
         sourceLastModified: null,
@@ -186,14 +234,45 @@ const runScheduledDownload = async (recordId, options) => {
         downloads.set(record.id, record);
     }
 
+    const apiKey = backendSettings.debrid.allDebrid?.apiKey;
+    let preexistingMagnetIds = null;
+    const isAllDebridResolver = apiKey && isAllDebridResolverRecord(record);
+    if (isAllDebridResolver) {
+        try {
+            preexistingMagnetIds = await allDebridAvailability.snapshotMatchingMagnetIds(apiKey, record.infoHash);
+        } catch (error) {
+            console.warn(`Could not snapshot AllDebrid magnets before download ${record.id}: ${error.message || 'unknown error'}`);
+        }
+    }
+
     try {
         await startDownload(record, updateDownloadRecordById, options);
+        const completedRecord = downloads.get(record.id);
+        if (isAllDebridResolver && completedRecord?.status === 'completed') {
+            await allDebridAvailability.recordObservation(record.infoHash, 'cached', 'completed_download').catch((error) => {
+                console.warn(`Could not save cached AllDebrid history for download ${record.id}: ${error.message || 'unknown error'}`);
+            });
+        } else if (isAllDebridResolver && completedRecord?.status === 'failed' && completedRecord.errorCode === 'SOURCE_NOT_READY') {
+            if (preexistingMagnetIds !== null) {
+                await allDebridAvailability.cleanupNewMagnetsForHash(apiKey, record.infoHash, preexistingMagnetIds)
+                    .then((cleanup) => {
+                        allDebridPendingCleanupCount = cleanup.pending;
+                    })
+                    .catch((error) => {
+                        console.warn(`Could not identify or clean up AllDebrid magnets for download ${record.id}: ${error.message || 'unknown error'}`);
+                    });
+            }
+            await allDebridAvailability.recordObservation(record.infoHash, 'uncached', 'placeholder_response').catch((error) => {
+                console.warn(`Could not save not-cached AllDebrid history for download ${record.id}: ${error.message || 'unknown error'}`);
+            });
+        }
     } catch (error) {
         const nextRecord = downloads.get(record.id);
         if (nextRecord && !['failed', 'canceled', 'paused'].includes(nextRecord.status)) {
             updateDownloadRecord(nextRecord, {
                 status: 'failed',
                 error: error?.message || 'Download failed',
+                errorCode: error?.code || null,
                 completedAt: null,
                 speedBytesPerSecond: 0,
                 etaSeconds: null
@@ -258,20 +337,65 @@ const restoreDownloadRecords = (recordsById) => {
     });
 };
 
+const getAllDebridConnectionResponse = () => {
+    const settings = backendSettings.debrid.allDebrid;
+    return {
+        connected: Boolean(settings?.apiKey),
+        username: settings?.username ?? null,
+        isPremium: settings?.isPremium === true,
+        premiumUntil: settings?.premiumUntil ?? null,
+        pendingCleanup: allDebridPendingCleanupCount
+    };
+};
+
 const getBackendSettingsResponse = () => ({
     downloads: {
         maxConcurrentDownloads: backendSettings.downloads.maxConcurrentDownloads,
         minAllowedConcurrentDownloads: 1,
         maxAllowedConcurrentDownloads: null,
         unlimitedValue: UNLIMITED_CONCURRENT_DOWNLOADS
+    },
+    debrid: {
+        allDebrid: getAllDebridConnectionResponse()
     }
 });
+
+const saveAllDebridConnection = async (allDebrid) => {
+    backendSettings = await settingsStore.save(createBackendSettings(
+        backendSettings.downloads.maxConcurrentDownloads,
+        allDebrid
+    ));
+    return getAllDebridConnectionResponse();
+};
+
+const sendAllDebridError = (response, error, fallbackMessage) => {
+    const authenticationError = ['AUTH_MISSING_APIKEY', 'AUTH_BAD_APIKEY', 'AUTH_BLOCKED', 'AUTH_USER_BANNED'].includes(error?.code);
+    const invalidRequest = ['ALLDEBRID_TOO_MANY_HASHES', 'ALLDEBRID_INVALID_HASHES'].includes(error?.code);
+    const status = authenticationError ? 401 : invalidRequest ? 400 : 502;
+    response.status(status).json({
+        ok: false,
+        errorCode: error?.code || 'ALLDEBRID_REQUEST_FAILED',
+        error: error?.message || fallbackMessage
+    });
+};
 
 app.use(cors());
 app.use(express.json());
 
 app.use((request, response, next) => {
     console.log(`${request.method} ${request.path}`);
+    next();
+});
+
+app.use('/debrid', (request, response, next) => {
+    const origin = request.get('Origin');
+    if (origin && !TRUSTED_DEBRID_ORIGINS.has(origin)) {
+        response.status(403).json({
+            ok: false,
+            error: 'This origin is not allowed to use local debrid credentials'
+        });
+        return;
+    }
     next();
 });
 
@@ -304,7 +428,7 @@ app.patch('/settings', async (request, response) => {
         return;
     }
 
-    const nextSettings = createBackendSettings(maxConcurrentDownloads);
+    const nextSettings = createBackendSettings(maxConcurrentDownloads, backendSettings.debrid.allDebrid);
     try {
         backendSettings = await settingsStore.save(nextSettings);
     } catch (error) {
@@ -318,6 +442,132 @@ app.patch('/settings', async (request, response) => {
 
     downloadScheduler.setMaxConcurrentDownloads(maxConcurrentDownloads);
     response.json(getBackendSettingsResponse());
+});
+
+app.post('/debrid/alldebrid/auth/pin', async (request, response) => {
+    try {
+        const pin = await allDebridClient.getPin();
+        const expiresIn = Number(pin?.expires_in);
+        const expiresAt = new Date(Date.now() + (Number.isFinite(expiresIn) ? expiresIn : 600) * 1000).toISOString();
+        allDebridPinSession = {
+            pin: pin.pin,
+            check: pin.check,
+            userUrl: pin.user_url,
+            expiresAt
+        };
+        response.status(201).json({
+            pin: pin.pin,
+            userUrl: pin.user_url,
+            expiresAt
+        });
+    } catch (error) {
+        sendAllDebridError(response, error, 'Could not start AllDebrid authentication');
+    }
+});
+
+app.post('/debrid/alldebrid/auth/pin/check', async (request, response) => {
+    if (!allDebridPinSession) {
+        response.status(409).json({ ok: false, error: 'No AllDebrid PIN connection is in progress' });
+        return;
+    }
+    if (Date.parse(allDebridPinSession.expiresAt) <= Date.now()) {
+        allDebridPinSession = null;
+        response.status(410).json({ ok: false, error: 'The AllDebrid PIN expired. Start a new connection.' });
+        return;
+    }
+
+    try {
+        const pinResult = await allDebridClient.checkPin(allDebridPinSession.pin, allDebridPinSession.check);
+        if (pinResult?.activated !== true || typeof pinResult.apikey !== 'string' || !pinResult.apikey) {
+            response.json({
+                activated: false,
+                expiresAt: allDebridPinSession.expiresAt
+            });
+            return;
+        }
+
+        const userData = await allDebridClient.getUser(pinResult.apikey);
+        const user = userData?.user || {};
+        const connection = await saveAllDebridConnection({
+            apiKey: pinResult.apikey,
+            username: user.username,
+            isPremium: user.isPremium,
+            premiumUntil: user.premiumUntil
+        });
+        allDebridPinSession = null;
+        response.json({ activated: true, connection });
+    } catch (error) {
+        if (['PIN_EXPIRED', 'PIN_INVALID'].includes(error?.code)) {
+            allDebridPinSession = null;
+        }
+        sendAllDebridError(response, error, 'Could not complete AllDebrid authentication');
+    }
+});
+
+app.delete('/debrid/alldebrid/auth', async (request, response) => {
+    const apiKey = backendSettings.debrid.allDebrid?.apiKey;
+    try {
+        if (apiKey) {
+            const cleanup = await allDebridAvailability.retryPendingCleanup(apiKey);
+            allDebridPendingCleanupCount = cleanup.pending;
+        } else {
+            allDebridPendingCleanupCount = await allDebridAvailability.getPendingCleanupCount();
+        }
+        if (allDebridPendingCleanupCount > 0) {
+            response.status(409).json({
+                ok: false,
+                error: 'Temporary AllDebrid magnets still need cleanup. Keep the connection and try again.'
+            });
+            return;
+        }
+
+        await saveAllDebridConnection(null);
+        allDebridPinSession = null;
+        allDebridAvailability.clearCache();
+        response.json({ ok: true, connection: getAllDebridConnectionResponse() });
+    } catch (error) {
+        sendAllDebridError(response, error, 'Could not disconnect AllDebrid');
+    }
+});
+
+app.post('/debrid/alldebrid/availability', async (request, response) => {
+    const apiKey = backendSettings.debrid.allDebrid?.apiKey;
+    if (!apiKey) {
+        response.json({
+            provider: 'alldebrid',
+            connected: false,
+            items: [],
+            pendingCleanup: allDebridPendingCleanupCount,
+            cleanupWarning: null
+        });
+        return;
+    }
+
+    try {
+        const result = await allDebridAvailability.check(apiKey, request.body?.hashes);
+        allDebridPendingCleanupCount = result.pendingCleanup;
+        response.json({
+            provider: 'alldebrid',
+            connected: true,
+            ...result
+        });
+    } catch (error) {
+        allDebridPendingCleanupCount = await allDebridAvailability.getPendingCleanupCount().catch(() => allDebridPendingCleanupCount);
+        sendAllDebridError(response, error, 'Could not check AllDebrid availability');
+    }
+});
+
+app.post('/debrid/alldebrid/availability/history', async (request, response) => {
+    try {
+        const result = await allDebridAvailability.getHistory(request.body?.hashes);
+        response.json({
+            provider: 'alldebrid',
+            connected: Boolean(backendSettings.debrid.allDebrid?.apiKey),
+            ...result
+        });
+    } catch (error) {
+        sendAllDebridError(response, error, 'Could not read AllDebrid availability history');
+    }
 });
 
 app.post('/downloads', async (request, response) => {
@@ -344,6 +594,15 @@ app.post('/downloads', async (request, response) => {
         response.status(400).json({
             ok: false,
             error: 'Unsupported source URL protocol. Only http and https are supported.'
+        });
+        return;
+    }
+
+    if (payload.sourceReadiness === 'requires_caching' || isKnownNotReadySourceUrl(sourceUrl)) {
+        response.status(409).json({
+            ok: false,
+            errorCode: 'SOURCE_NOT_READY',
+            error: 'This source is not cached yet. Choose a cached source or try again later.'
         });
         return;
     }
@@ -833,6 +1092,22 @@ const shutdown = async (signal) => {
 const startServer = async () => {
     backendSettings = await settingsStore.load(createBackendSettings(getConfiguredMaxConcurrentDownloads()));
     downloadScheduler.setMaxConcurrentDownloads(backendSettings.downloads.maxConcurrentDownloads);
+
+    const allDebridApiKey = backendSettings.debrid.allDebrid?.apiKey;
+    if (allDebridApiKey) {
+        try {
+            const cleanup = await allDebridAvailability.retryPendingCleanup(allDebridApiKey);
+            allDebridPendingCleanupCount = cleanup.pending;
+            if (cleanup.cleaned > 0) {
+                console.log(`Cleaned up ${cleanup.cleaned} temporary AllDebrid magnet(s) left by an interrupted check.`);
+            }
+        } catch (error) {
+            allDebridPendingCleanupCount = await allDebridAvailability.getPendingCleanupCount().catch(() => 0);
+            console.warn(`Could not retry pending AllDebrid cleanup during startup: ${error.message || 'unknown error'}`);
+        }
+    } else {
+        allDebridPendingCleanupCount = await allDebridAvailability.getPendingCleanupCount();
+    }
 
     const storedRecords = await recordStore.load();
     const recovery = recoverInterruptedDownloadRecords(storedRecords);

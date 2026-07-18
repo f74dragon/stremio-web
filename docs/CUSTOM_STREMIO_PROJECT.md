@@ -59,7 +59,7 @@ Notes:
 - `4. Add placeholder Download / Play Download buttons`: In progress (`Milestone 4A` implemented)
 - `5. Create local backend prototype`: In progress (`Milestone 5B` backend skeleton created)
 - `7. Add title-specific downloads panel`: In progress (`Milestone 7A` implemented)
-- `6. Implement real download manager`: In progress (`Milestones 6A-6F` real downloads, persistence, retry, resumable transfers, FIFO scheduling, and in-app concurrency settings implemented)
+- `6. Implement real download manager`: In progress (`Milestones 6A-6J` real downloads, persistence, retry/resume, FIFO scheduling, queue controls, concurrency settings, and hybrid AllDebrid availability handling implemented)
 - `8. Add global downloads page`: In progress (`Milestones 8A-8C.2` implemented)
 - `9. Add MPC-HC launch support`: In progress (`Milestones 9A-9B` panel and stream-row playback implemented)
 - `10. Add watched/unwatched integration`: Not started
@@ -78,7 +78,70 @@ Notes:
 
 ## Next Recommended Step
 
-Add multi-title/episode batch download selection on top of the completed scheduler and queue-management foundation. Debrid/hash availability remains the next discovery/availability feature after batch download UX is stable.
+Add Real-Debrid as a fallback availability provider using a separately verified read-only capability path. Keep actual downloads on the existing Stremio URLs and preserve preferred-addon priority above availability sorting. A user-facing **Clear availability history** action, batch title/episode selection, watched progress, and file deletion remain later passes.
+
+## Milestone 6J Findings: Hybrid AllDebrid Availability and Resolver Cleanup
+
+- Hash-aware stream browsing:
+  - Torrent hashes are read from native `stream.infoHash` values or conservatively extracted from Torrentio download/stream/magnet URLs only when exactly one 40-character hash is present.
+  - Opening or filtering a title reads only local availability history. It does not upload a magnet or contact AllDebrid.
+  - Connected users receive an explicit **Check availability** control with clear disclosure that the check briefly creates and removes temporary account magnets.
+  - Preferred-addon grouping remains the strongest ordering rule. Inside each addon tier, current cached, previously verified cached, unknown, and not-cached sources are ordered in that sequence.
+- Persistent availability history:
+  - Durable observations are stored atomically in `%LOCALAPPDATA%\Custom Stremio\alldebrid-availability-history.json` and survive backend restarts and account disconnects.
+  - Positive cached observations remain useful for 30 days and become **Previously verified cached** after 24 hours. Negative observations expire after 15 minutes because provider processing can change them quickly. Expired or absent observations appear as unknown.
+  - Explicit check results, successful real-media downloads, and known Torrentio placeholder responses all refresh the same history record.
+  - A short negative observation never erases a still-valid positive cached observation for the same hash.
+  - A separate five-minute in-memory protection window prevents repeated clicks from immediately mutating the account again.
+- Resolver safety:
+  - Before resolving a hash-bearing stream identified as AllDebrid by its addon metadata, the backend snapshots only preexisting AllDebrid magnet IDs with that exact hash.
+  - A successful media download refreshes the hash as cached and continues using the original Stremio URL.
+  - A Torrentio `downloading.mp4` / `downloading_vN.mp4` redirect stops before the placeholder body is written, marks the record failed with `SOURCE_NOT_READY`, identifies newly created exact-hash magnet IDs, journals and deletes only those IDs, verifies cleanup, and stores a short not-cached observation.
+  - Preexisting matching magnets and unrelated account magnets are never eligible for resolver cleanup. Failed deletions remain in the existing restart-safe cleanup journal.
+  - If an explicit upload response is lost, the backend reconciles the affected hashes against the pre-check snapshot and journals/deletes any exact new IDs it can identify before returning the original error.
+- Deferred:
+  - Real-Debrid fallback is the next provider pass.
+  - Clear availability history UI, automatic page-load provider checks, explicit send-to-debrid, batch episode/source selection, and `stremio-core` changes remain out of scope.
+- Validation:
+  - All 157 Jest tests pass, frontend ESLint passes, backend syntax checks pass, and the production build completes with only the repository's existing bundle-size warnings.
+
+## Milestone 6I Findings: AllDebrid Cached Source Availability
+
+- Verified provider contract:
+  - Authenticated live testing confirmed the old undocumented `/v4.1/magnet/instant` endpoint returns `404 Endpoint doesn't exist` and is not usable.
+  - The supported AllDebrid flow is PIN authentication followed by `POST /v4/magnet/upload`; its `ready` field reports whether the torrent was already available.
+  - The upload response remains available only as an explicit backend capability because it mutates the account. It is not called while browsing, filtering, or sorting streams.
+  - Readiness labels never unlock or replace Stremio links. The existing `externalPlayer.download` URL remains the exact source submitted to the local download scheduler.
+- Secure local integration:
+  - Added the current `/v4.1/pin/get` and `/v4/pin/check` flow under **Downloads -> Download options**, separate from upstream Stremio Settings.
+  - The API key is returned only to and stored only by the local backend. Frontend responses expose connection/profile state but never the key.
+  - AllDebrid requests are serialized and rate-limited. Input is deduplicated and restricted to valid 40-character torrent info hashes.
+- Explicit temporary-magnet capability:
+  - Each check snapshots pre-existing account magnet IDs before uploading, and only newly created IDs are eligible for cleanup. Existing magnets are never deleted, including an identical magnet that was already present.
+  - Newly created ready and not-ready magnets are deleted immediately. Cleanup uses retries, verifies IDs are absent from a fresh status snapshot, and writes unfinished IDs to `alldebrid-pending-cleanup.json` for restart recovery.
+  - AllDebrid does not provide a documented read-only cache endpoint. A not-ready upload may begin provider-side peer processing briefly before immediate deletion, so the app does not invoke this flow automatically.
+  - Results use a five-minute in-memory TTL when the explicit endpoint is called.
+- Safe stream and record UX:
+  - Preserved `infoHash`, `fileIdx`, `behaviorHints.filename`, and `behaviorHints.videoSize` through download payloads and persistent records.
+  - Torrentio `[AD+]` rows receive a compact **Cached on AllDebrid** badge and sort ahead within their addon tier.
+  - Live testing proved `[AD Download]` is not a definitive negative cache result: a row with that label can resolve to the real cached file. Those rows therefore remain **unknown**, usable, and unsorted rather than being falsely blocked.
+  - Classification uses only the stream metadata already returned by the addon. Browsing and sorting make no AllDebrid or Torrentio network request and create no magnet.
+  - Direct-link streams without a recognized marker remain unchanged. Local completed/downloaded state remains stronger than provider readiness.
+  - The downloader inspects each redirect target before requesting its body. Torrentio `downloading.mp4` and versioned `downloading_vN.mp4` placeholders fail as `SOURCE_NOT_READY`, are never finalized as completed media, and tell the user to choose another source or retry later.
+  - A provider label can become stale; the redirect guard is the final safety net for the known Torrentio placeholder family.
+- Validation and remaining work:
+  - Added focused coverage for PIN/auth request shapes, Bearer auth, hash validation/deduplication, ready/not-ready results, pre-existing ID protection, TTL caching, failed cleanup persistence, restart recovery, settings migration, exact Stremio download URL preservation, local marker classification, and redirect rejection before body/file writing.
+  - This milestone was superseded by the hybrid persistent-history and resolver-cleanup work in Milestone 6J.
+  - Real-Debrid fallback, batch episode/source selection, watched progress, filesystem discovery, metadata backfill, and media-file deletion remain separate passes.
+
+### Live Torrentio Resolver Findings
+
+- A ready copied Torrentio download link returned HTTP `302` to an AllDebrid media host. A one-byte range request returned HTTP `206` and a total media size of `3,593,154,342` bytes, confirming that the real file was immediately available.
+- A not-ready copied Torrentio download link returned HTTP `302` to `https://torrentio.strem.fun/videos/downloading_v2.mp4`.
+- Resolving that not-ready link created a new AllDebrid magnet before returning the placeholder. The account changed from 82 to 83 magnets; the new item had status `Downloading`, status code `1`, and zero downloaded bytes at observation time.
+- The Torrentio download URL contained exactly one 40-character info hash, and it exactly matched the hash of the newly created AllDebrid magnet. This provides a safe association key for targeted cleanup.
+- The test-created magnet was deleted by exact ID and verified absent, returning the account to 82 magnets.
+- Consequence: placeholder interception prevents a bogus local media file, but it does not by itself stop provider-side processing. The production failure path should snapshot/match by extracted hash and delete only the exact new magnet created by the resolver request.
 
 ## Milestone 6H Findings: Manual Download Queue Reordering
 

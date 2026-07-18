@@ -75,6 +75,7 @@ const prepareDownloadRetry = async (record, now = new Date().toISOString()) => {
         updatedAt: now,
         completedAt: null,
         error: null,
+        errorCode: null,
         resumeSupported: null,
         sourceEtag: null,
         sourceLastModified: null,

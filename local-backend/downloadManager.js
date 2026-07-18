@@ -13,6 +13,8 @@ const REQUEST_TIMEOUT_MS = 30000;
 const PROGRESS_UPDATE_INTERVAL_MS = 500;
 const SUPPORTED_PROTOCOLS = new Set(['http:', 'https:']);
 const activeDownloads = new Map();
+const TORRENTIO_NOT_READY_PATH = /^\/videos\/downloading(?:_v\d+)?\.mp4$/i;
+const SOURCE_NOT_READY_MESSAGE = 'AllDebrid is still preparing this source. Choose another cached source or try again later.';
 
 const createDownloadError = (message, code = null) => {
     const error = new Error(message);
@@ -27,6 +29,21 @@ const isSupportedSourceUrl = (sourceUrl) => {
         return SUPPORTED_PROTOCOLS.has(parsedUrl.protocol);
     } catch {
         return false;
+    }
+};
+
+const isKnownNotReadySourceUrl = (sourceUrl) => {
+    try {
+        const parsedUrl = new URL(sourceUrl);
+        return parsedUrl.hostname.toLowerCase() === 'torrentio.strem.fun' && TORRENTIO_NOT_READY_PATH.test(parsedUrl.pathname);
+    } catch {
+        return false;
+    }
+};
+
+const assertSourceIsReady = (sourceUrl) => {
+    if (isKnownNotReadySourceUrl(sourceUrl)) {
+        throw createDownloadError(SOURCE_NOT_READY_MESSAGE, 'SOURCE_NOT_READY');
     }
 };
 
@@ -131,6 +148,13 @@ const buildProgressUpdate = ({
 
 const requestDownload = (sourceUrl, partialPath, control, redirectCount, resumeOffset, resumeValidator, onProgress) => {
     return new Promise((resolve, reject) => {
+        try {
+            assertSourceIsReady(sourceUrl);
+        } catch (error) {
+            reject(error);
+            return;
+        }
+
         if (!isSupportedSourceUrl(sourceUrl)) {
             reject(createDownloadError('Unsupported source URL protocol. Only http and https are supported.'));
             return;
@@ -166,7 +190,15 @@ const requestDownload = (sourceUrl, partialPath, control, redirectCount, resumeO
                     return;
                 }
 
-                resolveOnce({ redirectTo: new URL(response.headers.location, parsedUrl).toString() });
+                const redirectTo = new URL(response.headers.location, parsedUrl).toString();
+                try {
+                    assertSourceIsReady(redirectTo);
+                } catch (error) {
+                    rejectOnce(error);
+                    return;
+                }
+
+                resolveOnce({ redirectTo });
                 return;
             }
 
@@ -377,7 +409,8 @@ const startDownload = (record, onUpdate, { resumeOffset = 0 } = {}) => {
                     partialPath,
                     bytesDownloaded: currentOffset,
                     completedAt: null,
-                    error: null
+                    error: null,
+                    errorCode: null
                 });
 
                 const outcome = await requestDownload(
@@ -434,7 +467,8 @@ const startDownload = (record, onUpdate, { resumeOffset = 0 } = {}) => {
                     sourceEtag: outcome.sourceEtag,
                     sourceLastModified: outcome.sourceLastModified,
                     completedAt: new Date().toISOString(),
-                    error: null
+                    error: null,
+                    errorCode: null
                 });
                 return;
             }
@@ -460,7 +494,8 @@ const startDownload = (record, onUpdate, { resumeOffset = 0 } = {}) => {
                     sourceEtag: control.sourceEtag,
                     sourceLastModified: control.sourceLastModified,
                     completedAt: null,
-                    error: null
+                    error: null,
+                    errorCode: null
                 });
                 return;
             }
@@ -475,7 +510,8 @@ const startDownload = (record, onUpdate, { resumeOffset = 0 } = {}) => {
                 sourceEtag: control.sourceEtag,
                 sourceLastModified: control.sourceLastModified,
                 completedAt: null,
-                error: normalizedError.message
+                error: normalizedError.message,
+                errorCode: normalizedError.code
             });
         } finally {
             activeDownloads.delete(record.id);
@@ -524,6 +560,7 @@ module.exports = {
     cancelDownload,
     isDownloadActive,
     isSupportedSourceUrl,
+    isKnownNotReadySourceUrl,
     parseContentRange,
     buildProgressUpdate
 };

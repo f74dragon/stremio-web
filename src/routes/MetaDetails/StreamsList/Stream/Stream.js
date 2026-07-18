@@ -11,8 +11,9 @@ const { Button, Image, Popup } = require('stremio/components');
 const { useRouteFocused } = require('stremio-router');
 const StreamPlaceholder = require('./StreamPlaceholder');
 const styles = require('./styles');
+const { SOURCE_READINESS } = require('stremio/customStremio/debridSourceReadiness');
 
-const getDownloadButtonLabel = (downloadRecord, isDownloadPending, downloadAction) => {
+const getDownloadButtonLabel = (downloadRecord, isDownloadPending, downloadAction, sourceReadiness) => {
     if (isDownloadPending) {
         return 'Adding...';
     }
@@ -31,7 +32,7 @@ const getDownloadButtonLabel = (downloadRecord, isDownloadPending, downloadActio
         case 'completed':
             return 'Play Download';
         default:
-            return 'Download';
+            return sourceReadiness === SOURCE_READINESS.REQUIRES_CACHING ? 'Not cached' : 'Download';
     }
 };
 
@@ -49,6 +50,8 @@ const Stream = ({
     downloadRecord,
     downloadAction,
     downloadActionError,
+    sourceReadiness = SOURCE_READINESS.UNKNOWN,
+    availabilityVerifiedAt,
     isDownloadPending,
     onDownloadPlaceholder,
     onPlayDownload,
@@ -94,6 +97,10 @@ const Stream = ({
     }, []);
 
     const href = React.useMemo(() => {
+        if (sourceReadiness === SOURCE_READINESS.REQUIRES_CACHING) {
+            return null;
+        }
+
         return deepLinks ?
             deepLinks.externalPlayer ?
                 deepLinks.externalPlayer.web ?
@@ -110,7 +117,7 @@ const Stream = ({
                 deepLinks.player
             :
             null;
-    }, [deepLinks]);
+    }, [deepLinks, sourceReadiness]);
 
     const download = React.useMemo(() => {
         return href === deepLinks?.externalPlayer?.playlist ?
@@ -155,6 +162,16 @@ const Stream = ({
             return;
         }
 
+        if (sourceReadiness === SOURCE_READINESS.REQUIRES_CACHING) {
+            event.preventDefault();
+            toast.show({
+                type: 'error',
+                title: 'This source is not cached yet. Choose a cached source instead.',
+                timeout: 5000
+            });
+            return;
+        }
+
         if (profile.settings.playerType !== null) {
             markVideoAsWatched();
             toast.show({
@@ -167,7 +184,7 @@ const Stream = ({
         if (typeof props.onClick === 'function') {
             props.onClick(event);
         }
-    }, [props.onClick, profile.settings, markVideoAsWatched]);
+    }, [props.onClick, profile.settings, markVideoAsWatched, sourceReadiness]);
 
     const copyMagnetLink = React.useCallback((event) => {
         event.preventDefault();
@@ -248,12 +265,16 @@ const Stream = ({
     }, [downloadPayload, downloadRecord, downloadAction, isDownloadPending, onDownloadPlaceholder, onPlayDownload]);
 
     const downloadButtonLabel = React.useMemo(
-        () => getDownloadButtonLabel(downloadRecord, isDownloadPending, downloadAction),
-        [downloadRecord, isDownloadPending, downloadAction]
+        () => getDownloadButtonLabel(downloadRecord, isDownloadPending, downloadAction, sourceReadiness),
+        [downloadRecord, isDownloadPending, downloadAction, sourceReadiness]
     );
     const downloadButtonIsPlayable = downloadRecord?.status === 'completed' && Boolean(downloadRecord.id);
     const hasNonPlayableDownloadRecord = Boolean(downloadRecord) && !downloadButtonIsPlayable;
-    const downloadButtonDisabled = isDownloadPending || Boolean(downloadAction) || hasNonPlayableDownloadRecord;
+    const sourceRequiresCaching = sourceReadiness === SOURCE_READINESS.REQUIRES_CACHING && !downloadButtonIsPlayable;
+    const downloadButtonDisabled = isDownloadPending || Boolean(downloadAction) || hasNonPlayableDownloadRecord || sourceRequiresCaching;
+    const showAllDebridCached = sourceReadiness === SOURCE_READINESS.CACHED && !downloadButtonIsPlayable;
+    const showAllDebridPreviouslyCached = sourceReadiness === SOURCE_READINESS.PREVIOUSLY_CACHED && !downloadButtonIsPlayable;
+    const showAllDebridRequiresCaching = sourceReadiness === SOURCE_READINESS.REQUIRES_CACHING && !downloadButtonIsPlayable;
 
     const renderThumbnailFallback = React.useCallback(() => (
         <Icon className={styles['placeholder-icon']} name={'ic_broken_link'} />
@@ -261,7 +282,20 @@ const Stream = ({
 
     const renderLabel = React.useMemo(() => function renderLabel({ className, children, ...props }) {
         return (
-            <Button className={classnames(className, styles['stream-container'])} title={addonName} href={href} target={target} download={download} onClick={onClick} {...props}>
+            <Button
+                {...props}
+                className={classnames(
+                    className,
+                    styles['stream-container'],
+                    sourceRequiresCaching ? styles['stream-container-not-ready'] : null
+                )}
+                title={sourceRequiresCaching ? 'This source requires AllDebrid caching' : addonName}
+                href={href}
+                target={target}
+                download={download}
+                aria-disabled={sourceRequiresCaching}
+                onClick={onClick}
+            >
                 <div className={styles['info-container']}>
                     {
                         typeof thumbnail === 'string' && thumbnail.length > 0 ?
@@ -288,7 +322,42 @@ const Stream = ({
                             null
                     }
                 </div>
-                <div className={styles['description-container']} title={description}>{description}</div>
+                <div className={styles['description-container']} title={description}>
+                    {
+                        showAllDebridCached ?
+                            <div
+                                className={styles['debrid-badge']}
+                                title={t('CUSTOM_STREAM_ALLDEBRID_CACHED_TITLE', { defaultValue: 'This torrent is already cached by AllDebrid' })}
+                            >
+                                <Icon className={styles['debrid-badge-icon']} name={'checkmark'} />
+                                <span>{t('CUSTOM_STREAM_ALLDEBRID_CACHED', { defaultValue: 'Cached on AllDebrid' })}</span>
+                            </div>
+                            : null
+                    }
+                    {
+                        showAllDebridPreviouslyCached ?
+                            <div
+                                className={classnames(styles['debrid-badge'], styles['debrid-badge-previously-cached'])}
+                                title={availabilityVerifiedAt ? `Last verified ${new Date(availabilityVerifiedAt).toLocaleString()}` : 'Previously verified in the AllDebrid cache'}
+                            >
+                                <Icon className={styles['debrid-badge-icon']} name={'checkmark'} />
+                                <span>{t('CUSTOM_STREAM_ALLDEBRID_PREVIOUSLY_CACHED', { defaultValue: 'Previously verified cached' })}</span>
+                            </div>
+                            : null
+                    }
+                    {
+                        showAllDebridRequiresCaching ?
+                            <div
+                                className={classnames(styles['debrid-badge'], styles['debrid-badge-not-ready'])}
+                                title={'This source would ask AllDebrid to cache the torrent before it can play'}
+                            >
+                                <Icon className={styles['debrid-badge-icon']} name={'warning'} />
+                                <span>{t('CUSTOM_STREAM_ALLDEBRID_REQUIRES_CACHING', { defaultValue: 'Requires caching' })}</span>
+                            </div>
+                            : null
+                    }
+                    <div className={styles['description-text']}>{description}</div>
+                </div>
                 <Button
                     className={classnames(
                         styles['download-button-container'],
@@ -313,11 +382,11 @@ const Stream = ({
                         :
                         null
                 }
-                <Icon className={styles['icon']} name={'play'} />
+                <Icon className={styles['icon']} name={sourceRequiresCaching ? 'warning' : 'play'} />
                 {children}
             </Button>
         );
-    }, [thumbnail, progress, addonName, name, description, href, target, download, onClick, downloadButtonOnClick, downloadButtonDisabled, downloadButtonIsPlayable, downloadButtonLabel, downloadAction, downloadActionError]);
+    }, [thumbnail, progress, addonName, name, description, href, target, download, onClick, downloadButtonOnClick, downloadButtonDisabled, downloadButtonIsPlayable, downloadButtonLabel, downloadAction, downloadActionError, showAllDebridCached, showAllDebridPreviouslyCached, showAllDebridRequiresCaching, sourceRequiresCaching, availabilityVerifiedAt]);
 
     const renderMenu = React.useMemo(() => function renderMenu() {
         return (
@@ -407,6 +476,8 @@ Stream.propTypes = {
     downloadRecord: PropTypes.object,
     downloadAction: PropTypes.oneOf(['cancel', 'play', 'remove']),
     downloadActionError: PropTypes.string,
+    sourceReadiness: PropTypes.oneOf(Object.values(SOURCE_READINESS)),
+    availabilityVerifiedAt: PropTypes.string,
     isDownloadPending: PropTypes.bool,
     onDownloadPlaceholder: PropTypes.func,
     onPlayDownload: PropTypes.func,

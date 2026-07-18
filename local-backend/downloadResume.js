@@ -75,7 +75,8 @@ const prepareDownloadResume = async (record, now = new Date().toISOString()) => 
             queueOrder: null,
             updatedAt: now,
             completedAt: null,
-            error: null
+            error: null,
+            errorCode: null
         },
         resumeOffset
     };

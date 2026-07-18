@@ -69,6 +69,43 @@ Accepted backend values are positive whole numbers or `unlimited`. The app prese
 
 Unlimited starts every queued transfer and can use substantial bandwidth, storage I/O, and system resources. Custom values and Unlimited are applied immediately without interrupting transfers that are already active.
 
+## AllDebrid Account and Safe Source Readiness
+
+Open **Downloads -> Download options -> AllDebrid availability** and choose **Connect AllDebrid**. The backend displays an official PIN and the app provides a direct link to AllDebrid's authorization page. No API key needs to be copied into an environment variable or frontend setting.
+
+The API key is stored only in the local backend settings file:
+
+`%LOCALAPPDATA%\Custom Stremio\backend-settings.json`
+
+Frontend API responses expose only connection, username, and premium state. They never return the key. Treat the local data directory as private because an AllDebrid API key grants account access.
+
+Debrid routes accept browser requests only from the local development origins on port `8080` by default. If this fork is served from another trusted origin, add a comma-separated allowlist before starting the backend:
+
+```powershell
+$env:CUSTOM_STREMIO_ALLOWED_ORIGINS = 'https://my-trusted-local-origin.example'
+```
+
+Normal stream browsing:
+
+- reads persistent local history and recognizes Torrentio `[AD+]` as a positive fallback hint;
+- treats `[AD Download]` as unknown unless an explicit provider observation exists;
+- performs no AllDebrid API request and creates no magnet while browsing, filtering, or sorting;
+- offers a disclosed **Check availability** action when the account is connected and visible sources contain hashes;
+- never replace or unlock the Stremio URL used by the downloader;
+- rejects known Torrentio `downloading.mp4` / `downloading_vN.mp4` redirect placeholders before requesting their body or finalizing a file.
+
+The backend retains an explicit `POST /debrid/alldebrid/availability` capability for future opt-in actions. It:
+
+- uses torrent `infoHash` values supplied by the caller;
+- reports the upload response's `ready` state;
+- protects every magnet that existed in the account before the check;
+- immediately deletes every newly created ready or not-ready check magnet;
+- retains failed cleanup IDs in `alldebrid-pending-cleanup.json` and retries them after restart;
+- caches repeat checks for five minutes to reduce repeated provider mutations;
+- stores cached observations for 30 days and not-cached observations for 15 minutes in `alldebrid-availability-history.json`.
+
+AllDebrid's documented API does not expose a read-only instant-availability endpoint. The explicit action therefore uses the documented upload response, which means an uncached torrent may briefly begin provider-side peer processing before the temporary magnet is deleted. It is never called automatically. When an unchecked Torrentio download resolves to the known placeholder, the backend matches the URL hash against account magnets and deletes only newly created exact-hash IDs; preexisting and unrelated magnets are protected. Disconnect is blocked while cleanup remains pending so the backend does not discard the credential needed to finish cleanup.
+
 ## Persistent Download Records
 
 Download metadata is stored separately from media files at:
@@ -278,6 +315,7 @@ Invoke-RestMethod -Uri 'http://127.0.0.1:5577/downloads' -Method Post -ContentTy
 - Download records persist across backend restarts.
 - Failed and canceled records can be retried from the frontend or through `POST /downloads/:id/retry`; completed and active records cannot be retried.
 - New records preserve optional title posters/backgrounds, logos, summaries, runtime/release information, metadata links, and episode thumbnails for the media-first Downloads Library. Older records without rich metadata remain valid and use frontend fallbacks.
+- Torrent-backed records also preserve `infoHash`, `fileIdx`, and safe filename/video-size behavior hints for availability and later source-selection work. These fields do not change the selected direct download URL.
 - `POST /downloads/:id/open-location` opens only locations derived from stored records; it does not accept caller-supplied paths.
 - The first restart after upgrading from the older in-memory backend cannot recover records that were never written by that older process; their media files remain on disk.
 - Waiting queued work is restored in saved manual order when present and FIFO order otherwise; interrupted active transfers are restored as `paused` and can be resumed explicitly.

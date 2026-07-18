@@ -32,6 +32,12 @@ describe('downloadPayload', () => {
             addonName: 'Example Addon',
             stream: {
                 name: '1080p',
+                infoHash: '842783E3005495D5D1637F5364B59343C7844707',
+                fileIdx: 3,
+                behaviorHints: {
+                    filename: 'Episode.Title.S01E02.mkv',
+                    videoSize: 1234567890
+                },
                 deepLinks: {
                     externalPlayer: {
                         download: 'https://media.example/episode.mkv'
@@ -61,6 +67,13 @@ describe('downloadPayload', () => {
             season: 1,
             episode: 2,
             videoReleased: '2026-07-15T12:00:00.000Z',
+            infoHash: '842783e3005495d5d1637f5364b59343c7844707',
+            sourceReadiness: 'unknown',
+            fileIdx: 3,
+            behaviorHints: {
+                filename: 'Episode.Title.S01E02.mkv',
+                videoSize: 1234567890
+            },
             downloadUrl: 'https://media.example/episode.mkv'
         });
     });
@@ -77,5 +90,39 @@ describe('downloadPayload', () => {
             metaLinks: [],
             videoThumbnail: null
         });
+    });
+
+    test('rejects malformed torrent hashes without affecting the Stremio download URL', () => {
+        const payload = buildDownloadPayload({
+            stream: {
+                infoHash: 'not-a-hash',
+                url: 'https://stream.example/video',
+                deepLinks: { externalPlayer: { download: 'https://download.example/video.mkv' } }
+            }
+        });
+        expect(payload.infoHash).toBeNull();
+        expect(payload.downloadUrl).toBe('https://download.example/video.mkv');
+    });
+
+    test('keeps Torrentio download-route rows unknown without resolving or blocking the URL', () => {
+        const payload = buildDownloadPayload({
+            stream: {
+                name: '[AD Download] 1080p',
+                deepLinks: { externalPlayer: { download: 'https://torrentio.example/resolve' } }
+            }
+        });
+
+        expect(payload.sourceReadiness).toBe('unknown');
+        expect(payload.downloadUrl).toBe('https://torrentio.example/resolve');
+    });
+
+    test('extracts a torrent hash embedded in a Torrentio download URL', () => {
+        const hash = '842783e3005495d5d1637f5364b59343c7844707';
+        const payload = buildDownloadPayload({
+            stream: {
+                deepLinks: { externalPlayer: { download: `https://torrentio.example/resolve/${hash}/file.mkv` } }
+            }
+        });
+        expect(payload.infoHash).toBe(hash);
     });
 });

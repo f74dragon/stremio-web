@@ -12,8 +12,17 @@ const styles = require('./styles');
 const { usePlatform, useProfile } = require('stremio/common');
 const { default: SeasonEpisodePicker } = require('../EpisodePicker');
 const { buildDownloadPayload } = require('stremio/customStremio/downloadPayload');
-const { createDownload } = require('stremio/customStremio/localBackendClient');
+const {
+    createDownload,
+    checkAllDebridAvailability,
+    getAllDebridAvailabilityHistory
+} = require('stremio/customStremio/localBackendClient');
 const { findMatchingDownloadRecord, getPayloadSourceUrl, isActiveDownloadRecord } = require('stremio/customStremio/downloadRecordMatching');
+const {
+    classifyDebridSourceReadiness,
+    getStreamInfoHash,
+    getSourceReadinessSortRank
+} = require('stremio/customStremio/debridSourceReadiness');
 
 const ALL_ADDONS_KEY = 'ALL';
 const PREFERRED_ADDON_STORAGE_KEY = 'customStremio.preferredAddon';
@@ -47,6 +56,10 @@ const StreamsList = ({
     const [selectedAddon, setSelectedAddon] = React.useState(ALL_ADDONS_KEY);
     const [downloadStatus, setDownloadStatus] = React.useState(null);
     const [pendingDownloadKeys, setPendingDownloadKeys] = React.useState({});
+    const [availabilityByHash, setAvailabilityByHash] = React.useState({});
+    const [allDebridConnected, setAllDebridConnected] = React.useState(false);
+    const [availabilityChecking, setAvailabilityChecking] = React.useState(false);
+    const [availabilityError, setAvailabilityError] = React.useState(null);
     const [preferredAddon, setPreferredAddon] = React.useState(() => {
         try {
             if (typeof window === 'undefined' || !window.localStorage) {
@@ -132,19 +145,90 @@ const StreamsList = ({
                 :
                 [];
     }, [streamsByAddon, selectedAddon]);
+    const filteredInfoHashes = React.useMemo(() => Array.from(new Set(
+        filteredStreams.map(getStreamInfoHash).filter(Boolean)
+    )), [filteredStreams]);
+    const filteredInfoHashesKey = filteredInfoHashes.join(',');
+    const applyAvailabilityItems = React.useCallback((items) => {
+        if (!Array.isArray(items)) {
+            return;
+        }
+        setAvailabilityByHash((currentItems) => {
+            const nextItems = { ...currentItems };
+            items.forEach((item) => {
+                if (typeof item?.hash === 'string') {
+                    nextItems[item.hash.toLowerCase()] = item;
+                }
+            });
+            return nextItems;
+        });
+    }, []);
+    const getStreamAvailability = React.useCallback((stream) => {
+        const hash = getStreamInfoHash(stream);
+        return hash ? availabilityByHash[hash] || null : null;
+    }, [availabilityByHash]);
+    const getStreamReadiness = React.useCallback((stream) => {
+        return classifyDebridSourceReadiness(stream, getStreamAvailability(stream));
+    }, [getStreamAvailability]);
+
+    React.useEffect(() => {
+        let canceled = false;
+        getAllDebridAvailabilityHistory(filteredInfoHashes)
+            .then((result) => {
+                if (canceled) {
+                    return;
+                }
+                setAllDebridConnected(result?.connected === true);
+                applyAvailabilityItems(result?.items);
+                setAvailabilityError(null);
+            })
+            .catch(() => {
+                if (!canceled) {
+                    setAllDebridConnected(false);
+                }
+            });
+        return () => {
+            canceled = true;
+        };
+    }, [filteredInfoHashesKey, applyAvailabilityItems]);
+
+    const onCheckAvailability = React.useCallback(async () => {
+        if (availabilityChecking || filteredInfoHashes.length === 0) {
+            return;
+        }
+        setAvailabilityChecking(true);
+        setAvailabilityError(null);
+        try {
+            const checked = await checkAllDebridAvailability(filteredInfoHashes);
+            setAllDebridConnected(checked?.connected === true);
+            const history = await getAllDebridAvailabilityHistory(filteredInfoHashes);
+            applyAvailabilityItems(history?.items);
+            if (checked?.cleanupWarning) {
+                setAvailabilityError(checked.cleanupWarning);
+            }
+        } catch (error) {
+            setAvailabilityError(error?.backendError || error?.message || 'Could not check AllDebrid availability.');
+        } finally {
+            setAvailabilityChecking(false);
+        }
+    }, [availabilityChecking, filteredInfoHashesKey, applyAvailabilityItems]);
     const orderedFilteredStreams = React.useMemo(() => {
-        if (selectedAddon !== ALL_ADDONS_KEY || !normalizeAddonName(preferredAddon)) {
-            return filteredStreams;
-        }
+        return filteredStreams
+            .map((stream, index) => ({ stream, index }))
+            .sort((left, right) => {
+                if (selectedAddon === ALL_ADDONS_KEY && normalizeAddonName(preferredAddon)) {
+                    const preferredDifference = Number(isPreferredAddonStream(right.stream)) - Number(isPreferredAddonStream(left.stream));
+                    if (preferredDifference !== 0) {
+                        return preferredDifference;
+                    }
+                }
 
-        const preferredStreams = filteredStreams.filter((stream) => isPreferredAddonStream(stream));
-        if (preferredStreams.length === 0) {
-            return filteredStreams;
-        }
-
-        const otherStreams = filteredStreams.filter((stream) => !isPreferredAddonStream(stream));
-        return preferredStreams.concat(otherStreams);
-    }, [filteredStreams, selectedAddon, preferredAddon, isPreferredAddonStream]);
+                const readinessDifference = getSourceReadinessSortRank(getStreamReadiness(left.stream)) -
+                    getSourceReadinessSortRank(getStreamReadiness(right.stream));
+                return readinessDifference !== 0 ? readinessDifference : left.index - right.index;
+            })
+            .map(({ stream }) => stream);
+    }, [filteredStreams, selectedAddon, preferredAddon, isPreferredAddonStream, getStreamReadiness]);
     const selectableOptions = React.useMemo(() => {
         return {
             options: [
@@ -196,6 +280,17 @@ const StreamsList = ({
             onSelect: onPreferredAddonSelected
         };
     }, [streamsByAddon, preferredAddon, onPreferredAddonSelected]);
+    const availabilitySummary = React.useMemo(() => {
+        return filteredInfoHashes.reduce((summary, hash) => {
+            const status = availabilityByHash[hash]?.status;
+            if (status === 'cached') {
+                summary.cached += 1;
+            } else if (status === 'uncached') {
+                summary.uncached += 1;
+            }
+            return summary;
+        }, { cached: 0, uncached: 0 });
+    }, [filteredInfoHashesKey, availabilityByHash]);
     const showDownloadStatus = React.useCallback((message, tone) => {
         const statusId = Date.now();
         setDownloadStatus({ id: statusId, message, tone, visible: true });
@@ -350,6 +445,43 @@ const StreamsList = ({
                         :
                         null
                 }
+                {
+                    allDebridConnected && filteredInfoHashes.length > 0 ?
+                        <div className={styles['availability-controls']}>
+                            <Button
+                                className={styles['availability-check-button']}
+                                title={t('CUSTOM_STREAM_CHECK_AVAILABILITY_TITLE', { defaultValue: 'Check the visible torrent hashes on AllDebrid' })}
+                                disabled={availabilityChecking}
+                                aria-busy={availabilityChecking}
+                                onClick={onCheckAvailability}
+                            >
+                                <Icon className={classnames(styles['availability-check-icon'], availabilityChecking ? styles['availability-check-icon-active'] : null)} name={'checkmark'} />
+                                <span>{availabilityChecking ?
+                                    t('CUSTOM_STREAM_CHECKING_AVAILABILITY', { defaultValue: 'Checking…' })
+                                    :
+                                    t('CUSTOM_STREAM_CHECK_AVAILABILITY', { defaultValue: 'Check availability' })}
+                                </span>
+                            </Button>
+                            {
+                                availabilitySummary.cached > 0 || availabilitySummary.uncached > 0 ?
+                                    <span className={styles['availability-summary']}>
+                                        {`${availabilitySummary.cached} cached · ${availabilitySummary.uncached} not cached`}
+                                    </span>
+                                    : null
+                            }
+                            <span className={styles['availability-disclosure']}>
+                                {t('CUSTOM_STREAM_CHECK_AVAILABILITY_DISCLOSURE', {
+                                    defaultValue: 'Checks briefly create and remove temporary magnet entries in your AllDebrid account.'
+                                })}
+                            </span>
+                            {
+                                availabilityError ?
+                                    <span className={styles['availability-error']} role={'alert'}>{availabilityError}</span>
+                                    : null
+                            }
+                        </div>
+                        : null
+                }
             </div>
             {
                 props.streams.length === 0 ?
@@ -397,17 +529,22 @@ const StreamsList = ({
                             <React.Fragment>
                                 <div className={styles['streams-container']} ref={streamsContainerRef}>
                                     {orderedFilteredStreams.map((stream, index) => {
-                                        const downloadPayload = buildDownloadPayload({
-                                            metaId,
-                                            parentTitle,
-                                            poster,
-                                            background,
-                                            mediaMetadata,
-                                            type,
-                                            video,
-                                            addonName: stream.addonName,
-                                            stream
-                                        });
+                                        const availability = getStreamAvailability(stream);
+                                        const sourceReadiness = getStreamReadiness(stream);
+                                        const downloadPayload = {
+                                            ...buildDownloadPayload({
+                                                metaId,
+                                                parentTitle,
+                                                poster,
+                                                background,
+                                                mediaMetadata,
+                                                type,
+                                                video,
+                                                addonName: stream.addonName,
+                                                stream
+                                            }),
+                                            sourceReadiness
+                                        };
                                         const downloadRecord = findMatchingDownloadRecord(downloadRecords, downloadPayload);
                                         const activeDownloadRecord = isActiveDownloadRecord(downloadRecord) ? downloadRecord : null;
                                         const downloadRecordId = activeDownloadRecord?.id;
@@ -429,6 +566,8 @@ const StreamsList = ({
                                                 downloadRecord={activeDownloadRecord}
                                                 downloadAction={downloadRecordId ? downloadActionStates[downloadRecordId] : null}
                                                 downloadActionError={downloadRecordId ? downloadActionErrors[downloadRecordId] : null}
+                                                sourceReadiness={sourceReadiness}
+                                                availabilityVerifiedAt={availability?.verifiedAt ?? null}
                                                 isDownloadPending={isDownloadPending}
                                                 onDownloadPlaceholder={onDownloadPlaceholder}
                                                 onPlayDownload={onPlayDownload}

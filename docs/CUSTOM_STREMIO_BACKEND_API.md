@@ -41,6 +41,9 @@ The frontend will send `POST /downloads` using the current `buildDownloadPayload
 - `addonName`
 - `streamName`
 - `streamDescription`
+- `infoHash` (normalized 40-character torrent hash when provided by the Stremio stream)
+- `fileIdx`
+- `behaviorHints` (`filename` and `videoSize` only)
 - `streamUrl`
 - `externalUrl`
 - `downloadUrl`
@@ -100,6 +103,12 @@ Example combined download record shape:
   "addonName": "Torrentio",
   "streamName": "1080p BluRay",
   "streamDescription": "English, x264",
+  "infoHash": "842783e3005495d5d1637f5364b59343c7844707",
+  "fileIdx": 3,
+  "behaviorHints": {
+    "filename": "Episode.Title.S01E02.mkv",
+    "videoSize": 1234567890
+  },
   "streamUrl": null,
   "externalUrl": null,
   "downloadUrl": "https://example.com/file.torrent",
@@ -202,13 +211,93 @@ Behavior notes:
 - Lowering the limit does not interrupt active transfers. New work waits until the active count is below the new value.
 - The response uses the same shape as `GET /settings`.
 
+### AllDebrid authentication and availability
+
+#### `POST /debrid/alldebrid/auth/pin`
+
+- Starts the official AllDebrid PIN flow through `GET https://api.alldebrid.com/v4.1/pin/get`.
+- Returns only `pin`, `userUrl`, and `expiresAt`; the provider check token stays in backend memory.
+- The user opens `userUrl` and authorizes the displayed PIN.
+
+#### `POST /debrid/alldebrid/auth/pin/check`
+
+- Checks the active PIN through `POST https://api.alldebrid.com/v4/pin/check`.
+- Before activation, returns `{ "activated": false, "expiresAt": "..." }`.
+- After activation, validates the returned API key with `/v4/user`, stores it in local backend settings, and returns sanitized connection state. The API key is never returned to frontend code.
+- Browser calls to `/debrid/*` accept trusted local port-8080 origins by default. Additional exact origins require `CUSTOM_STREMIO_ALLOWED_ORIGINS`; requests without an `Origin` header remain available for local command-line diagnostics.
+
+#### `DELETE /debrid/alldebrid/auth`
+
+- Disconnects the locally stored AllDebrid account and clears only the short-lived in-memory repeat-check cache. Persistent availability history is retained.
+- Pending temporary-magnet cleanup is retried before the key is removed. Disconnect returns HTTP `409` rather than discarding the only credential capable of cleanup when items still remain.
+
+#### `POST /debrid/alldebrid/availability`
+
+This is an explicit, account-mutating diagnostic capability. The stream browser does not call it automatically. Normal browsing treats `[AD+]` as a positive addon-provided signal, but does not treat `[AD Download]` as a negative result because live testing proved that label can still resolve to a real cached file.
+
+Request:
+
+```json
+{
+  "hashes": ["842783e3005495d5d1637f5364b59343c7844707"]
+}
+```
+
+Response:
+
+```json
+{
+  "provider": "alldebrid",
+  "connected": true,
+  "items": [
+    {
+      "hash": "842783e3005495d5d1637f5364b59343c7844707",
+      "status": "cached",
+      "checkedAt": "2026-07-17T12:00:00.000Z",
+      "fromCache": false
+    }
+  ],
+  "pendingCleanup": 0,
+  "cleanupWarning": null
+}
+```
+
+Behavior and safety:
+
+- Accepts at most 100 unique, valid 40-character hexadecimal info hashes per request.
+- Uses the documented `POST /v4/magnet/upload` response `ready` field. The removed undocumented `/magnet/instant` endpoint is not used.
+- Snapshots existing magnet IDs first, journals every new ID, deletes all check-created ready and not-ready magnets, and verifies cleanup through a fresh status snapshot.
+- Existing account magnets are protected and never deleted by a check.
+- Failed cleanup remains in `%LOCALAPPDATA%\Custom Stremio\alldebrid-pending-cleanup.json` and is retried on the next check and backend startup.
+- Cached and uncached results live in backend memory for five minutes to reduce account mutations and API traffic.
+- `fromCache` reports whether that item came from this five-minute backend cache; provider availability is represented only by `status`.
+- Confirmed `cached` and `uncached` observations are also written to persistent availability history with their longer display TTLs.
+- Because AllDebrid has no documented read-only cache endpoint, uploading an uncached hash may briefly start peer processing before immediate deletion.
+- Do not use this endpoint for passive page-load checks. The stream page calls it only from the explicit, disclosed **Check availability** action.
+- This endpoint only supplies UI availability metadata. `POST /downloads` continues to use the original Stremio-provided URL.
+
+#### `POST /debrid/alldebrid/availability/history`
+
+Read-only local history lookup. It never calls AllDebrid and is safe for the stream page to call while browsing.
+
+Request:
+
+```json
+{ "hashes": ["842783e3005495d5d1637f5364b59343c7844707"] }
+```
+
+Each response item contains `hash`, `status`, `verifiedAt`, `expiresAt`, `source`, and `previouslyVerified`. Missing and expired entries return `status: "unknown"`. Cached observations expire after 30 days and set `previouslyVerified: true` after 24 hours; uncached observations expire after 15 minutes. A new negative observation does not overwrite a still-valid positive cached observation for the same hash.
+
 ### 2. `POST /downloads`
 
 Purpose:
 - Create a new local download job from the frontend payload.
+- Reject payloads already identified as `requires_caching`, plus direct known Torrentio not-ready placeholder URLs, with HTTP `409` and `errorCode: "SOURCE_NOT_READY"`.
 
 Request body:
 - The frontend `buildDownloadPayload(input)` output fields listed above.
+- `sourceReadiness` is one of `cached`, `previously_cached`, `requires_caching`, or `unknown`. Persistent provider observations override addon label hints; `[AD Download]` alone remains `unknown` and usable.
+- Hash-bearing jobs identified as AllDebrid by their addon metadata snapshot exact-hash account magnets before source resolution. Successful media completion stores `cached`. A known Torrentio placeholder stores short-lived `uncached`, fails with `errorCode: "SOURCE_NOT_READY"`, and triggers journaled deletion only for new exact-hash magnet IDs.
 
 Duplicate behavior:
 - Backend must detect active duplicates before creating a new record.
@@ -468,12 +557,21 @@ Notes:
 - `deleted` records are omitted from storage.
 - Invalid or unsupported metadata documents stop backend startup rather than being silently overwritten.
 
+## Persistent AllDebrid Availability History
+
+- Default Windows path: `%LOCALAPPDATA%\Custom Stremio\alldebrid-availability-history.json`
+- `CUSTOM_STREMIO_DATA_DIR` overrides the containing data directory.
+- The versioned JSON document uses atomic temporary-file replacement and is separate from account credentials and the pending-cleanup journal.
+- Disconnecting AllDebrid does not delete this history. A user-facing clear-history control is intentionally deferred.
+
 ## Persistent Backend Settings
 
 - Settings are stored separately from download records in a versioned `backend-settings.json` document.
 - Default Windows path: `%LOCALAPPDATA%\Custom Stremio\backend-settings.json`
 - `CUSTOM_STREMIO_DATA_DIR` overrides the directory for both record and settings documents.
 - Writes use atomic temporary-file replacement.
+- The AllDebrid API key is stored only in this local backend document and is omitted from every frontend settings response. Protect the Windows account and data directory accordingly.
+- Version-one settings containing only download concurrency are migrated in memory with AllDebrid disconnected and written in the current format on the next save.
 - A saved `downloads.maxConcurrentDownloads` value takes precedence over `CUSTOM_STREMIO_MAX_CONCURRENT_DOWNLOADS` on startup.
 - When no saved document exists, the environment value is used if it is a positive integer or `unlimited`; otherwise the scheduler default is `2`.
 - Invalid or unsupported settings documents stop backend startup rather than being silently overwritten.

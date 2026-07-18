@@ -1,8 +1,15 @@
+const { classifyDebridSourceReadiness, getStreamInfoHash } = require('./debridSourceReadiness');
+
 const toIsoDateOrNull = (value) => {
     return value instanceof Date && !isNaN(value.getTime()) ?
         value.toISOString()
         :
         null;
+};
+
+const normalizeInfoHash = (value) => {
+    const hash = typeof value === 'string' ? value.trim().toLowerCase() : '';
+    return /^[a-f0-9]{40}$/.test(hash) ? hash : null;
 };
 
 const buildDownloadPayload = (input) => {
@@ -43,6 +50,13 @@ const buildDownloadPayload = (input) => {
         addonName,
         streamName: stream?.name ?? null,
         streamDescription: stream?.description ?? null,
+        sourceReadiness: classifyDebridSourceReadiness(stream),
+        infoHash: getStreamInfoHash(stream) || normalizeInfoHash(stream?.infoHash),
+        fileIdx: Number.isSafeInteger(stream?.fileIdx) ? stream.fileIdx : null,
+        behaviorHints: {
+            filename: stream?.behaviorHints?.filename ?? null,
+            videoSize: Number.isFinite(stream?.behaviorHints?.videoSize) ? stream.behaviorHints.videoSize : null
+        },
         streamUrl: stream?.url ?? null,
         externalUrl: stream?.externalUrl ?? null,
         downloadUrl: externalPlayer?.download ?? null,
@@ -52,5 +66,6 @@ const buildDownloadPayload = (input) => {
 };
 
 module.exports = {
+    normalizeInfoHash,
     buildDownloadPayload
 };

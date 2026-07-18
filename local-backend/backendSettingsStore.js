@@ -3,12 +3,36 @@ const path = require('path');
 const { getDefaultDataDirectory } = require('./downloadRecordStore');
 const { isValidMaxConcurrentDownloads } = require('./downloadScheduler');
 
-const SETTINGS_STORE_VERSION = 1;
+const SETTINGS_STORE_VERSION = 2;
+const LEGACY_SETTINGS_STORE_VERSION = 1;
 const SETTINGS_FILE_NAME = 'backend-settings.json';
 
-const createBackendSettings = (maxConcurrentDownloads) => ({
+const normalizeAllDebridSettings = (settings) => {
+    if (settings === null || settings === undefined) {
+        return null;
+    }
+
+    const apiKey = typeof settings.apiKey === 'string' ? settings.apiKey.trim() : '';
+    if (!apiKey) {
+        const error = new Error('Backend settings contain an invalid AllDebrid API key');
+        error.code = 'BACKEND_SETTINGS_INVALID';
+        throw error;
+    }
+
+    return {
+        apiKey,
+        username: typeof settings.username === 'string' && settings.username.trim() ? settings.username.trim() : null,
+        isPremium: settings.isPremium === true,
+        premiumUntil: settings.premiumUntil === null || settings.premiumUntil === undefined ? null : String(settings.premiumUntil)
+    };
+};
+
+const createBackendSettings = (maxConcurrentDownloads, allDebrid = null) => ({
     downloads: {
         maxConcurrentDownloads
+    },
+    debrid: {
+        allDebrid: normalizeAllDebridSettings(allDebrid)
     }
 });
 
@@ -22,7 +46,7 @@ const validateBackendSettings = (settings) => {
         throw error;
     }
 
-    return createBackendSettings(maxConcurrentDownloads);
+    return createBackendSettings(maxConcurrentDownloads, settings?.debrid?.allDebrid ?? null);
 };
 
 const readBackendSettings = async (filePath = getDefaultSettingsPath(), fallbackSettings) => {
@@ -38,7 +62,7 @@ const readBackendSettings = async (filePath = getDefaultSettingsPath(), fallback
             throw parseError;
         }
 
-        if (!document || typeof document !== 'object' || document.version !== SETTINGS_STORE_VERSION) {
+        if (!document || typeof document !== 'object' || ![LEGACY_SETTINGS_STORE_VERSION, SETTINGS_STORE_VERSION].includes(document.version)) {
             const formatError = new Error(`Backend settings use an unsupported format: ${filePath}`);
             formatError.code = 'BACKEND_SETTINGS_UNSUPPORTED';
             throw formatError;
@@ -95,6 +119,7 @@ class BackendSettingsStore {
 
 module.exports = {
     SETTINGS_STORE_VERSION,
+    LEGACY_SETTINGS_STORE_VERSION,
     SETTINGS_FILE_NAME,
     createBackendSettings,
     getDefaultSettingsPath,

@@ -82,6 +82,7 @@ describe('downloadRetry', () => {
             updatedAt: '2026-07-16T12:00:00.000Z',
             completedAt: null,
             error: null,
+            errorCode: null,
             resumeSupported: null,
             sourceEtag: null,
             sourceLastModified: null,

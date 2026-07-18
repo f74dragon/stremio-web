@@ -5,6 +5,7 @@ const os = require('os');
 const path = require('path');
 const {
     SETTINGS_STORE_VERSION,
+    LEGACY_SETTINGS_STORE_VERSION,
     createBackendSettings,
     readBackendSettings,
     writeBackendSettings,
@@ -26,14 +27,16 @@ describe('backendSettingsStore', () => {
 
     test('uses the environment-derived fallback until a saved value exists', async () => {
         await expect(readBackendSettings(settingsPath, createBackendSettings(2))).resolves.toEqual({
-            downloads: { maxConcurrentDownloads: 2 }
+            downloads: { maxConcurrentDownloads: 2 },
+            debrid: { allDebrid: null }
         });
 
         const store = new BackendSettingsStore({ filePath: settingsPath });
         await store.save(createBackendSettings(4));
         await store.save(createBackendSettings(3));
         await expect(store.load(createBackendSettings(1))).resolves.toEqual({
-            downloads: { maxConcurrentDownloads: 3 }
+            downloads: { maxConcurrentDownloads: 3 },
+            debrid: { allDebrid: null }
         });
 
         const document = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
@@ -51,13 +54,43 @@ describe('backendSettingsStore', () => {
     test('persists custom and unlimited concurrency values', async () => {
         await expect(writeBackendSettings(settingsPath, {
             downloads: { maxConcurrentDownloads: 128 }
-        })).resolves.toEqual({ downloads: { maxConcurrentDownloads: 128 } });
+        })).resolves.toEqual({ downloads: { maxConcurrentDownloads: 128 }, debrid: { allDebrid: null } });
 
         await expect(writeBackendSettings(settingsPath, {
             downloads: { maxConcurrentDownloads: 'unlimited' }
-        })).resolves.toEqual({ downloads: { maxConcurrentDownloads: 'unlimited' } });
+        })).resolves.toEqual({ downloads: { maxConcurrentDownloads: 'unlimited' }, debrid: { allDebrid: null } });
         await expect(readBackendSettings(settingsPath, createBackendSettings(2))).resolves.toEqual({
-            downloads: { maxConcurrentDownloads: 'unlimited' }
+            downloads: { maxConcurrentDownloads: 'unlimited' },
+            debrid: { allDebrid: null }
+        });
+    });
+
+    test('persists backend-only AllDebrid credentials and migrates version one settings', async () => {
+        const settings = createBackendSettings(2, {
+            apiKey: 'secret-api-key',
+            username: 'viewer',
+            isPremium: true,
+            premiumUntil: 1900000000
+        });
+        await expect(writeBackendSettings(settingsPath, settings)).resolves.toEqual({
+            downloads: { maxConcurrentDownloads: 2 },
+            debrid: {
+                allDebrid: {
+                    apiKey: 'secret-api-key',
+                    username: 'viewer',
+                    isPremium: true,
+                    premiumUntil: '1900000000'
+                }
+            }
+        });
+
+        fs.writeFileSync(settingsPath, JSON.stringify({
+            version: LEGACY_SETTINGS_STORE_VERSION,
+            settings: { downloads: { maxConcurrentDownloads: 4 } }
+        }), 'utf8');
+        await expect(readBackendSettings(settingsPath, createBackendSettings(1))).resolves.toEqual({
+            downloads: { maxConcurrentDownloads: 4 },
+            debrid: { allDebrid: null }
         });
     });
 

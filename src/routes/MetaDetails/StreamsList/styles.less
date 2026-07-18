@@ -190,6 +190,76 @@
                 overflow: auto;
             }
         }
+
+        .availability-controls {
+            flex: 1 1 100%;
+            min-width: 0;
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 0.55rem 0.8rem;
+            padding: 0.7rem 0.8rem;
+            border: 1px solid rgba(255, 255, 255, 0.07);
+            border-radius: 0.75rem;
+            background-color: rgba(255, 255, 255, 0.035);
+        }
+
+        .availability-check-button {
+            flex: none;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.42rem;
+            min-height: 2.35rem;
+            padding: 0.55rem 0.85rem;
+            border-radius: 999px;
+            color: var(--primary-foreground-color);
+            font-size: 0.82rem;
+            font-weight: 700;
+            background-color: var(--secondary-accent-color);
+
+            &:hover, &:focus {
+                background-color: var(--primary-accent-color);
+                box-shadow: 0 0.45rem 1.1rem rgba(0, 0, 0, 0.2);
+            }
+
+            &:disabled {
+                opacity: 0.68;
+            }
+        }
+
+        .availability-check-icon {
+            width: 0.95rem;
+            height: 0.95rem;
+        }
+
+        .availability-check-icon-active {
+            animation: availability-pulse 0.9s ease-in-out infinite alternate;
+        }
+
+        .availability-summary {
+            flex: none;
+            color: var(--primary-foreground-color);
+            font-size: 0.78rem;
+            font-weight: 650;
+            opacity: 0.88;
+        }
+
+        .availability-disclosure {
+            flex: 1 1 20rem;
+            min-width: 12rem;
+            color: var(--primary-foreground-color);
+            font-size: 0.72rem;
+            line-height: 1.35;
+            opacity: 0.52;
+        }
+
+        .availability-error {
+            flex: 1 1 100%;
+            color: var(--danger-accent-color);
+            font-size: 0.76rem;
+            line-height: 1.35;
+        }
     }
 
     .streams-container {
@@ -274,5 +344,17 @@
             padding: 1em;
             background-color: var(--primary-background-color);
         }
+    }
+}
+
+@keyframes availability-pulse {
+    from {
+        opacity: 0.35;
+        transform: scale(0.88);
+    }
+
+    to {
+        opacity: 1;
+        transform: scale(1);
     }
 }

@@ -58,6 +58,40 @@ const updateBackendSettings = async (settings) => {
     });
 };
 
+const startAllDebridPinAuth = async () => requestJson('/debrid/alldebrid/auth/pin', {
+    method: 'POST'
+});
+
+const checkAllDebridPinAuth = async () => requestJson('/debrid/alldebrid/auth/pin/check', {
+    method: 'POST'
+});
+
+const disconnectAllDebrid = async () => requestJson('/debrid/alldebrid/auth', {
+    method: 'DELETE'
+});
+
+const checkAllDebridAvailability = async (hashes) => {
+    if (!Array.isArray(hashes)) {
+        throw new Error('checkAllDebridAvailability requires a hashes array');
+    }
+
+    return requestJson('/debrid/alldebrid/availability', {
+        method: 'POST',
+        body: { hashes }
+    });
+};
+
+const getAllDebridAvailabilityHistory = async (hashes) => {
+    if (!Array.isArray(hashes)) {
+        throw new Error('getAllDebridAvailabilityHistory requires a hashes array');
+    }
+
+    return requestJson('/debrid/alldebrid/availability/history', {
+        method: 'POST',
+        body: { hashes }
+    });
+};
+
 const createDownload = async (payload) => {
     if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
         throw new Error('createDownload requires a payload object');
@@ -138,6 +172,11 @@ module.exports = {
     getBackendHealth,
     getBackendSettings,
     updateBackendSettings,
+    startAllDebridPinAuth,
+    checkAllDebridPinAuth,
+    disconnectAllDebrid,
+    checkAllDebridAvailability,
+    getAllDebridAvailabilityHistory,
     createDownload,
     listDownloads,
     getDownload,
