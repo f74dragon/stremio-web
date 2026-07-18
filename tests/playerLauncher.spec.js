@@ -75,4 +75,19 @@ describe('playerLauncher', () => {
         });
         expect(childProcess.unref).toHaveBeenCalledTimes(1);
     });
+
+    test('prefers a saved player selection over the legacy environment fallback', async () => {
+        const savedPlayerPath = path.join(tempDirectory, 'saved-player.exe');
+        fs.writeFileSync(savedPlayerPath, 'saved player');
+        process.env[PLAYER_PATH_ENV] = playerPath;
+        const childProcess = new EventEmitter();
+        childProcess.unref = jest.fn();
+        spawn.mockImplementation(() => {
+            process.nextTick(() => childProcess.emit('spawn'));
+            return childProcess;
+        });
+
+        await launchMediaFile(mediaPath, savedPlayerPath);
+        expect(spawn).toHaveBeenCalledWith(savedPlayerPath, [mediaPath], expect.objectContaining({ shell: false }));
+    });
 });

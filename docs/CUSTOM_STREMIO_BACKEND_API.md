@@ -494,7 +494,20 @@ Response shape:
 - Success: `{ "ok": true, "downloadId": "dl_0001", "directoryPath": "C:\\Downloads\\Stremio Downloads", "opened": true }`
 - Missing/invalid stored location: HTTP `409` or `410` with an error message.
 
-### 11. `POST /play`
+### 11. `POST /settings/player/select`
+
+Purpose:
+- Open a native Windows `.exe` picker and persist the selected video player.
+
+Behavior and security:
+- The dialog is opened by the local backend because browsers do not expose a trustworthy absolute path from a file input.
+- Only trusted local frontend origins may call the endpoint; local command-line requests without an `Origin` header remain available for diagnostics.
+- Canceling returns current settings with `selectionCanceled: true` and does not change the saved path.
+- A selection must be an absolute, existing regular `.exe` file before settings are written.
+- The chosen path applies immediately and is stored in `%LOCALAPPDATA%\Custom Stremio\backend-settings.json`.
+- `GET /settings`, `PATCH /settings`, and this selector endpoint share the trusted-local-origin policy because settings now include a local executable path.
+
+### 12. `POST /play`
 
 Purpose:
 - Launch MPC-HC or the configured external player for a completed local file.
@@ -517,7 +530,7 @@ Response shape:
 Notes:
 - Only records with status `completed` can be played.
 - The backend resolves the canonical `localPath` from its own stored record. Arbitrary paths supplied by callers are not accepted.
-- The player executable must be explicitly configured through `CUSTOM_STREMIO_PLAYER_PATH` before the backend starts.
+- The player executable is selected under **Downloads -> Download options -> Video player** and applies without restarting. `CUSTOM_STREMIO_PLAYER_PATH` is retained only as a fallback when no saved selection exists.
 - The backend validates that both the configured player and downloaded media are regular files before launching.
 - The player is launched directly with the media path as a single process argument; no shell command is constructed.
 - Expected errors include `400` for a missing id, `404` for an unknown record, `409` for a non-completed record, `410` for a missing downloaded file, and `503` for missing/invalid player configuration.
@@ -571,7 +584,8 @@ Notes:
 - `CUSTOM_STREMIO_DATA_DIR` overrides the directory for both record and settings documents.
 - Writes use atomic temporary-file replacement.
 - The AllDebrid API key is stored only in this local backend document and is omitted from every frontend settings response. Protect the Windows account and data directory accordingly.
-- Version-one settings containing only download concurrency are migrated in memory with AllDebrid disconnected and written in the current format on the next save.
+- Version-one concurrency-only and version-two AllDebrid settings are migrated in memory with the configured player fallback preserved, then written in the current format on the next save.
+- The saved `player.executablePath` is an absolute Windows `.exe` path used by `POST /play`; it is never supplied by the play request itself.
 - A saved `downloads.maxConcurrentDownloads` value takes precedence over `CUSTOM_STREMIO_MAX_CONCURRENT_DOWNLOADS` on startup.
 - When no saved document exists, the environment value is used if it is a positive integer or `unlimited`; otherwise the scheduler default is `2`.
 - Invalid or unsupported settings documents stop backend startup rather than being silently overwritten.
@@ -614,5 +628,5 @@ Current implementation notes:
 
 - SQLite remains an option if future global-library/query requirements outgrow the current single-file record store
 - WebSocket/SSE progress updates later
-- Additional Settings controls later for download folder and MPC-HC path
+- Additional Download options controls later for the download folder
 - final desktop packaging later

@@ -24,7 +24,12 @@ const { AllDebridClient } = require('./allDebridClient');
 const { AllDebridCleanupStore } = require('./allDebridCleanupStore');
 const { AllDebridAvailabilityStore } = require('./allDebridAvailabilityStore');
 const { AllDebridAvailabilityService } = require('./allDebridAvailability');
-const { launchMediaFile } = require('./playerLauncher');
+const {
+    getConfiguredPlayerPath,
+    validatePlayerExecutable,
+    launchMediaFile
+} = require('./playerLauncher');
+const { selectPlayerExecutable } = require('./playerExecutableSelector');
 const { openDownloadLocation } = require('./fileExplorerLauncher');
 const { DownloadRecordStore, recoverInterruptedDownloadRecords } = require('./downloadRecordStore');
 
@@ -355,6 +360,10 @@ const getBackendSettingsResponse = () => ({
         maxAllowedConcurrentDownloads: null,
         unlimitedValue: UNLIMITED_CONCURRENT_DOWNLOADS
     },
+    player: {
+        configured: Boolean(backendSettings.player.executablePath),
+        executablePath: backendSettings.player.executablePath
+    },
     debrid: {
         allDebrid: getAllDebridConnectionResponse()
     }
@@ -363,7 +372,8 @@ const getBackendSettingsResponse = () => ({
 const saveAllDebridConnection = async (allDebrid) => {
     backendSettings = await settingsStore.save(createBackendSettings(
         backendSettings.downloads.maxConcurrentDownloads,
-        allDebrid
+        allDebrid,
+        backendSettings.player.executablePath
     ));
     return getAllDebridConnectionResponse();
 };
@@ -379,6 +389,18 @@ const sendAllDebridError = (response, error, fallbackMessage) => {
     });
 };
 
+const requireTrustedLocalOrigin = (request, response, next) => {
+    const origin = request.get('Origin');
+    if (origin && !TRUSTED_DEBRID_ORIGINS.has(origin)) {
+        response.status(403).json({
+            ok: false,
+            error: 'This origin is not allowed to use privileged local backend actions'
+        });
+        return;
+    }
+    next();
+};
+
 app.use(cors());
 app.use(express.json());
 
@@ -387,17 +409,7 @@ app.use((request, response, next) => {
     next();
 });
 
-app.use('/debrid', (request, response, next) => {
-    const origin = request.get('Origin');
-    if (origin && !TRUSTED_DEBRID_ORIGINS.has(origin)) {
-        response.status(403).json({
-            ok: false,
-            error: 'This origin is not allowed to use local debrid credentials'
-        });
-        return;
-    }
-    next();
-});
+app.use('/debrid', requireTrustedLocalOrigin);
 
 app.get('/health', (request, response) => {
     const scheduler = downloadScheduler.getSnapshot();
@@ -414,11 +426,11 @@ app.get('/health', (request, response) => {
     });
 });
 
-app.get('/settings', (request, response) => {
+app.get('/settings', requireTrustedLocalOrigin, (request, response) => {
     response.json(getBackendSettingsResponse());
 });
 
-app.patch('/settings', async (request, response) => {
+app.patch('/settings', requireTrustedLocalOrigin, async (request, response) => {
     const maxConcurrentDownloads = request.body?.downloads?.maxConcurrentDownloads;
     if (!isValidMaxConcurrentDownloads(maxConcurrentDownloads)) {
         response.status(400).json({
@@ -428,7 +440,11 @@ app.patch('/settings', async (request, response) => {
         return;
     }
 
-    const nextSettings = createBackendSettings(maxConcurrentDownloads, backendSettings.debrid.allDebrid);
+    const nextSettings = createBackendSettings(
+        maxConcurrentDownloads,
+        backendSettings.debrid.allDebrid,
+        backendSettings.player.executablePath
+    );
     try {
         backendSettings = await settingsStore.save(nextSettings);
     } catch (error) {
@@ -442,6 +458,36 @@ app.patch('/settings', async (request, response) => {
 
     downloadScheduler.setMaxConcurrentDownloads(maxConcurrentDownloads);
     response.json(getBackendSettingsResponse());
+});
+
+app.post('/settings/player/select', requireTrustedLocalOrigin, async (request, response) => {
+    try {
+        const executablePath = await selectPlayerExecutable({
+            currentExecutablePath: backendSettings.player.executablePath
+        });
+        if (!executablePath) {
+            response.json({ ...getBackendSettingsResponse(), selectionCanceled: true });
+            return;
+        }
+
+        await validatePlayerExecutable(executablePath);
+        backendSettings = await settingsStore.save(createBackendSettings(
+            backendSettings.downloads.maxConcurrentDownloads,
+            backendSettings.debrid.allDebrid,
+            executablePath
+        ));
+        response.json({ ...getBackendSettingsResponse(), selectionCanceled: false });
+    } catch (error) {
+        const status = error?.code === 'PLAYER_SELECTOR_UNSUPPORTED' ?
+            501
+            :
+            ['PLAYER_PATH_INVALID', 'PLAYER_NOT_FOUND'].includes(error?.code) ? 400 : 500;
+        response.status(status).json({
+            ok: false,
+            errorCode: error?.code || 'PLAYER_SELECTION_FAILED',
+            error: error?.message || 'Could not choose the video player executable'
+        });
+    }
 });
 
 app.post('/debrid/alldebrid/auth/pin', async (request, response) => {
@@ -1047,7 +1093,7 @@ app.post('/play', async (request, response) => {
     }
 
     try {
-        const launchResult = await launchMediaFile(record.localPath);
+        const launchResult = await launchMediaFile(record.localPath, backendSettings.player.executablePath);
         response.json({
             ok: true,
             downloadId: record.id,
@@ -1090,7 +1136,11 @@ const shutdown = async (signal) => {
 };
 
 const startServer = async () => {
-    backendSettings = await settingsStore.load(createBackendSettings(getConfiguredMaxConcurrentDownloads()));
+    backendSettings = await settingsStore.load(createBackendSettings(
+        getConfiguredMaxConcurrentDownloads(),
+        null,
+        getConfiguredPlayerPath()
+    ));
     downloadScheduler.setMaxConcurrentDownloads(backendSettings.downloads.maxConcurrentDownloads);
 
     const allDebridApiKey = backendSettings.debrid.allDebrid?.apiKey;

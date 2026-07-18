@@ -3,8 +3,9 @@ const path = require('path');
 const { getDefaultDataDirectory } = require('./downloadRecordStore');
 const { isValidMaxConcurrentDownloads } = require('./downloadScheduler');
 
-const SETTINGS_STORE_VERSION = 2;
+const SETTINGS_STORE_VERSION = 3;
 const LEGACY_SETTINGS_STORE_VERSION = 1;
+const ALLDEBRID_SETTINGS_STORE_VERSION = 2;
 const SETTINGS_FILE_NAME = 'backend-settings.json';
 
 const normalizeAllDebridSettings = (settings) => {
@@ -27,9 +28,27 @@ const normalizeAllDebridSettings = (settings) => {
     };
 };
 
-const createBackendSettings = (maxConcurrentDownloads, allDebrid = null) => ({
+const normalizePlayerExecutablePath = (value) => {
+    if (value === null || value === undefined || value === '') {
+        return null;
+    }
+
+    const executablePath = typeof value === 'string' ? value.trim() : '';
+    const isAbsolute = path.isAbsolute(executablePath) || path.win32.isAbsolute(executablePath);
+    if (!isAbsolute || path.extname(executablePath).toLowerCase() !== '.exe') {
+        const error = new Error('Backend settings contain an invalid player executable path');
+        error.code = 'BACKEND_SETTINGS_INVALID';
+        throw error;
+    }
+    return executablePath;
+};
+
+const createBackendSettings = (maxConcurrentDownloads, allDebrid = null, playerExecutablePath = null) => ({
     downloads: {
         maxConcurrentDownloads
+    },
+    player: {
+        executablePath: normalizePlayerExecutablePath(playerExecutablePath)
     },
     debrid: {
         allDebrid: normalizeAllDebridSettings(allDebrid)
@@ -46,7 +65,11 @@ const validateBackendSettings = (settings) => {
         throw error;
     }
 
-    return createBackendSettings(maxConcurrentDownloads, settings?.debrid?.allDebrid ?? null);
+    return createBackendSettings(
+        maxConcurrentDownloads,
+        settings?.debrid?.allDebrid ?? null,
+        settings?.player?.executablePath ?? null
+    );
 };
 
 const readBackendSettings = async (filePath = getDefaultSettingsPath(), fallbackSettings) => {
@@ -62,13 +85,21 @@ const readBackendSettings = async (filePath = getDefaultSettingsPath(), fallback
             throw parseError;
         }
 
-        if (!document || typeof document !== 'object' || ![LEGACY_SETTINGS_STORE_VERSION, SETTINGS_STORE_VERSION].includes(document.version)) {
+        if (!document || typeof document !== 'object' || ![
+            LEGACY_SETTINGS_STORE_VERSION,
+            ALLDEBRID_SETTINGS_STORE_VERSION,
+            SETTINGS_STORE_VERSION
+        ].includes(document.version)) {
             const formatError = new Error(`Backend settings use an unsupported format: ${filePath}`);
             formatError.code = 'BACKEND_SETTINGS_UNSUPPORTED';
             throw formatError;
         }
 
-        return validateBackendSettings(document.settings);
+        const settings = document.version < SETTINGS_STORE_VERSION ? {
+            ...document.settings,
+            player: fallbackSettings?.player ?? { executablePath: null }
+        } : document.settings;
+        return validateBackendSettings(settings);
     } catch (error) {
         if (error?.code === 'ENOENT') {
             return validateBackendSettings(fallbackSettings);
@@ -120,8 +151,10 @@ class BackendSettingsStore {
 module.exports = {
     SETTINGS_STORE_VERSION,
     LEGACY_SETTINGS_STORE_VERSION,
+    ALLDEBRID_SETTINGS_STORE_VERSION,
     SETTINGS_FILE_NAME,
     createBackendSettings,
+    normalizePlayerExecutablePath,
     getDefaultSettingsPath,
     validateBackendSettings,
     readBackendSettings,

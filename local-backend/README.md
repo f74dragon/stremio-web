@@ -28,14 +28,16 @@ The server binds to:
 
 ## Media Player
 
-Set the media player executable path before starting the backend. The backend does not scan the filesystem or guess installation locations.
+Start both the backend and frontend, then open **Downloads -> Download options -> Video player** and choose **Choose player**. A native Windows `.exe` picker opens so you can point directly to MPC-HC or another player. The validated path is stored in `%LOCALAPPDATA%\Custom Stremio\backend-settings.json` and applies immediately without restarting the backend.
+
+The backend does not scan the filesystem or guess installation locations. `CUSTOM_STREMIO_PLAYER_PATH` remains only as a backward-compatible fallback when no saved selection exists:
 
 ```powershell
 $env:CUSTOM_STREMIO_PLAYER_PATH = 'C:\Program Files\MPC-HC\mpc-hc64.exe'
 npm start
 ```
 
-The setting applies to the current PowerShell session. `POST /play` accepts only a stored `downloadId`; callers cannot submit arbitrary local paths for the backend to open.
+`POST /play` accepts only a stored `downloadId`; callers cannot submit arbitrary local paths or executable paths for the backend to open.
 
 ## Download Folder
 
@@ -321,4 +323,4 @@ Invoke-RestMethod -Uri 'http://127.0.0.1:5577/downloads' -Method Post -ContentTy
 - Waiting queued work is restored in saved manual order when present and FIFO order otherwise; interrupted active transfers are restored as `paused` and can be resumed explicitly.
 - Real file downloading is implemented only for direct `http`/`https` URLs in this milestone.
 - Pause/resume requires the remote direct-file source to honor HTTP byte ranges. Unsupported sources fail safely and can still use Retry from byte zero.
-- Completed records can be opened through `POST /play` when `CUSTOM_STREMIO_PLAYER_PATH` points to a valid player executable.
+- Completed records can be opened through `POST /play` when Download options contains a valid saved player executable. The legacy environment fallback is still accepted when no saved path exists.

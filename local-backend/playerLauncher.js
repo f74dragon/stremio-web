@@ -13,9 +13,25 @@ class PlayerLaunchError extends Error {
     }
 }
 
-const getConfiguredPlayerPath = () => {
+const getConfiguredPlayerPath = (savedPlayerPath = null) => {
+    if (typeof savedPlayerPath === 'string' && savedPlayerPath.trim().length > 0) {
+        return savedPlayerPath.trim();
+    }
     const configuredPath = process.env[PLAYER_PATH_ENV];
     return typeof configuredPath === 'string' && configuredPath.trim().length > 0 ? configuredPath.trim() : null;
+};
+
+const validatePlayerExecutable = async (playerPath) => {
+    await requireRegularFile(playerPath, {
+        invalidCode: 'PLAYER_PATH_INVALID',
+        invalidMessage: 'The selected player must be an absolute path to an executable file.',
+        missingCode: 'PLAYER_NOT_FOUND',
+        missingMessage: `Configured media player was not found at ${playerPath}.`
+    });
+    if (path.extname(playerPath).toLowerCase() !== '.exe') {
+        throw new PlayerLaunchError('PLAYER_PATH_INVALID', 'The selected video player must be a Windows .exe file.');
+    }
+    return playerPath;
 };
 
 const requireRegularFile = async (filePath, options) => {
@@ -58,21 +74,16 @@ const spawnPlayer = (playerPath, localPath) => {
     });
 };
 
-const launchMediaFile = async (localPath) => {
-    const playerPath = getConfiguredPlayerPath();
+const launchMediaFile = async (localPath, savedPlayerPath = null) => {
+    const playerPath = getConfiguredPlayerPath(savedPlayerPath);
     if (!playerPath) {
         throw new PlayerLaunchError(
             'PLAYER_NOT_CONFIGURED',
-            `Media player is not configured. Set ${PLAYER_PATH_ENV} before starting the local backend.`
+            'Media player is not configured. Choose one in Downloads > Download options.'
         );
     }
 
-    await requireRegularFile(playerPath, {
-        invalidCode: 'PLAYER_PATH_INVALID',
-        invalidMessage: `${PLAYER_PATH_ENV} must contain an absolute path to the player executable.`,
-        missingCode: 'PLAYER_NOT_FOUND',
-        missingMessage: `Configured media player was not found at ${playerPath}.`
-    });
+    await validatePlayerExecutable(playerPath);
     await requireRegularFile(localPath, {
         invalidCode: 'MEDIA_PATH_INVALID',
         invalidMessage: 'The completed download does not have a valid absolute local path.',
@@ -91,5 +102,6 @@ module.exports = {
     PLAYER_PATH_ENV,
     PlayerLaunchError,
     getConfiguredPlayerPath,
+    validatePlayerExecutable,
     launchMediaFile
 };

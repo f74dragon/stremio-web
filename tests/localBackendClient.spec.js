@@ -7,6 +7,7 @@ const {
     startAllDebridPinAuth,
     checkAllDebridAvailability,
     getAllDebridAvailabilityHistory,
+    selectPlayerExecutable,
     moveDownloadInQueue
 } = require('../src/customStremio/localBackendClient');
 
@@ -90,6 +91,20 @@ describe('localBackendClient settings', () => {
             method: 'PATCH',
             body: JSON.stringify({ position: 1 }),
             headers: { 'Content-Type': 'application/json' }
+        });
+    });
+
+    test('opens the backend-owned native player selector', async () => {
+        const responseBody = {
+            downloads: { maxConcurrentDownloads: 2 },
+            player: { configured: true, executablePath: 'C:\\Program Files\\MPC-HC\\mpc-hc64.exe' }
+        };
+        global.fetch.mockResolvedValue(createJsonResponse(responseBody));
+
+        await expect(selectPlayerExecutable()).resolves.toEqual(responseBody);
+        expect(global.fetch).toHaveBeenCalledWith(`${LOCAL_BACKEND_BASE_URL}/settings/player/select`, {
+            method: 'POST',
+            headers: {}
         });
     });
 

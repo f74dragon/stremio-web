@@ -34,6 +34,109 @@
     box-shadow: 0 0.6rem 1.6rem rgba(0, 0, 0, 0.12);
 }
 
+.player-panel {
+    display: grid;
+    width: 100%;
+    grid-template-columns: minmax(0, 1fr) minmax(18rem, 36rem);
+    align-items: center;
+    gap: 1rem 2rem;
+    padding: 1rem 1.15rem;
+    border: 1px solid rgba(104, 174, 255, 0.22);
+    border-radius: calc(var(--border-radius) * 1.1);
+    background: linear-gradient(135deg, rgba(47, 112, 187, 0.12), rgba(255, 255, 255, 0.03));
+    box-shadow: 0 0.6rem 1.6rem rgba(0, 0, 0, 0.12);
+}
+
+.player-heading-row {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    flex-wrap: wrap;
+
+    > h2 {
+        margin: 0;
+        font-size: 0.95rem;
+        font-weight: 650;
+    }
+}
+
+.player-configured {
+    padding: 0.2rem 0.5rem;
+    border-radius: 999px;
+    color: rgba(218, 239, 255, 0.96);
+    font-size: 0.64rem;
+    font-weight: 700;
+    background-color: rgba(62, 143, 223, 0.26);
+}
+
+.player-control {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.75rem;
+}
+
+.player-path-copy {
+    display: flex;
+    min-width: 0;
+    flex: 1 1 auto;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.16rem;
+    text-align: right;
+
+    > strong,
+    > span {
+        display: block;
+        max-width: 100%;
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+    }
+
+    > strong {
+        font-size: 0.78rem;
+    }
+
+    > span {
+        font-size: 0.66rem;
+        opacity: 0.58;
+    }
+}
+
+.player-select-button {
+    flex: none;
+    display: inline-flex;
+    min-height: 2.35rem;
+    padding: 0 0.95rem;
+    border: 1px solid rgba(112, 181, 255, 0.34);
+    border-radius: 999px;
+    align-items: center;
+    justify-content: center;
+    color: var(--primary-foreground-color);
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.75rem;
+    font-weight: 650;
+    background-color: rgba(55, 126, 205, 0.24);
+
+    &:hover,
+    &:focus-visible {
+        background-color: rgba(55, 126, 205, 0.42);
+    }
+
+    &:disabled {
+        cursor: wait;
+        opacity: 0.58;
+    }
+}
+
+.player-muted {
+    font-size: 0.68rem;
+    opacity: 0.6;
+}
+
 .debrid-heading-row {
     display: flex;
     align-items: center;
@@ -392,6 +495,22 @@
     .debrid-panel {
         grid-template-columns: 1fr;
         gap: 0.85rem;
+    }
+
+    .player-panel {
+        grid-template-columns: 1fr;
+        gap: 0.85rem;
+    }
+
+    .player-control {
+        justify-content: flex-start;
+        flex-wrap: wrap;
+    }
+
+    .player-path-copy {
+        flex-basis: 100%;
+        align-items: flex-start;
+        text-align: left;
     }
 
     .debrid-control,

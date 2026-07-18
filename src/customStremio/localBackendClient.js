@@ -70,6 +70,10 @@ const disconnectAllDebrid = async () => requestJson('/debrid/alldebrid/auth', {
     method: 'DELETE'
 });
 
+const selectPlayerExecutable = async () => requestJson('/settings/player/select', {
+    method: 'POST'
+});
+
 const checkAllDebridAvailability = async (hashes) => {
     if (!Array.isArray(hashes)) {
         throw new Error('checkAllDebridAvailability requires a hashes array');
@@ -175,6 +179,7 @@ module.exports = {
     startAllDebridPinAuth,
     checkAllDebridPinAuth,
     disconnectAllDebrid,
+    selectPlayerExecutable,
     checkAllDebridAvailability,
     getAllDebridAvailabilityHistory,
     createDownload,

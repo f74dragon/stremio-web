@@ -6,6 +6,7 @@ const path = require('path');
 const {
     SETTINGS_STORE_VERSION,
     LEGACY_SETTINGS_STORE_VERSION,
+    ALLDEBRID_SETTINGS_STORE_VERSION,
     createBackendSettings,
     readBackendSettings,
     writeBackendSettings,
@@ -28,6 +29,7 @@ describe('backendSettingsStore', () => {
     test('uses the environment-derived fallback until a saved value exists', async () => {
         await expect(readBackendSettings(settingsPath, createBackendSettings(2))).resolves.toEqual({
             downloads: { maxConcurrentDownloads: 2 },
+            player: { executablePath: null },
             debrid: { allDebrid: null }
         });
 
@@ -36,6 +38,7 @@ describe('backendSettingsStore', () => {
         await store.save(createBackendSettings(3));
         await expect(store.load(createBackendSettings(1))).resolves.toEqual({
             downloads: { maxConcurrentDownloads: 3 },
+            player: { executablePath: null },
             debrid: { allDebrid: null }
         });
 
@@ -54,13 +57,14 @@ describe('backendSettingsStore', () => {
     test('persists custom and unlimited concurrency values', async () => {
         await expect(writeBackendSettings(settingsPath, {
             downloads: { maxConcurrentDownloads: 128 }
-        })).resolves.toEqual({ downloads: { maxConcurrentDownloads: 128 }, debrid: { allDebrid: null } });
+        })).resolves.toEqual({ downloads: { maxConcurrentDownloads: 128 }, player: { executablePath: null }, debrid: { allDebrid: null } });
 
         await expect(writeBackendSettings(settingsPath, {
             downloads: { maxConcurrentDownloads: 'unlimited' }
-        })).resolves.toEqual({ downloads: { maxConcurrentDownloads: 'unlimited' }, debrid: { allDebrid: null } });
+        })).resolves.toEqual({ downloads: { maxConcurrentDownloads: 'unlimited' }, player: { executablePath: null }, debrid: { allDebrid: null } });
         await expect(readBackendSettings(settingsPath, createBackendSettings(2))).resolves.toEqual({
             downloads: { maxConcurrentDownloads: 'unlimited' },
+            player: { executablePath: null },
             debrid: { allDebrid: null }
         });
     });
@@ -74,6 +78,7 @@ describe('backendSettingsStore', () => {
         });
         await expect(writeBackendSettings(settingsPath, settings)).resolves.toEqual({
             downloads: { maxConcurrentDownloads: 2 },
+            player: { executablePath: null },
             debrid: {
                 allDebrid: {
                     apiKey: 'secret-api-key',
@@ -90,7 +95,34 @@ describe('backendSettingsStore', () => {
         }), 'utf8');
         await expect(readBackendSettings(settingsPath, createBackendSettings(1))).resolves.toEqual({
             downloads: { maxConcurrentDownloads: 4 },
+            player: { executablePath: null },
             debrid: { allDebrid: null }
+        });
+
+        fs.writeFileSync(settingsPath, JSON.stringify({
+            version: ALLDEBRID_SETTINGS_STORE_VERSION,
+            settings
+        }), 'utf8');
+        await expect(readBackendSettings(settingsPath, createBackendSettings(1, null, 'C:\\Players\\mpc-hc64.exe'))).resolves.toMatchObject({
+            downloads: { maxConcurrentDownloads: 2 },
+            player: { executablePath: 'C:\\Players\\mpc-hc64.exe' },
+            debrid: { allDebrid: { apiKey: 'secret-api-key' } }
+        });
+    });
+
+    test('persists a validated player executable path', async () => {
+        const executablePath = 'C:\\Program Files\\MPC-HC\\mpc-hc64.exe';
+        await expect(writeBackendSettings(settingsPath, createBackendSettings(2, null, executablePath))).resolves.toEqual({
+            downloads: { maxConcurrentDownloads: 2 },
+            player: { executablePath },
+            debrid: { allDebrid: null }
+        });
+        await expect(writeBackendSettings(settingsPath, {
+            downloads: { maxConcurrentDownloads: 2 },
+            player: { executablePath: 'relative-player.exe' },
+            debrid: { allDebrid: null }
+        })).rejects.toMatchObject({
+            code: 'BACKEND_SETTINGS_INVALID'
         });
     });
 

@@ -61,7 +61,7 @@ Notes:
 - `7. Add title-specific downloads panel`: In progress (`Milestone 7A` implemented)
 - `6. Implement real download manager`: In progress (`Milestones 6A-6J` real downloads, persistence, retry/resume, FIFO scheduling, queue controls, concurrency settings, and hybrid AllDebrid availability handling implemented)
 - `8. Add global downloads page`: In progress (`Milestones 8A-8C.2` implemented)
-- `9. Add MPC-HC launch support`: In progress (`Milestones 9A-9B` panel and stream-row playback implemented)
+- `9. Add MPC-HC launch support`: In progress (`Milestones 9A-9C` panel playback, stream-row playback, and persistent in-app player selection implemented)
 - `10. Add watched/unwatched integration`: Not started
 - `11. Package as Windows app`: Not started
 
@@ -422,6 +422,17 @@ Add Real-Debrid as a fallback availability provider using a separately verified 
 - Deferred behavior:
   - Automatic resume, partial-file cleanup, global downloads UI, open folder, watched integration, and debrid/hash availability remain deferred.
 
+## Milestone 9C Findings: Persistent In-App Video Player Selection
+
+- Player selection now lives in the fork-owned **Downloads -> Download options** interface rather than upstream Stremio Settings.
+- A backend-owned native Windows file dialog lets the user point directly to an `.exe`; browser file inputs are not used because they hide the real local path.
+- The backend validates that the selection is an absolute, existing `.exe` file before atomically persisting it in `backend-settings.json`.
+- The saved selection applies to the next Play action immediately and survives backend restarts. No server restart or environment setup is required.
+- Existing concurrency and AllDebrid settings preserve the player path when they are changed, and version-one/version-two settings migrate without losing their existing values.
+- `CUSTOM_STREMIO_PLAYER_PATH` remains a backward-compatible startup fallback only when no saved player selection exists. No installation directories are scanned or guessed.
+- The selector endpoint is protected by the trusted-local-origin policy, launches PowerShell without a shell command, and passes the initial directory through an environment value rather than interpolating paths into script source.
+- Validation: all 164 Jest tests, frontend ESLint, backend syntax checks, diff checks, and the production build pass; webpack reports only the repository's existing bundle-size warnings.
+
 ## Milestone 9B Findings: Play Completed Downloads from Stream Rows
 
 - Files changed:
@@ -455,7 +466,7 @@ Add Real-Debrid as a fallback availability provider using a separately verified 
   - `docs/CUSTOM_STREMIO_BACKEND_API.md`
   - `docs/CUSTOM_STREMIO_PROJECT.md`
 - Player configuration:
-  - The backend uses only the explicit `CUSTOM_STREMIO_PLAYER_PATH` environment setting.
+  - This original environment-only setup was superseded by the persistent in-app selector in Milestone 9C.
   - No installation-directory scanning or guessed executable paths are used.
   - Current development path: `C:\Program Files\MPC-HC\mpc-hc64.exe`.
 - Playback safety:

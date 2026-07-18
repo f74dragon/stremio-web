@@ -6,7 +6,8 @@ const {
     updateBackendSettings,
     startAllDebridPinAuth,
     checkAllDebridPinAuth,
-    disconnectAllDebrid
+    disconnectAllDebrid,
+    selectPlayerExecutable
 } = require('../localBackendClient');
 const styles = require('./DownloadManagerSettingsPanel.less');
 
@@ -27,6 +28,8 @@ const DownloadManagerSettingsPanel = () => {
     const [allDebridAuth, setAllDebridAuth] = React.useState(null);
     const [allDebridBusy, setAllDebridBusy] = React.useState(false);
     const [allDebridError, setAllDebridError] = React.useState(null);
+    const [playerBusy, setPlayerBusy] = React.useState(false);
+    const [playerError, setPlayerError] = React.useState(null);
 
     React.useEffect(() => {
         mountedRef.current = true;
@@ -76,6 +79,35 @@ const DownloadManagerSettingsPanel = () => {
     }, [currentValue, customSelected]);
 
     const allDebridConnection = settings?.debrid?.allDebrid;
+    const playerSettings = settings?.player;
+    const playerExecutableName = playerSettings?.executablePath ?
+        playerSettings.executablePath.split(/[\\/]/).pop()
+        :
+        null;
+
+    const choosePlayerExecutable = React.useCallback(async () => {
+        if (!settings || playerBusy) {
+            return;
+        }
+        setPlayerBusy(true);
+        setPlayerError(null);
+        try {
+            const nextSettings = await selectPlayerExecutable();
+            if (mountedRef.current && nextSettings?.selectionCanceled !== true) {
+                setSettings(nextSettings);
+            }
+        } catch (requestError) {
+            if (mountedRef.current) {
+                setPlayerError(requestError?.backendError || t('CUSTOM_DOWNLOAD_MANAGER_PLAYER_SELECT_ERROR', {
+                    defaultValue: 'Could not open or save the video player selection.'
+                }));
+            }
+        } finally {
+            if (mountedRef.current) {
+                setPlayerBusy(false);
+            }
+        }
+    }, [settings, playerBusy, t]);
 
     const startAllDebridConnection = React.useCallback(async () => {
         if (allDebridBusy) {
@@ -372,6 +404,56 @@ const DownloadManagerSettingsPanel = () => {
                         :
                         null
                 }
+            </section>
+            <section className={styles['player-panel']} aria-labelledby={'download-manager-player-title'}>
+                <div className={styles['settings-copy']}>
+                    <div className={styles['player-heading-row']}>
+                        <h2 id={'download-manager-player-title'}>
+                            {t('CUSTOM_DOWNLOAD_MANAGER_PLAYER_TITLE', { defaultValue: 'Video player' })}
+                        </h2>
+                        {
+                            playerSettings?.configured ?
+                                <span className={styles['player-configured']}>
+                                    {t('CUSTOM_DOWNLOAD_MANAGER_PLAYER_READY', { defaultValue: 'Ready' })}
+                                </span>
+                                : null
+                        }
+                    </div>
+                    <p>
+                        {t('CUSTOM_DOWNLOAD_MANAGER_PLAYER_DESCRIPTION', {
+                            defaultValue: 'Choose the Windows .exe used to play completed downloads. The path is stored only by the local backend.'
+                        })}
+                    </p>
+                </div>
+                <div className={styles['player-control']}>
+                    {
+                        !settings ?
+                            <span className={styles['player-muted']}>
+                                {t('CUSTOM_DOWNLOAD_MANAGER_PLAYER_BACKEND_WAIT', { defaultValue: 'Waiting for the local backend...' })}
+                            </span>
+                            :
+                            <React.Fragment>
+                                <div className={styles['player-path-copy']} title={playerSettings?.executablePath || undefined}>
+                                    <strong>{playerExecutableName || t('CUSTOM_DOWNLOAD_MANAGER_PLAYER_NOT_SELECTED', { defaultValue: 'No player selected' })}</strong>
+                                    <span>{playerSettings?.executablePath || t('CUSTOM_DOWNLOAD_MANAGER_PLAYER_SELECT_PROMPT', { defaultValue: 'Select MPC-HC or another video player executable.' })}</span>
+                                </div>
+                                <button
+                                    className={styles['player-select-button']}
+                                    type={'button'}
+                                    disabled={playerBusy}
+                                    onClick={choosePlayerExecutable}
+                                >
+                                    {playerBusy ?
+                                        t('CUSTOM_DOWNLOAD_MANAGER_PLAYER_CHOOSING', { defaultValue: 'Choosing...' })
+                                        : playerSettings?.configured ?
+                                            t('CUSTOM_DOWNLOAD_MANAGER_PLAYER_CHANGE', { defaultValue: 'Change player' })
+                                            :
+                                            t('CUSTOM_DOWNLOAD_MANAGER_PLAYER_CHOOSE', { defaultValue: 'Choose player' })}
+                                </button>
+                            </React.Fragment>
+                    }
+                </div>
+                {playerError ? <div className={styles['error-row']} role={'alert'}>{playerError}</div> : null}
             </section>
             <section className={styles['debrid-panel']} aria-labelledby={'download-manager-alldebrid-title'}>
                 <div className={styles['settings-copy']}>
