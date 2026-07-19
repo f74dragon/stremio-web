@@ -13,8 +13,10 @@ const REQUEST_TIMEOUT_MS = 30000;
 const PROGRESS_UPDATE_INTERVAL_MS = 500;
 const SUPPORTED_PROTOCOLS = new Set(['http:', 'https:']);
 const activeDownloads = new Map();
-const TORRENTIO_NOT_READY_PATH = /^\/videos\/downloading(?:_v\d+)?\.mp4$/i;
-const SOURCE_NOT_READY_MESSAGE = 'AllDebrid is still preparing this source. Choose another cached source or try again later.';
+const TORRENTIO_DOWNLOADING_PATH = /^\/videos\/downloading(?:_v\d+)?\.mp4$/i;
+const TORRENTIO_FAILED_PATH = /^\/videos\/failed(?:_[a-z0-9-]+)+(?:_v\d+)?\.mp4$/i;
+const SOURCE_NOT_READY_MESSAGE = 'This debrid source is still being prepared. Choose another cached source or try again later.';
+const SOURCE_UNAVAILABLE_MESSAGE = 'This debrid source was rejected or removed by the provider. Choose another cached source.';
 
 const createDownloadError = (message, code = null) => {
     const error = new Error(message);
@@ -32,18 +34,41 @@ const isSupportedSourceUrl = (sourceUrl) => {
     }
 };
 
-const isKnownNotReadySourceUrl = (sourceUrl) => {
+const classifyKnownPlaceholderSourceUrl = (sourceUrl) => {
     try {
         const parsedUrl = new URL(sourceUrl);
-        return parsedUrl.hostname.toLowerCase() === 'torrentio.strem.fun' && TORRENTIO_NOT_READY_PATH.test(parsedUrl.pathname);
+        if (parsedUrl.hostname.toLowerCase() !== 'torrentio.strem.fun') {
+            return null;
+        }
+        if (TORRENTIO_DOWNLOADING_PATH.test(parsedUrl.pathname)) {
+            return { status: 'uncached', errorCode: 'SOURCE_NOT_READY', reason: 'downloading' };
+        }
+        if (TORRENTIO_FAILED_PATH.test(parsedUrl.pathname)) {
+            const reason = parsedUrl.pathname
+                .replace(/^\/videos\/failed_/i, '')
+                .replace(/\.mp4$/i, '')
+                .replace(/_v\d+$/i, '');
+            return {
+                status: 'unavailable',
+                errorCode: 'SOURCE_UNAVAILABLE',
+                reason: reason || 'provider_failure'
+            };
+        }
+        return null;
     } catch {
-        return false;
+        return null;
     }
 };
 
+const isKnownNotReadySourceUrl = (sourceUrl) => classifyKnownPlaceholderSourceUrl(sourceUrl) !== null;
+
 const assertSourceIsReady = (sourceUrl) => {
-    if (isKnownNotReadySourceUrl(sourceUrl)) {
-        throw createDownloadError(SOURCE_NOT_READY_MESSAGE, 'SOURCE_NOT_READY');
+    const placeholder = classifyKnownPlaceholderSourceUrl(sourceUrl);
+    if (placeholder) {
+        throw createDownloadError(
+            placeholder.status === 'unavailable' ? SOURCE_UNAVAILABLE_MESSAGE : SOURCE_NOT_READY_MESSAGE,
+            placeholder.errorCode
+        );
     }
 };
 
@@ -228,6 +253,10 @@ const requestDownload = (sourceUrl, partialPath, control, redirectCount, resumeO
 
             if (resumeOffset > 0 && response.statusCode !== 206) {
                 response.resume();
+                if (response.statusCode === 451) {
+                    rejectOnce(createDownloadError(SOURCE_UNAVAILABLE_MESSAGE, 'SOURCE_UNAVAILABLE'));
+                    return;
+                }
                 rejectOnce(createDownloadError(
                     response.statusCode === 200 ?
                         'The download source does not support resuming. Retry the download from the beginning.'
@@ -240,7 +269,10 @@ const requestDownload = (sourceUrl, partialPath, control, redirectCount, resumeO
 
             if (resumeOffset === 0 && response.statusCode !== 200 && response.statusCode !== 206) {
                 response.resume();
-                rejectOnce(createDownloadError(`Download request failed with HTTP ${response.statusCode || 'unknown'}`));
+                rejectOnce(response.statusCode === 451 ?
+                    createDownloadError(SOURCE_UNAVAILABLE_MESSAGE, 'SOURCE_UNAVAILABLE')
+                    :
+                    createDownloadError(`Download request failed with HTTP ${response.statusCode || 'unknown'}`));
                 return;
             }
 
@@ -560,6 +592,7 @@ module.exports = {
     cancelDownload,
     isDownloadActive,
     isSupportedSourceUrl,
+    classifyKnownPlaceholderSourceUrl,
     isKnownNotReadySourceUrl,
     parseContentRange,
     buildProgressUpdate

@@ -26,12 +26,8 @@ const getRecordSourceUrl = (record) => {
 
 const isActiveDownloadRecord = (record) => ACTIVE_DOWNLOAD_STATUSES.has(normalizeValue(record?.status).toLowerCase());
 
-const doesRecordMatchPayload = (record, payload) => {
+const doesRecordIdentityMatchPayload = (record, payload) => {
     if (!record || !payload) {
-        return false;
-    }
-
-    if (!isActiveDownloadRecord(record)) {
         return false;
     }
 
@@ -55,6 +51,10 @@ const doesRecordMatchPayload = (record, payload) => {
     return normalizeValue(record.type) === normalizeValue(payload.type);
 };
 
+const doesRecordMatchPayload = (record, payload) => {
+    return isActiveDownloadRecord(record) && doesRecordIdentityMatchPayload(record, payload);
+};
+
 const findMatchingDownloadRecord = (records, payload) => {
     if (!Array.isArray(records) || !payload) {
         return null;
@@ -63,10 +63,21 @@ const findMatchingDownloadRecord = (records, payload) => {
     return records.find((record) => doesRecordMatchPayload(record, payload)) || null;
 };
 
+const findMatchingFailedDownloadRecord = (records, payload) => {
+    if (!Array.isArray(records) || !payload) {
+        return null;
+    }
+
+    return records.find((record) => normalizeValue(record?.status).toLowerCase() === 'failed' &&
+        doesRecordIdentityMatchPayload(record, payload)) || null;
+};
+
 module.exports = {
     getPayloadSourceUrl,
     getRecordSourceUrl,
     isActiveDownloadRecord,
+    doesRecordIdentityMatchPayload,
     doesRecordMatchPayload,
-    findMatchingDownloadRecord
+    findMatchingDownloadRecord,
+    findMatchingFailedDownloadRecord
 };

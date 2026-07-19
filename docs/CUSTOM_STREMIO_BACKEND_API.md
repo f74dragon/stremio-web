@@ -39,8 +39,10 @@ The frontend will send `POST /downloads` using the current `buildDownloadPayload
 - `episode`
 - `videoReleased`
 - `addonName`
+- `debridProvider` (`alldebrid`, `realdebrid`, or `unknown`)
 - `streamName`
 - `streamDescription`
+- `sourceReadiness` (`cached`, `previously_cached`, `requires_caching`, `unavailable`, or `unknown`)
 - `infoHash` (normalized 40-character torrent hash when provided by the Stremio stream)
 - `fileIdx`
 - `behaviorHints` (`filename` and `videoSize` only)
@@ -101,8 +103,10 @@ Example combined download record shape:
   "episode": 2,
   "videoReleased": "2024-03-01T00:00:00.000Z",
   "addonName": "Torrentio",
+  "debridProvider": "realdebrid",
   "streamName": "1080p BluRay",
   "streamDescription": "English, x264",
+  "sourceReadiness": "cached",
   "infoHash": "842783e3005495d5d1637f5364b59343c7844707",
   "fileIdx": 3,
   "behaviorHints": {
@@ -184,6 +188,10 @@ Response shape:
     "minAllowedConcurrentDownloads": 1,
     "maxAllowedConcurrentDownloads": null,
     "unlimitedValue": "unlimited"
+  },
+  "debrid": {
+    "allDebrid": { "connected": true },
+    "realDebrid": { "connected": false }
   }
 }
 ```
@@ -269,12 +277,13 @@ Behavior and safety:
 - Snapshots existing magnet IDs first, journals every new ID, deletes all check-created ready and not-ready magnets, and verifies cleanup through a fresh status snapshot.
 - Existing account magnets are protected and never deleted by a check.
 - Failed cleanup remains in `%LOCALAPPDATA%\Custom Stremio\alldebrid-pending-cleanup.json` and is retried on the next check and backend startup.
-- Cached and uncached results live in backend memory for five minutes to reduce account mutations and API traffic.
+- Explicit cached and uncached results live in backend memory for five minutes to reduce account mutations and API traffic. A later failed download clears the matching memory entry so an explicit recheck is live.
 - `fromCache` reports whether that item came from this five-minute backend cache; provider availability is represented only by `status`.
-- Confirmed `cached` and `uncached` observations are also written to persistent availability history with their longer display TTLs.
+- Confirmed `cached`, `uncached`, and failed-download `unavailable` observations are written to persistent availability history with their longer display TTLs.
 - Because AllDebrid has no documented read-only cache endpoint, uploading an uncached hash may briefly start peer processing before immediate deletion.
 - Do not use this endpoint for passive page-load checks. The stream page calls it only from the explicit, disclosed **Check availability** action.
 - This endpoint only supplies UI availability metadata. `POST /downloads` continues to use the original Stremio-provided URL.
+- The frontend splits larger explicit checks and history reads into requests of at most 100 hashes, preserving the route limit without treating an HTTP validation response as an offline backend.
 
 #### `POST /debrid/alldebrid/availability/history`
 
@@ -286,18 +295,78 @@ Request:
 { "hashes": ["842783e3005495d5d1637f5364b59343c7844707"] }
 ```
 
-Each response item contains `hash`, `status`, `verifiedAt`, `expiresAt`, `source`, and `previouslyVerified`. Missing and expired entries return `status: "unknown"`. Cached observations expire after 30 days and set `previouslyVerified: true` after 24 hours; uncached observations expire after 15 minutes. A new negative observation does not overwrite a still-valid positive cached observation for the same hash.
+Each response item contains `hash`, `status`, `verifiedAt`, `expiresAt`, `source`, and `previouslyVerified`. Missing and expired entries return `status: "unknown"`. Cached observations expire after 30 days and history-loaded positives set `previouslyVerified: true`; uncached observations expire after 15 minutes and unavailable observations after 24 hours. Later definitive download/check evidence replaces an older result for the same hash.
+
+### Real-Debrid authentication and explicit source availability
+
+#### `POST /debrid/realdebrid/auth/device`
+
+- Starts Real-Debrid's documented open-source device authorization with the public client ID and `new_credentials=yes`.
+- Returns `userCode`, `verificationUrl`, `expiresAt`, and `intervalSeconds`. The device code remains in backend memory.
+
+#### `POST /debrid/realdebrid/auth/device/check`
+
+- Polls the documented device-credentials endpoint. Before approval it returns `{ "activated": false }`.
+- After approval, exchanges the device code for access/refresh tokens, reads `/user`, stores account-bound credentials in backend settings, and returns only sanitized connection/profile state.
+- Access tokens are refreshed in the backend when within 60 seconds of expiration. Concurrent consumers share one refresh operation.
+
+#### `DELETE /debrid/realdebrid/auth`
+
+- Retries pending temporary-torrent cleanup first. Disconnect returns HTTP `409` while any cleanup ID remains pending so the backend retains the credential needed to finish safely.
+- After cleanup, calls the documented `GET /disable_access_token` endpoint and removes local Real-Debrid credentials after successful revocation.
+
+#### `POST /debrid/realdebrid/availability`
+
+Explicit account-mutating availability check. It is called only when the user chooses **Check Real-Debrid**; opening or filtering a title never calls it.
+
+The frontend sends explicit checks one source per request so it can render live row-level and completed/total progress. Within each request, deletion and absence verification of the newly created temporary torrent complete before the response returns; cleanup is never intentionally postponed until the end of the visible title scan.
+
+```json
+{
+  "sources": [
+    {
+      "hash": "842783e3005495d5d1637f5364b59343c7844707",
+      "fileIdx": 3,
+      "filename": "Show.Name.S01E04.1080p.mkv",
+      "videoSize": 2147483648
+    }
+  ]
+}
+```
+
+- Accepts at most 50 source descriptors and deduplicates their exact source keys. A valid 40-character hexadecimal `hash` is required; `fileIdx`, `filename`, and `videoSize` are optional matching evidence.
+- For each source, snapshots preexisting exact-hash torrent IDs, adds one temporary magnet, waits for its file metadata, and selects only a uniquely matched requested file. Ambiguous multi-file matches return `status: "unknown"` without selecting a file.
+- Only provider status `downloaded` with `progress: 100` returns `status: "cached"`. A persistent non-downloaded state or observed peer activity returns `status: "uncached"`. HTTP `451` / provider code `35` returns `status: "unavailable"` without cleanup when no ID was created.
+- Every newly returned ID is durably journaled before selection, deleted in `finally`, and verified absent. Existing same-hash IDs are protected. Lost add responses trigger exact-hash reconciliation against the pre-request snapshot.
+- Returns `items`, `pendingCleanup`, and an optional `cleanupWarning`. Per-source matching/provider failures are returned as `unknown`, `invalid`, or `error` items rather than changing another source's result.
+- Repeat checks have a five-minute in-memory result cache. Persistent source-file observations use separate longer TTLs described below.
+- This endpoint reports availability only. It never changes or replaces the Stremio URL used by `POST /downloads`.
+- The frontend splits larger explicit checks and history reads into requests of at most 50 exact source descriptors, preserving the route limit without treating an HTTP validation response as an offline backend.
+
+#### `POST /debrid/realdebrid/availability/history`
+
+Local-only history lookup. It accepts the same `sources` array, makes no Real-Debrid API request, and is safe to call while browsing.
+
+- Returns `cached`, `uncached`, `unavailable`, `unknown`, or `invalid` for each exact source key.
+- Cached observations expire after 30 days and history-loaded positives return `previouslyVerified: true`. Uncached observations expire after 15 minutes; unavailable observations expire after 24 hours.
+- Later definitive download/check evidence replaces an older observation for the same exact source file. Failed-download observations clear the short in-memory check cache so an explicit recheck contacts the provider.
+- Authenticated testing proved the historical `GET /torrents/instantAvailability/{hash}` route returns provider error code `37`, `disabled_endpoint`; that diagnostic route and client method are intentionally absent.
 
 ### 2. `POST /downloads`
 
 Purpose:
 - Create a new local download job from the frontend payload.
-- Reject payloads already identified as `requires_caching`, plus direct known Torrentio not-ready placeholder URLs, with HTTP `409` and `errorCode: "SOURCE_NOT_READY"`.
+- Reject payloads already identified as `requires_caching` or `unavailable`, plus direct known Torrentio placeholder URLs, with HTTP `409`. Preparing sources use `SOURCE_NOT_READY`; provider-rejected sources use `SOURCE_UNAVAILABLE`.
 
 Request body:
 - The frontend `buildDownloadPayload(input)` output fields listed above.
-- `sourceReadiness` is one of `cached`, `previously_cached`, `requires_caching`, or `unknown`. Persistent provider observations override addon label hints; `[AD Download]` alone remains `unknown` and usable.
-- Hash-bearing jobs identified as AllDebrid by their addon metadata snapshot exact-hash account magnets before source resolution. Successful media completion stores `cached`. A known Torrentio placeholder stores short-lived `uncached`, fails with `errorCode: "SOURCE_NOT_READY"`, and triggers journaled deletion only for new exact-hash magnet IDs.
+- `debridProvider` identifies which provider owns the submitted source URL. Conservative addon/stream metadata detection supplies `alldebrid`, `realdebrid`, or `unknown`.
+- `sourceReadiness` is provider-scoped and is one of `cached`, `previously_cached`, `requires_caching`, `unavailable`, or `unknown`. Persistent provider observations override addon label hints; an unchecked download-route label remains `unknown` and usable.
+- Before accepting a job, the backend also reads persistent history for the identified provider. AllDebrid uses the hash record; Real-Debrid uses the exact hash/file-index/filename/size key. A stored `uncached` or `unavailable` result is rejected even if the request claims `unknown`.
+- Provider results are not interchangeable: a failed Real-Debrid URL remains blocked even when an AllDebrid row for the same media is cached, and vice versa. The valid provider's own row remains downloadable.
+- Redirect inspection rejects both Torrentio `downloading_vN.mp4` and `failed_*_vN.mp4` families before requesting their bodies. The observed infringement placeholder is `https://torrentio.strem.fun/videos/failed_infringement_v2.mp4`.
+- A direct HTTP `451` download response is also normalized to `SOURCE_UNAVAILABLE` and never finalized as media.
+- Hash-bearing provider jobs snapshot their own exact-hash account entries before source resolution. Successful media completion stores `cached`; `SOURCE_NOT_READY` stores short-lived `uncached`; every other failed provider resolver transfer stores `unavailable`. Negative download evidence replaces stale positive history and triggers provider-specific cleanup only for newly created exact-hash IDs.
 
 Duplicate behavior:
 - Backend must detect active duplicates before creating a new record.
@@ -577,14 +646,22 @@ Notes:
 - The versioned JSON document uses atomic temporary-file replacement and is separate from account credentials and the pending-cleanup journal.
 - Disconnecting AllDebrid does not delete this history. A user-facing clear-history control is intentionally deferred.
 
+## Persistent Real-Debrid Availability and Cleanup
+
+- Source-file observations are stored in `%LOCALAPPDATA%\Custom Stremio\realdebrid-availability-history.json`.
+- Temporary torrent IDs awaiting verified deletion are stored separately in `%LOCALAPPDATA%\Custom Stremio\realdebrid-pending-cleanup.json`.
+- `CUSTOM_STREMIO_DATA_DIR` overrides the containing directory for both files.
+- Both versioned JSON documents use atomic temporary-file replacement. Availability history survives disconnect; pending cleanup is retried after backend restart.
+- A user-facing clear-history control is deferred. Pending cleanup is safety state and cannot be discarded through the frontend.
+
 ## Persistent Backend Settings
 
 - Settings are stored separately from download records in a versioned `backend-settings.json` document.
 - Default Windows path: `%LOCALAPPDATA%\Custom Stremio\backend-settings.json`
 - `CUSTOM_STREMIO_DATA_DIR` overrides the directory for both record and settings documents.
 - Writes use atomic temporary-file replacement.
-- The AllDebrid API key is stored only in this local backend document and is omitted from every frontend settings response. Protect the Windows account and data directory accordingly.
-- Version-one concurrency-only and version-two AllDebrid settings are migrated in memory with the configured player fallback preserved, then written in the current format on the next save.
+- The AllDebrid API key and Real-Debrid client secret/access/refresh tokens are stored only in this local backend document and are omitted from every frontend settings response. Protect the Windows account and data directory accordingly.
+- Version-one concurrency-only, version-two AllDebrid, and version-three player settings migrate in memory with their existing values preserved, then write in version four on the next save.
 - The saved `player.executablePath` is an absolute Windows `.exe` path used by `POST /play`; it is never supplied by the play request itself.
 - A saved `downloads.maxConcurrentDownloads` value takes precedence over `CUSTOM_STREMIO_MAX_CONCURRENT_DOWNLOADS` on startup.
 - When no saved document exists, the environment value is used if it is a positive integer or `unlimited`; otherwise the scheduler default is `2`.

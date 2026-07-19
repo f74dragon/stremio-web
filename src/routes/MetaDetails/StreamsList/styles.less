@@ -204,6 +204,20 @@
             background-color: rgba(255, 255, 255, 0.035);
         }
 
+        .availability-provider {
+            flex: 1 1 30rem;
+            min-width: 18rem;
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 0.45rem 0.7rem;
+        }
+
+        .availability-provider + .availability-provider {
+            padding-left: 0.8rem;
+            border-left: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
         .availability-check-button {
             flex: none;
             display: inline-flex;
@@ -233,6 +247,14 @@
             height: 0.95rem;
         }
 
+        .availability-check-button-realdebrid {
+            background-color: rgba(53, 108, 210, 0.82);
+
+            &:hover, &:focus {
+                background-color: rgba(73, 133, 239, 0.96);
+            }
+        }
+
         .availability-check-icon-active {
             animation: availability-pulse 0.9s ease-in-out infinite alternate;
         }
@@ -259,6 +281,19 @@
             color: var(--danger-accent-color);
             font-size: 0.76rem;
             line-height: 1.35;
+        }
+
+        @media only screen and (max-width: 50rem) {
+            .availability-provider {
+                min-width: 100%;
+            }
+
+            .availability-provider + .availability-provider {
+                padding-top: 0.7rem;
+                padding-left: 0;
+                border-top: 1px solid rgba(255, 255, 255, 0.08);
+                border-left: 0;
+            }
         }
     }
 

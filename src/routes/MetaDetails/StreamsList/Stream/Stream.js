@@ -11,7 +11,11 @@ const { Button, Image, Popup } = require('stremio/components');
 const { useRouteFocused } = require('stremio-router');
 const StreamPlaceholder = require('./StreamPlaceholder');
 const styles = require('./styles');
-const { SOURCE_READINESS } = require('stremio/customStremio/debridSourceReadiness');
+const {
+    DEBRID_PROVIDER,
+    SOURCE_READINESS,
+    isSourceReadinessBlocked
+} = require('stremio/customStremio/debridSourceReadiness');
 
 const getDownloadButtonLabel = (downloadRecord, isDownloadPending, downloadAction, sourceReadiness) => {
     if (isDownloadPending) {
@@ -32,8 +36,20 @@ const getDownloadButtonLabel = (downloadRecord, isDownloadPending, downloadActio
         case 'completed':
             return 'Play Download';
         default:
-            return sourceReadiness === SOURCE_READINESS.REQUIRES_CACHING ? 'Not cached' : 'Download';
+            if (sourceReadiness === SOURCE_READINESS.REQUIRES_CACHING) {
+                return 'Not cached';
+            }
+            return sourceReadiness === SOURCE_READINESS.UNAVAILABLE ? 'Unavailable' : 'Download';
     }
+};
+
+const getBlockedSourceMessage = (provider, sourceReadiness) => {
+    const providerName = provider === DEBRID_PROVIDER.REALDEBRID ? 'Real-Debrid' :
+        provider === DEBRID_PROVIDER.ALLDEBRID ? 'AllDebrid' : 'debrid provider';
+    return sourceReadiness === SOURCE_READINESS.UNAVAILABLE ?
+        `This source is unavailable on ${providerName}. Choose a cached source instead.`
+        :
+        `This source is not cached on ${providerName}. Choose a cached source instead.`;
 };
 
 const Stream = ({
@@ -41,6 +57,7 @@ const Stream = ({
     videoId,
     videoReleased,
     addonName,
+    debridProvider = DEBRID_PROVIDER.UNKNOWN,
     name,
     description,
     thumbnail,
@@ -52,6 +69,9 @@ const Stream = ({
     downloadActionError,
     sourceReadiness = SOURCE_READINESS.UNKNOWN,
     availabilityVerifiedAt,
+    realDebridAvailability,
+    isAvailabilityChecking = false,
+    availabilityCheckError,
     isDownloadPending,
     onDownloadPlaceholder,
     onPlayDownload,
@@ -97,7 +117,7 @@ const Stream = ({
     }, []);
 
     const href = React.useMemo(() => {
-        if (sourceReadiness === SOURCE_READINESS.REQUIRES_CACHING) {
+        if (isSourceReadinessBlocked(sourceReadiness)) {
             return null;
         }
 
@@ -162,11 +182,11 @@ const Stream = ({
             return;
         }
 
-        if (sourceReadiness === SOURCE_READINESS.REQUIRES_CACHING) {
+        if (isSourceReadinessBlocked(sourceReadiness)) {
             event.preventDefault();
             toast.show({
                 type: 'error',
-                title: 'This source is not cached yet. Choose a cached source instead.',
+                title: getBlockedSourceMessage(debridProvider, sourceReadiness),
                 timeout: 5000
             });
             return;
@@ -184,7 +204,7 @@ const Stream = ({
         if (typeof props.onClick === 'function') {
             props.onClick(event);
         }
-    }, [props.onClick, profile.settings, markVideoAsWatched, sourceReadiness]);
+    }, [props.onClick, profile.settings, markVideoAsWatched, debridProvider, sourceReadiness]);
 
     const copyMagnetLink = React.useCallback((event) => {
         event.preventDefault();
@@ -265,16 +285,21 @@ const Stream = ({
     }, [downloadPayload, downloadRecord, downloadAction, isDownloadPending, onDownloadPlaceholder, onPlayDownload]);
 
     const downloadButtonLabel = React.useMemo(
-        () => getDownloadButtonLabel(downloadRecord, isDownloadPending, downloadAction, sourceReadiness),
-        [downloadRecord, isDownloadPending, downloadAction, sourceReadiness]
+        () => isAvailabilityChecking ? 'Checking availability...' : getDownloadButtonLabel(downloadRecord, isDownloadPending, downloadAction, sourceReadiness),
+        [downloadRecord, isDownloadPending, downloadAction, sourceReadiness, isAvailabilityChecking]
     );
     const downloadButtonIsPlayable = downloadRecord?.status === 'completed' && Boolean(downloadRecord.id);
     const hasNonPlayableDownloadRecord = Boolean(downloadRecord) && !downloadButtonIsPlayable;
-    const sourceRequiresCaching = sourceReadiness === SOURCE_READINESS.REQUIRES_CACHING && !downloadButtonIsPlayable;
-    const downloadButtonDisabled = isDownloadPending || Boolean(downloadAction) || hasNonPlayableDownloadRecord || sourceRequiresCaching;
-    const showAllDebridCached = sourceReadiness === SOURCE_READINESS.CACHED && !downloadButtonIsPlayable;
-    const showAllDebridPreviouslyCached = sourceReadiness === SOURCE_READINESS.PREVIOUSLY_CACHED && !downloadButtonIsPlayable;
-    const showAllDebridRequiresCaching = sourceReadiness === SOURCE_READINESS.REQUIRES_CACHING && !downloadButtonIsPlayable;
+    const sourceIsBlocked = isSourceReadinessBlocked(sourceReadiness) && !downloadButtonIsPlayable;
+    const downloadButtonDisabled = isAvailabilityChecking || isDownloadPending || Boolean(downloadAction) || hasNonPlayableDownloadRecord || sourceIsBlocked;
+    const showAllDebridCached = !isAvailabilityChecking && debridProvider === DEBRID_PROVIDER.ALLDEBRID && sourceReadiness === SOURCE_READINESS.CACHED && !downloadButtonIsPlayable;
+    const showAllDebridPreviouslyCached = !isAvailabilityChecking && debridProvider === DEBRID_PROVIDER.ALLDEBRID && sourceReadiness === SOURCE_READINESS.PREVIOUSLY_CACHED && !downloadButtonIsPlayable;
+    const showAllDebridRequiresCaching = !isAvailabilityChecking && debridProvider === DEBRID_PROVIDER.ALLDEBRID && sourceReadiness === SOURCE_READINESS.REQUIRES_CACHING && !downloadButtonIsPlayable;
+    const showAllDebridUnavailable = !isAvailabilityChecking && debridProvider === DEBRID_PROVIDER.ALLDEBRID && sourceReadiness === SOURCE_READINESS.UNAVAILABLE && !downloadButtonIsPlayable;
+    const showRealDebridCached = !isAvailabilityChecking && debridProvider === DEBRID_PROVIDER.REALDEBRID && sourceReadiness === SOURCE_READINESS.CACHED && !downloadButtonIsPlayable;
+    const showRealDebridPreviouslyCached = !isAvailabilityChecking && debridProvider === DEBRID_PROVIDER.REALDEBRID && sourceReadiness === SOURCE_READINESS.PREVIOUSLY_CACHED && !downloadButtonIsPlayable;
+    const showRealDebridUncached = !isAvailabilityChecking && debridProvider === DEBRID_PROVIDER.REALDEBRID && sourceReadiness === SOURCE_READINESS.REQUIRES_CACHING && !downloadButtonIsPlayable;
+    const showRealDebridUnavailable = !isAvailabilityChecking && debridProvider === DEBRID_PROVIDER.REALDEBRID && sourceReadiness === SOURCE_READINESS.UNAVAILABLE && !downloadButtonIsPlayable;
 
     const renderThumbnailFallback = React.useCallback(() => (
         <Icon className={styles['placeholder-icon']} name={'ic_broken_link'} />
@@ -287,13 +312,13 @@ const Stream = ({
                 className={classnames(
                     className,
                     styles['stream-container'],
-                    sourceRequiresCaching ? styles['stream-container-not-ready'] : null
+                    sourceIsBlocked ? styles['stream-container-not-ready'] : null
                 )}
-                title={sourceRequiresCaching ? 'This source requires AllDebrid caching' : addonName}
+                title={sourceIsBlocked ? getBlockedSourceMessage(debridProvider, sourceReadiness) : addonName}
                 href={href}
                 target={target}
                 download={download}
-                aria-disabled={sourceRequiresCaching}
+                aria-disabled={sourceIsBlocked}
                 onClick={onClick}
             >
                 <div className={styles['info-container']}>
@@ -323,6 +348,19 @@ const Stream = ({
                     }
                 </div>
                 <div className={styles['description-container']} title={description}>
+                    {
+                        isAvailabilityChecking ?
+                            <div className={classnames(styles['debrid-badge'], styles['debrid-badge-checking'])}>
+                                <span className={styles['debrid-badge-checking-dot']} />
+                                <span>{debridProvider === DEBRID_PROVIDER.REALDEBRID ? 'Checking Real-Debrid...' : 'Checking AllDebrid...'}</span>
+                            </div>
+                            : availabilityCheckError ?
+                                <div className={classnames(styles['debrid-badge'], styles['debrid-badge-unresolved'])} title={availabilityCheckError}>
+                                    <Icon className={styles['debrid-badge-icon']} name={'warning'} />
+                                    <span>{t('CUSTOM_STREAM_AVAILABILITY_UNRESOLVED', { defaultValue: 'Could not safely check' })}</span>
+                                </div>
+                                : null
+                    }
                     {
                         showAllDebridCached ?
                             <div
@@ -356,6 +394,52 @@ const Stream = ({
                             </div>
                             : null
                     }
+                    {
+                        showAllDebridUnavailable ?
+                            <div className={classnames(styles['debrid-badge'], styles['realdebrid-badge-unavailable'])} title={'This AllDebrid source failed and is no longer considered downloadable'}>
+                                <Icon className={styles['debrid-badge-icon']} name={'warning'} />
+                                <span>{t('CUSTOM_STREAM_ALLDEBRID_UNAVAILABLE', { defaultValue: 'Unavailable on AllDebrid' })}</span>
+                            </div>
+                            : null
+                    }
+                    {
+                        showRealDebridCached ?
+                            <div
+                                className={classnames(styles['debrid-badge'], styles['realdebrid-badge'])}
+                                title={t('CUSTOM_STREAM_REALDEBRID_CACHED_TITLE', { defaultValue: 'This exact file was verified instantly available on Real-Debrid' })}
+                            >
+                                <Icon className={styles['debrid-badge-icon']} name={'checkmark'} />
+                                <span>{t('CUSTOM_STREAM_REALDEBRID_CACHED', { defaultValue: 'Cached on Real-Debrid' })}</span>
+                            </div>
+                            : null
+                    }
+                    {
+                        showRealDebridPreviouslyCached ?
+                            <div
+                                className={classnames(styles['debrid-badge'], styles['realdebrid-badge'], styles['debrid-badge-previously-cached'])}
+                                title={realDebridAvailability?.verifiedAt ? `Last verified ${new Date(realDebridAvailability.verifiedAt).toLocaleString()}` : 'Previously verified on Real-Debrid'}
+                            >
+                                <Icon className={styles['debrid-badge-icon']} name={'checkmark'} />
+                                <span>{t('CUSTOM_STREAM_REALDEBRID_PREVIOUSLY_CACHED', { defaultValue: 'Previously cached on Real-Debrid' })}</span>
+                            </div>
+                            : null
+                    }
+                    {
+                        showRealDebridUncached ?
+                            <div className={classnames(styles['debrid-badge'], styles['realdebrid-badge-not-ready'])} title={'This exact file was not instantly available on Real-Debrid'}>
+                                <Icon className={styles['debrid-badge-icon']} name={'warning'} />
+                                <span>{t('CUSTOM_STREAM_REALDEBRID_NOT_CACHED', { defaultValue: 'Not cached on Real-Debrid' })}</span>
+                            </div>
+                            : null
+                    }
+                    {
+                        showRealDebridUnavailable ?
+                            <div className={classnames(styles['debrid-badge'], styles['realdebrid-badge-unavailable'])} title={'Real-Debrid rejected this torrent before creating an account entry'}>
+                                <Icon className={styles['debrid-badge-icon']} name={'warning'} />
+                                <span>{t('CUSTOM_STREAM_REALDEBRID_UNAVAILABLE', { defaultValue: 'Unavailable on Real-Debrid' })}</span>
+                            </div>
+                            : null
+                    }
                     <div className={styles['description-text']}>{description}</div>
                 </div>
                 <Button
@@ -382,11 +466,11 @@ const Stream = ({
                         :
                         null
                 }
-                <Icon className={styles['icon']} name={sourceRequiresCaching ? 'warning' : 'play'} />
+                <Icon className={styles['icon']} name={sourceIsBlocked ? 'warning' : 'play'} />
                 {children}
             </Button>
         );
-    }, [thumbnail, progress, addonName, name, description, href, target, download, onClick, downloadButtonOnClick, downloadButtonDisabled, downloadButtonIsPlayable, downloadButtonLabel, downloadAction, downloadActionError, showAllDebridCached, showAllDebridPreviouslyCached, showAllDebridRequiresCaching, sourceRequiresCaching, availabilityVerifiedAt]);
+    }, [thumbnail, progress, addonName, name, description, href, target, download, onClick, downloadButtonOnClick, downloadButtonDisabled, downloadButtonIsPlayable, downloadButtonLabel, downloadAction, downloadActionError, showAllDebridCached, showAllDebridPreviouslyCached, showAllDebridRequiresCaching, showAllDebridUnavailable, showRealDebridCached, showRealDebridPreviouslyCached, showRealDebridUncached, showRealDebridUnavailable, sourceIsBlocked, sourceReadiness, debridProvider, availabilityVerifiedAt, realDebridAvailability, isAvailabilityChecking, availabilityCheckError]);
 
     const renderMenu = React.useMemo(() => function renderMenu() {
         return (
@@ -450,6 +534,7 @@ Stream.propTypes = {
     videoId: PropTypes.string,
     videoReleased: PropTypes.instanceOf(Date),
     addonName: PropTypes.string,
+    debridProvider: PropTypes.oneOf(Object.values(DEBRID_PROVIDER)),
     name: PropTypes.string,
     description: PropTypes.string,
     thumbnail: PropTypes.string,
@@ -478,6 +563,13 @@ Stream.propTypes = {
     downloadActionError: PropTypes.string,
     sourceReadiness: PropTypes.oneOf(Object.values(SOURCE_READINESS)),
     availabilityVerifiedAt: PropTypes.string,
+    realDebridAvailability: PropTypes.shape({
+        status: PropTypes.oneOf(['cached', 'uncached', 'unavailable', 'unknown', 'invalid', 'error']),
+        verifiedAt: PropTypes.string,
+        previouslyVerified: PropTypes.bool
+    }),
+    isAvailabilityChecking: PropTypes.bool,
+    availabilityCheckError: PropTypes.string,
     isDownloadPending: PropTypes.bool,
     onDownloadPlaceholder: PropTypes.func,
     onPlayDownload: PropTypes.func,

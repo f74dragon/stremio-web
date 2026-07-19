@@ -1,4 +1,8 @@
-const { classifyDebridSourceReadiness, getStreamInfoHash } = require('./debridSourceReadiness');
+const {
+    classifyProviderSourceReadiness,
+    getDebridProvider,
+    getStreamInfoHash
+} = require('./debridSourceReadiness');
 
 const toIsoDateOrNull = (value) => {
     return value instanceof Date && !isNaN(value.getTime()) ?
@@ -22,6 +26,7 @@ const buildDownloadPayload = (input) => {
     const background = input?.background ?? null;
     const addonName = input?.addonName ?? null;
     const stream = input?.stream ?? null;
+    const providerContext = stream ? { ...stream, addonName: stream.addonName ?? addonName } : { addonName };
     const deepLinks = stream?.deepLinks ?? null;
     const externalPlayer = deepLinks?.externalPlayer ?? null;
 
@@ -48,9 +53,10 @@ const buildDownloadPayload = (input) => {
         episode: typeof video?.episode === 'number' ? video.episode : null,
         videoReleased: toIsoDateOrNull(video?.released),
         addonName,
+        debridProvider: getDebridProvider(providerContext),
         streamName: stream?.name ?? null,
         streamDescription: stream?.description ?? null,
-        sourceReadiness: classifyDebridSourceReadiness(stream),
+        sourceReadiness: classifyProviderSourceReadiness(providerContext),
         infoHash: getStreamInfoHash(stream) || normalizeInfoHash(stream?.infoHash),
         fileIdx: Number.isSafeInteger(stream?.fileIdx) ? stream.fileIdx : null,
         behaviorHints: {

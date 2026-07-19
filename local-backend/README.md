@@ -108,6 +108,36 @@ The backend retains an explicit `POST /debrid/alldebrid/availability` capability
 
 AllDebrid's documented API does not expose a read-only instant-availability endpoint. The explicit action therefore uses the documented upload response, which means an uncached torrent may briefly begin provider-side peer processing before the temporary magnet is deleted. It is never called automatically. When an unchecked Torrentio download resolves to the known placeholder, the backend matches the URL hash against account magnets and deletes only newly created exact-hash IDs; preexisting and unrelated magnets are protected. Disconnect is blocked while cleanup remains pending so the backend does not discard the credential needed to finish cleanup.
 
+## Real-Debrid Account and Explicit Availability
+
+Open **Downloads -> Download options -> Real-Debrid account** and choose **Connect Real-Debrid**. The app shows a device code and opens the official authorization page. After approval, account-bound OAuth client credentials and access/refresh tokens are stored only in:
+
+`%LOCALAPPDATA%\Custom Stremio\backend-settings.json`
+
+Frontend responses expose only sanitized account and premium state. Access tokens refresh locally when needed, and Disconnect revokes the active token before removing the saved connection. Treat the local data directory as private.
+
+Opening and filtering stream sources reads only persistent local availability history. It does not contact Real-Debrid. When the user explicitly chooses **Check Real-Debrid**, the backend uses the documented add/select/info/delete workflow and clearly discloses that temporary account torrents are created.
+
+The check is source-file-specific: it combines hash, Stremio file index, filename, and video size, then selects only a uniquely matched requested file. Only `downloaded`/100% is cached. A queued/non-downloaded result is not instant, ambiguous files remain unknown without selection, and HTTP `451` is unavailable. Current and historical results appear as provider-specific stream badges and govern only the matching provider row; they never replace its original Stremio download URL.
+
+Provider-specific download safety is enforced in both layers. The frontend disables AllDebrid or Real-Debrid rows known not cached/unavailable, while `POST /downloads` re-reads the matching persistent provider history before creating a record. A valid row on the other provider remains usable. Unknown and unchecked rows retain their prior behavior, with the known Torrentio placeholder redirect detector as a final guard.
+
+Real-Debrid rows are recognized from `[RD]`, `[RD+]`, `[RD Download]`, explicit RealDebrid addon metadata, and resolver/deep-link URLs containing `realdebrid`. These labels identify the provider but do not count as verified cache results. Episode resolver hashes are extracted from all external-player link variants, including percent-encoded URLs. Both provider controls remain present for populated stream lists even while the backend is offline: disconnected providers, absent filtered sources, and rows without a checkable hash receive explicit disabled states instead of making the feature disappear.
+
+The final download guard rejects Torrentio `downloading_vN.mp4` and `failed_*_vN.mp4` videos before requesting or writing their bodies. This includes `failed_infringement_v2.mp4`. Direct HTTP `451` responses fail as `SOURCE_UNAVAILABLE`. Failed provider resolver downloads immediately replace stale positive history: preparing placeholders become not cached and other failures become unavailable. A later successful download or explicit positive check restores cached status. A generic minimum-size rule is not used because legitimate short videos can be small.
+
+Large addon result sets are batched by the frontend for passive history reads: 100 AllDebrid hashes or 50 Real-Debrid source descriptors per backend request. User-triggered explicit checks use one item per request so each visible row and the completed/total counter update live. Route/provider HTTP errors are shown as their actual error and preserve the known connection state; only a network failure marks the backend unavailable.
+
+Every new torrent ID is saved to `%LOCALAPPDATA%\Custom Stremio\realdebrid-pending-cleanup.json` before selection, deleted in that source check's `finally`, and verified absent before the frontend advances to the next source. Existing same-hash account IDs are protected. Failed cleanup is retried after restart, and disconnect is blocked while cleanup remains pending. Results persist separately in `realdebrid-availability-history.json`; cached results last 30 days, not-cached results 15 minutes, and unavailable results 24 hours.
+
+Authenticated testing confirmed the historical instant-availability route returns provider error code `37`, `disabled_endpoint`. The disabled diagnostic endpoint and client method were removed; production behavior uses only documented endpoints.
+
+A controlled add/select/info/delete test confirmed the documented workflow: adding produced `waiting_files_selection` without peer activity; selecting the largest video file changed a cached candidate to `downloaded`/100% in under one second; deleting the exact returned ID succeeded with HTTP `204` and restored the original account count. This proves positive cached detection, but does not yet establish the safest observation window for an uncached selection.
+
+Five hashes previously recorded as uncached by AllDebrid were also tested against Real-Debrid. Two were instantly cached by Real-Debrid after selection and three were rejected with HTTP `451` before an account ID was created. No candidate entered peer downloading. This confirms provider results are not interchangeable and that rejected additions require no cleanup, while every successfully created temporary ID must still be deleted and verified independently.
+
+A later user-supplied uncached hash completed the negative-path test. It moved from `waiting_files_selection` to `queued`/0% at 363 ms after selection rather than `downloaded`/100%. The exact ID was deleted and verified in roughly 1.2 seconds total, before any measured progress or transfer speed; the complete account torrent list was unchanged afterward. The implemented check therefore accepts only `downloaded`/100% as cached and cleans up every other post-selection state.
+
 ## Persistent Download Records
 
 Download metadata is stored separately from media files at:

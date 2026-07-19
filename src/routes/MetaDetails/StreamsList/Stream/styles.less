@@ -152,6 +152,47 @@
         box-shadow: none;
     }
 
+    .realdebrid-badge {
+        border-color: rgba(104, 164, 255, 0.34);
+        color: rgba(222, 237, 255, 0.98);
+        background-color: rgba(48, 102, 201, 0.25);
+        box-shadow: 0 0.25rem 0.7rem rgba(15, 48, 107, 0.18);
+    }
+
+    .realdebrid-badge-not-ready {
+        border-color: rgba(244, 183, 74, 0.32);
+        color: rgba(255, 239, 205, 0.96);
+        background-color: rgba(164, 105, 22, 0.24);
+    }
+
+    .realdebrid-badge-unavailable {
+        border-color: rgba(255, 112, 112, 0.3);
+        color: rgba(255, 222, 222, 0.96);
+        background-color: rgba(164, 55, 55, 0.23);
+    }
+
+    .debrid-badge-checking {
+        border-color: rgba(155, 126, 255, 0.42);
+        color: rgba(240, 235, 255, 0.98);
+        background-color: rgba(101, 70, 190, 0.28);
+        box-shadow: 0 0.25rem 0.8rem rgba(54, 29, 123, 0.2);
+    }
+
+    .debrid-badge-checking-dot {
+        width: 0.48rem;
+        height: 0.48rem;
+        border-radius: 50%;
+        background-color: currentColor;
+        animation: availability-pulse 1s ease-in-out infinite;
+    }
+
+    .debrid-badge-unresolved {
+        border-color: rgba(244, 183, 74, 0.28);
+        color: rgba(255, 239, 205, 0.94);
+        background-color: rgba(126, 88, 27, 0.22);
+        box-shadow: none;
+    }
+
     .download-button-container {
         flex: none;
         display: flex;
@@ -275,6 +316,18 @@
 			}
 		}
 	}
+}
+
+@keyframes availability-pulse {
+    0%, 100% {
+        opacity: 0.4;
+        transform: scale(0.82);
+    }
+
+    50% {
+        opacity: 1;
+        transform: scale(1);
+    }
 }
 
 @media only screen and (max-width: @small) {

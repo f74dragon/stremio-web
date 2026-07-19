@@ -7,6 +7,9 @@ const {
     startAllDebridPinAuth,
     checkAllDebridPinAuth,
     disconnectAllDebrid,
+    startRealDebridDeviceAuth,
+    checkRealDebridDeviceAuth,
+    disconnectRealDebrid,
     selectPlayerExecutable
 } = require('../localBackendClient');
 const styles = require('./DownloadManagerSettingsPanel.less');
@@ -28,6 +31,9 @@ const DownloadManagerSettingsPanel = () => {
     const [allDebridAuth, setAllDebridAuth] = React.useState(null);
     const [allDebridBusy, setAllDebridBusy] = React.useState(false);
     const [allDebridError, setAllDebridError] = React.useState(null);
+    const [realDebridAuth, setRealDebridAuth] = React.useState(null);
+    const [realDebridBusy, setRealDebridBusy] = React.useState(false);
+    const [realDebridError, setRealDebridError] = React.useState(null);
     const [playerBusy, setPlayerBusy] = React.useState(false);
     const [playerError, setPlayerError] = React.useState(null);
 
@@ -79,6 +85,7 @@ const DownloadManagerSettingsPanel = () => {
     }, [currentValue, customSelected]);
 
     const allDebridConnection = settings?.debrid?.allDebrid;
+    const realDebridConnection = settings?.debrid?.realDebrid;
     const playerSettings = settings?.player;
     const playerExecutableName = playerSettings?.executablePath ?
         playerSettings.executablePath.split(/[\\/]/).pop()
@@ -211,6 +218,110 @@ const DownloadManagerSettingsPanel = () => {
             clearInterval(interval);
         };
     }, [allDebridAuth, allDebridConnection?.connected, t]);
+
+    const startRealDebridConnection = React.useCallback(async () => {
+        if (realDebridBusy) {
+            return;
+        }
+        setRealDebridBusy(true);
+        setRealDebridError(null);
+        try {
+            const auth = await startRealDebridDeviceAuth();
+            if (mountedRef.current) {
+                setRealDebridAuth(auth);
+            }
+        } catch (requestError) {
+            if (mountedRef.current) {
+                setRealDebridError(requestError?.backendError || t('CUSTOM_DOWNLOAD_MANAGER_REALDEBRID_CONNECT_ERROR', {
+                    defaultValue: 'Could not start the Real-Debrid connection.'
+                }));
+            }
+        } finally {
+            if (mountedRef.current) {
+                setRealDebridBusy(false);
+            }
+        }
+    }, [realDebridBusy, t]);
+
+    const disconnectRealDebridConnection = React.useCallback(async () => {
+        if (realDebridBusy) {
+            return;
+        }
+        setRealDebridBusy(true);
+        setRealDebridError(null);
+        try {
+            const result = await disconnectRealDebrid();
+            if (mountedRef.current) {
+                setSettings((current) => ({
+                    ...current,
+                    debrid: { ...current?.debrid, realDebrid: result.connection }
+                }));
+                setRealDebridAuth(null);
+            }
+        } catch (requestError) {
+            if (mountedRef.current) {
+                setRealDebridError(requestError?.backendError || t('CUSTOM_DOWNLOAD_MANAGER_REALDEBRID_DISCONNECT_ERROR', {
+                    defaultValue: 'Could not disconnect Real-Debrid.'
+                }));
+            }
+        } finally {
+            if (mountedRef.current) {
+                setRealDebridBusy(false);
+            }
+        }
+    }, [realDebridBusy, t]);
+
+    React.useEffect(() => {
+        if (!realDebridAuth || realDebridConnection?.connected) {
+            return undefined;
+        }
+
+        let canceled = false;
+        let requestPending = false;
+        const poll = async () => {
+            if (requestPending || canceled) {
+                return;
+            }
+            if (Date.parse(realDebridAuth.expiresAt) <= Date.now()) {
+                setRealDebridAuth(null);
+                setRealDebridError(t('CUSTOM_DOWNLOAD_MANAGER_REALDEBRID_CODE_EXPIRED', {
+                    defaultValue: 'The Real-Debrid authorization code expired. Start a new connection.'
+                }));
+                return;
+            }
+
+            requestPending = true;
+            try {
+                const result = await checkRealDebridDeviceAuth();
+                if (!canceled && mountedRef.current && result.activated) {
+                    setSettings((current) => ({
+                        ...current,
+                        debrid: { ...current?.debrid, realDebrid: result.connection }
+                    }));
+                    setRealDebridAuth(null);
+                    setRealDebridError(null);
+                }
+            } catch (requestError) {
+                if (!canceled && mountedRef.current && [409, 410].includes(requestError?.status)) {
+                    setRealDebridAuth(null);
+                    setRealDebridError(requestError?.backendError || t('CUSTOM_DOWNLOAD_MANAGER_REALDEBRID_CODE_INACTIVE', {
+                        defaultValue: 'The Real-Debrid authorization code is no longer active.'
+                    }));
+                }
+            } finally {
+                requestPending = false;
+            }
+        };
+
+        const intervalMs = Math.max(3, Number(realDebridAuth.intervalSeconds) || 5) * 1000;
+        const firstPoll = setTimeout(poll, intervalMs);
+        const interval = setInterval(poll, intervalMs);
+        return () => {
+            canceled = true;
+            clearTimeout(firstPoll);
+            clearInterval(interval);
+        };
+    }, [realDebridAuth, realDebridConnection?.connected, t]);
 
     const selectConcurrency = React.useCallback(async (maxConcurrentDownloads) => {
         if (!settings || saving || maxConcurrentDownloads === currentValue) {
@@ -545,6 +656,97 @@ const DownloadManagerSettingsPanel = () => {
                         : null
                 }
                 {allDebridError ? <div className={styles['error-row']} role={'alert'}>{allDebridError}</div> : null}
+            </section>
+            <section className={styles['realdebrid-panel']} aria-labelledby={'download-manager-realdebrid-title'}>
+                <div className={styles['settings-copy']}>
+                    <div className={styles['debrid-heading-row']}>
+                        <h2 id={'download-manager-realdebrid-title'}>
+                            {t('CUSTOM_DOWNLOAD_MANAGER_REALDEBRID_TITLE', { defaultValue: 'Real-Debrid account' })}
+                        </h2>
+                        {
+                            realDebridConnection?.connected ?
+                                <span className={realDebridConnection.isPremium ? styles['realdebrid-premium'] : styles['connection-basic']}>
+                                    {realDebridConnection.isPremium ?
+                                        t('CUSTOM_DOWNLOAD_MANAGER_REALDEBRID_PREMIUM_CONNECTED', { defaultValue: 'Premium connected' })
+                                        :
+                                        t('CUSTOM_DOWNLOAD_MANAGER_REALDEBRID_CONNECTED', { defaultValue: 'Connected' })}
+                                </span>
+                                : null
+                        }
+                    </div>
+                    <p>
+                        {t('CUSTOM_DOWNLOAD_MANAGER_REALDEBRID_DESCRIPTION', {
+                            defaultValue: 'Connect through Real-Debrid device authorization. Browsing stays read-only; an explicit source check briefly creates and removes a temporary torrent.'
+                        })}
+                    </p>
+                </div>
+                <div className={styles['debrid-control']}>
+                    {
+                        !settings ?
+                            <span className={styles['debrid-muted']}>
+                                {t('CUSTOM_DOWNLOAD_MANAGER_REALDEBRID_BACKEND_WAIT', { defaultValue: 'Waiting for the local backend...' })}
+                            </span>
+                            : realDebridConnection?.connected ?
+                                <React.Fragment>
+                                    <div className={styles['account-copy']}>
+                                        <strong>{realDebridConnection.username || t('CUSTOM_DOWNLOAD_MANAGER_REALDEBRID_ACCOUNT', { defaultValue: 'Real-Debrid account' })}</strong>
+                                        <span>{realDebridConnection.isPremium ?
+                                            t('CUSTOM_DOWNLOAD_MANAGER_REALDEBRID_ENABLED', { defaultValue: 'Connected securely. No torrent is added during source browsing.' })
+                                            :
+                                            t('CUSTOM_DOWNLOAD_MANAGER_REALDEBRID_PREMIUM_REQUIRED', { defaultValue: 'Connected, but this account is not currently premium.' })}</span>
+                                    </div>
+                                    <button
+                                        className={styles['disconnect-button']}
+                                        type={'button'}
+                                        disabled={realDebridBusy}
+                                        onClick={disconnectRealDebridConnection}
+                                    >
+                                        {realDebridBusy ?
+                                            t('CUSTOM_DOWNLOAD_MANAGER_REALDEBRID_DISCONNECTING', { defaultValue: 'Disconnecting...' })
+                                            :
+                                            t('CUSTOM_DOWNLOAD_MANAGER_REALDEBRID_DISCONNECT', { defaultValue: 'Disconnect' })}
+                                    </button>
+                                </React.Fragment>
+                                : realDebridAuth ?
+                                    <div className={styles['pin-flow']}>
+                                        <div>
+                                            <span className={styles['pin-label']}>
+                                                {t('CUSTOM_DOWNLOAD_MANAGER_REALDEBRID_CODE_LABEL', { defaultValue: 'Enter this code on Real-Debrid' })}
+                                            </span>
+                                            <strong className={styles['realdebrid-code']}>{realDebridAuth.userCode}</strong>
+                                        </div>
+                                        <a className={styles['realdebrid-connect-link']} href={realDebridAuth.verificationUrl} target={'_blank'} rel={'noreferrer'}>
+                                            {t('CUSTOM_DOWNLOAD_MANAGER_REALDEBRID_OPEN', { defaultValue: 'Open Real-Debrid' })}
+                                        </a>
+                                        <span className={styles['polling-label']}>
+                                            {t('CUSTOM_DOWNLOAD_MANAGER_REALDEBRID_AUTH_WAIT', { defaultValue: 'Waiting for authorization...' })}
+                                        </span>
+                                    </div>
+                                    :
+                                    <button
+                                        className={styles['realdebrid-connect-button']}
+                                        type={'button'}
+                                        disabled={realDebridBusy}
+                                        onClick={startRealDebridConnection}
+                                    >
+                                        {realDebridBusy ?
+                                            t('CUSTOM_DOWNLOAD_MANAGER_REALDEBRID_CONNECTING', { defaultValue: 'Connecting...' })
+                                            :
+                                            t('CUSTOM_DOWNLOAD_MANAGER_REALDEBRID_CONNECT', { defaultValue: 'Connect Real-Debrid' })}
+                                    </button>
+                    }
+                </div>
+                {
+                    realDebridConnection?.pendingCleanup > 0 ?
+                        <div className={styles['cleanup-warning']} role={'status'}>
+                            {t('CUSTOM_DOWNLOAD_MANAGER_REALDEBRID_CLEANUP_PENDING', {
+                                defaultValue: '{{count}} temporary Real-Debrid cleanup item(s) pending. The backend will retry automatically.',
+                                count: realDebridConnection.pendingCleanup
+                            })}
+                        </div>
+                        : null
+                }
+                {realDebridError ? <div className={styles['error-row']} role={'alert'}>{realDebridError}</div> : null}
             </section>
         </div>
     );

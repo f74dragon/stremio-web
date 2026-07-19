@@ -59,7 +59,7 @@ Notes:
 - `4. Add placeholder Download / Play Download buttons`: In progress (`Milestone 4A` implemented)
 - `5. Create local backend prototype`: In progress (`Milestone 5B` backend skeleton created)
 - `7. Add title-specific downloads panel`: In progress (`Milestone 7A` implemented)
-- `6. Implement real download manager`: In progress (`Milestones 6A-6J` real downloads, persistence, retry/resume, FIFO scheduling, queue controls, concurrency settings, and hybrid AllDebrid availability handling implemented)
+- `6. Implement real download manager`: In progress (`Milestones 6A-6K.3` real downloads, persistence, retry/resume, FIFO scheduling, queue controls, concurrency settings, hybrid provider availability, and provider-aware download safety implemented)
 - `8. Add global downloads page`: In progress (`Milestones 8A-8C.2` implemented)
 - `9. Add MPC-HC launch support`: In progress (`Milestones 9A-9C` panel playback, stream-row playback, and persistent in-app player selection implemented)
 - `10. Add watched/unwatched integration`: Not started
@@ -78,7 +78,77 @@ Notes:
 
 ## Next Recommended Step
 
-Add Real-Debrid as a fallback availability provider using a separately verified read-only capability path. Keep actual downloads on the existing Stremio URLs and preserve preferred-addon priority above availability sorting. A user-facing **Clear availability history** action, batch title/episode selection, watched progress, and file deletion remain later passes.
+Manually validate Milestone 6K.3 with the provider-specific AllDebrid and Real-Debrid addons. Check one cached and one known-negative source on each provider, confirm only that provider's row is affected, verify negative rows cannot create a download record, and confirm a cached row on the other provider remains downloadable. After that checkpoint, design a separate provider-resolver action only if the app should automatically switch a failed row to a different cached provider/quality instead of requiring the user to choose the valid row.
+
+## Milestone 6K.3 Findings: Provider-Aware Download Safety
+
+- Stream rows are conservatively classified as `alldebrid`, `realdebrid`, or `unknown` from explicit stream markers and addon metadata. Conflicting or absent evidence stays unknown rather than guessing.
+- Availability requests and persistent results are provider-scoped: AllDebrid checks include only AllDebrid rows, and Real-Debrid checks include only Real-Debrid rows. One provider's negative result cannot mark or disable the other provider's source URL.
+- Each provider row now derives one effective readiness value: current cached, previously cached, unknown, requires caching, or unavailable. Preferred-addon grouping remains the strongest ordering rule.
+- A Real-Debrid row verified not cached or unavailable is disabled just like a known-negative AllDebrid row. The button says **Not cached** or **Unavailable**, and the row explains which provider failed.
+- `POST /downloads` enforces the same rule. It rejects a negative payload and also re-reads persistent provider history using the exact AllDebrid hash or Real-Debrid source-file key before accepting a job, so removing the frontend disabled state does not bypass known-negative safety.
+- At the page level, a valid cache on either provider still supplies a downloadable row. A failing provider's own URL remains blocked; the app does not silently replace it with a different provider or quality.
+- Known Torrentio placeholder redirects remain a final failure guard. For provider-identified resolver attempts, successful media refreshes that provider's cache history; a recognized placeholder records a short negative result. Real-Debrid resolver cleanup snapshots existing exact-hash IDs and deletes only newly created IDs if the recognized placeholder path is reached.
+- Unknown or unchecked sources retain the existing behavior because absence of a result is not proof of failure.
+- Episode/provider discovery now inspects `name`, legacy `title`, addon metadata, provider resolver URLs, and every external-player deep-link variant. Bare `[RD]`, `[RD+]`, `[RD Download]`, `RealDebrid`, and resolver URLs containing `realdebrid` identify Real-Debrid rows; percent-encoded resolver URLs are decoded before extracting a 40-character hash.
+- A connected Real-Debrid row no longer makes its control disappear when the addon omitted a checkable hash. It displays a disabled **RD hash unavailable** state explaining why the account-mutating check cannot be performed safely.
+- Torrentio `failed_*_vN.mp4` responses, including the observed `failed_infringement_v2.mp4`, are rejected before their video body is requested or written. Direct HTTP `451` media responses also fail as `SOURCE_UNAVAILABLE`. Recognized provider failures update Real-Debrid history as unavailable and run exact-ID resolver cleanup where a hash and connection are available.
+- Generic file-size rejection was intentionally avoided because legitimate short-form media can be small; the deterministic failure URL and HTTP status are stronger signals.
+- Corrective availability pass: `[AD+]` and `[RD+]` remain provider-identification hints, but no longer become verified cache results by themselves. Only an explicit backend check, completed media download, or durable observation can display a cached result. History loaded while browsing is labeled as previously verified rather than presented as a fresh check.
+- Both provider controls remain visible for every populated stream list, including while the local backend is offline. Disconnected providers, providers absent from the current addon filter, and detected rows without a safe hash each display an explicit disabled reason instead of making the control disappear.
+- Large title source lists are split client-side into the backend route limits: 100 AllDebrid hashes and 50 Real-Debrid source descriptors per request, for both passive history reads and explicit checks. HTTP validation/provider errors no longer reset the provider connection or masquerade as an offline backend; only a network-level failure does.
+- Explicit checks run one visible source at a time and update the matching row as each result returns. The provider control shows completed/total progress, the active row shows which provider is checking it, and an unresolved row exposes the exact safe-matching error in its tooltip instead of leaving the user with only a title-level summary.
+- Real-Debrid cleanup is per source, not deferred until the full title scan: each temporary torrent ID is removed and verified in that source check's `finally` block before the next source begins. The former all-at-once frontend response merely made the account removals appear delayed.
+- Download outcomes feed back into availability immediately. `SOURCE_NOT_READY` becomes not cached; any other failed provider resolver transfer becomes unavailable. Negative download evidence replaces an older positive and clears the five-minute in-memory result so an explicit provider recheck is live. A later successful download or explicit positive check restores cached status.
+- Validation: all 195 Jest tests pass, frontend ESLint passes, backend syntax checks pass, and the production build completes with only the repository's existing bundle-size warnings.
+
+## Milestone 6K.2 Findings: Explicit Real-Debrid Source Availability
+
+- Added a disclosed **Check Real-Debrid** action beside the existing AllDebrid control. Browsing, opening, or filtering a title reads only local history and never contacts or mutates Real-Debrid automatically.
+- The check uses only documented Real-Debrid operations: snapshot the exact hash's existing account IDs, add a temporary magnet, wait for file metadata, select exactly one safely matched source file, observe its state briefly, then delete and verify the exact temporary ID.
+- Availability is source-file-specific rather than hash-only. History keys combine the info hash with the Stremio `fileIdx`, filename, and video size so separate episodes/files in the same torrent do not inherit one another's result.
+- File matching prefers exact path/name and size evidence, then conservative file-index or single-video fallbacks. Ambiguous multi-file torrents are left **Unknown** without selecting any file.
+- Only `downloaded` with `progress: 100` is accepted as **Cached on Real-Debrid**. A persistent post-selection state such as `queued`, or observed transfer activity, is **Not cached**. HTTP `451` / provider infringement code `35` is **Unavailable**.
+- Current cached, previously verified cached, unknown, not-cached, and unavailable sources receive separate badges and local ordering. Preferred-addon grouping remains the strongest sorting rule. Milestone 6K.3 later connects the provider-specific result to the matching provider row's download safety.
+- Observations persist atomically in `%LOCALAPPDATA%\Custom Stremio\realdebrid-availability-history.json`: cached results expire after 30 days, history-loaded cached results are labeled **Previously cached**, not-cached results expire after 15 minutes, and unavailable results expire after 24 hours. Later definitive download/check evidence replaces older history for the same exact source file.
+- Temporary torrent IDs are written to `%LOCALAPPDATA%\Custom Stremio\realdebrid-pending-cleanup.json` before file selection. Failed cleanup survives restart and is retried at backend startup; disconnect is blocked while cleanup remains pending so the credential required for deletion is preserved.
+- Existing same-hash account torrents are protected. A lost add response triggers exact-hash reconciliation against the pre-check snapshot, and only newly observed IDs become eligible for cleanup.
+- The disabled historical `instantAvailability` diagnostic was removed from production code and routes. It remains documented only as forensic evidence that provider error code `37` made it unusable.
+- This milestone does not add a Real-Debrid download/resolver action. Actual downloads still use the original Stremio-provided URL.
+- Validation: all 185 Jest tests pass, frontend ESLint passes, backend syntax checks pass, and the production build completes with only the repository's existing bundle-size warnings.
+
+## Milestone 6K.1 Findings: Secure Real-Debrid Foundation
+
+- Added Real-Debrid to **Downloads -> Download options**, separate from upstream Stremio Settings.
+- Authentication follows the documented open-source device workflow: the backend requests a user code, polls for account-bound client credentials after user approval, exchanges the device code for access/refresh tokens, and reads the account profile.
+- Client credentials, access tokens, and refresh tokens are stored only in the versioned local backend settings file. Frontend responses expose only connection, username, user ID, and premium status.
+- Expired access tokens refresh through the backend with a single shared refresh operation. Disconnect revokes the current access token before removing local credentials.
+- Added an explicit diagnostic for the historical `GET /torrents/instantAvailability/{hash}` route. It sends no torrent, magnet, file selection, or deletion request and is never called automatically by source browsing.
+- The current official Real-Debrid method list no longer displays that instant-availability route, although its old response schema remains on the official page. Therefore this milestone does not use its results for badges, sorting, or download decisions until authenticated live verification succeeds.
+- Authenticated live verification completed on July 18, 2026:
+  - Account connection survived a backend restart and restored the sanitized premium account state.
+  - A hash previously verified cached through AllDebrid and a deliberately nonexistent hash both reached Real-Debrid but returned provider error code `37`, `disabled_endpoint`.
+  - A read-only `/torrents` snapshot contained 53 account items both before and after the probe, with the exact ID list unchanged. The probe created no account torrent.
+  - Conclusion: the historical route is safely read-only but unusable. It must not power availability UI or decisions.
+- Controlled documented-workflow test on July 19, 2026:
+  - `addMagnet` created a visible entry in `waiting_files_selection`; this status alone did not reveal cache state and did not start peer downloading.
+  - After selecting only the largest video file, the torrent reached `downloaded` with `progress: 100` in under one second and remained there through a five-second observation window. This candidate was cached on Real-Debrid even though the initial account entry looked unresolved.
+  - The exact newly returned torrent ID was deleted with HTTP `204`, verified absent through `/torrents/info/{id}`, and the account torrent count returned to its original 53.
+  - Conclusion: the documented add/select/info flow can positively identify an instantly cached torrent, but an uncached controlled test is still required to measure the transition and cleanup window before production implementation.
+- Cross-provider candidate test on July 19, 2026:
+  - All five hashes stored locally as uncached by AllDebrid were tested as controlled Real-Debrid candidates.
+  - Two became `downloaded`/100% within roughly 100 ms after selection, proving that an AllDebrid-negative observation cannot be reused as a Real-Debrid-negative result.
+  - Three were rejected with HTTP `451` during `addMagnet`, before a torrent ID existed; no selection, download activity, or cleanup was possible or necessary for those requests.
+  - No eligible candidate entered `downloading`, so the real uncached post-selection transition remains unverified.
+  - Every created test ID was deleted with HTTP `204` and verified absent. Account count remained at 53 before and after the complete test series.
+- User-supplied uncached-hash test on July 19, 2026:
+  - `addMagnet` produced `waiting_files_selection` with selectable video metadata.
+  - At 363 ms after selecting the largest video file, Real-Debrid reported `queued` with `progress: 0` rather than the cached path's immediate `downloaded`/100% result.
+  - The exact new ID was deleted with HTTP `204`; absence was verified. The complete account torrent ID list and count (55) were identical before and after.
+  - The temporary entry existed for about 1.2 seconds total and was removed before any measured progress or peer speed appeared.
+  - This completes live evidence for both branches: immediate `downloaded`/100% is cached; a non-downloaded post-selection state is not instant and must be cleaned up immediately.
+- Existing AllDebrid behavior, preferred-addon sorting, and original Stremio download URLs remain unchanged.
+- Next pass: implement the explicit, restart-safe Real-Debrid check around the now-validated cached, queued, rejection, and cleanup paths. Only `downloaded`/100% is positive; every other post-selection state is conservatively not instant and triggers exact-ID cleanup. No AllDebrid result may be assumed equivalent across providers.
 
 ## Milestone 6J Findings: Hybrid AllDebrid Availability and Resolver Cleanup
 
@@ -89,9 +159,9 @@ Add Real-Debrid as a fallback availability provider using a separately verified 
   - Preferred-addon grouping remains the strongest ordering rule. Inside each addon tier, current cached, previously verified cached, unknown, and not-cached sources are ordered in that sequence.
 - Persistent availability history:
   - Durable observations are stored atomically in `%LOCALAPPDATA%\Custom Stremio\alldebrid-availability-history.json` and survive backend restarts and account disconnects.
-  - Positive cached observations remain useful for 30 days and become **Previously verified cached** after 24 hours. Negative observations expire after 15 minutes because provider processing can change them quickly. Expired or absent observations appear as unknown.
+  - Positive cached observations remain useful for 30 days and are displayed as **Previously verified cached** when loaded from history. Not-cached observations expire after 15 minutes, unavailable observations expire after 24 hours, and expired or absent observations appear as unknown.
   - Explicit check results, successful real-media downloads, and known Torrentio placeholder responses all refresh the same history record.
-  - A short negative observation never erases a still-valid positive cached observation for the same hash.
+  - Later definitive download or provider-check evidence replaces older history for the same hash, preventing a stale positive from surviving a failed resolver attempt.
   - A separate five-minute in-memory protection window prevents repeated clicks from immediately mutating the account again.
 - Resolver safety:
   - Before resolving a hash-bearing stream identified as AllDebrid by its addon metadata, the backend snapshots only preexisting AllDebrid magnet IDs with that exact hash.
@@ -123,7 +193,7 @@ Add Real-Debrid as a fallback availability provider using a separately verified 
   - Results use a five-minute in-memory TTL when the explicit endpoint is called.
 - Safe stream and record UX:
   - Preserved `infoHash`, `fileIdx`, `behaviorHints.filename`, and `behaviorHints.videoSize` through download payloads and persistent records.
-  - Torrentio `[AD+]` rows receive a compact **Cached on AllDebrid** badge and sort ahead within their addon tier.
+  - Torrentio `[AD+]` identifies an AllDebrid source but is not trusted as a verified cache result. A compact cached badge and cache-first ordering require a backend observation.
   - Live testing proved `[AD Download]` is not a definitive negative cache result: a row with that label can resolve to the real cached file. Those rows therefore remain **unknown**, usable, and unsorted rather than being falsely blocked.
   - Classification uses only the stream metadata already returned by the addon. Browsing and sorting make no AllDebrid or Torrentio network request and create no magnet.
   - Direct-link streams without a recognized marker remain unchanged. Local completed/downloaded state remains stronger than provider readiness.

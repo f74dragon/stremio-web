@@ -3,9 +3,10 @@ const path = require('path');
 const { getDefaultDataDirectory } = require('./downloadRecordStore');
 const { isValidMaxConcurrentDownloads } = require('./downloadScheduler');
 
-const SETTINGS_STORE_VERSION = 3;
+const SETTINGS_STORE_VERSION = 4;
 const LEGACY_SETTINGS_STORE_VERSION = 1;
 const ALLDEBRID_SETTINGS_STORE_VERSION = 2;
+const PLAYER_SETTINGS_STORE_VERSION = 3;
 const SETTINGS_FILE_NAME = 'backend-settings.json';
 
 const normalizeAllDebridSettings = (settings) => {
@@ -28,6 +29,32 @@ const normalizeAllDebridSettings = (settings) => {
     };
 };
 
+const normalizeRealDebridSettings = (settings) => {
+    if (settings === null || settings === undefined) {
+        return null;
+    }
+
+    const requiredValues = ['clientId', 'clientSecret', 'accessToken', 'refreshToken'];
+    const normalized = Object.fromEntries(requiredValues.map((key) => [
+        key,
+        typeof settings[key] === 'string' ? settings[key].trim() : ''
+    ]));
+    if (requiredValues.some((key) => !normalized[key]) || !Number.isFinite(Date.parse(settings.tokenExpiresAt))) {
+        const error = new Error('Backend settings contain invalid Real-Debrid credentials');
+        error.code = 'BACKEND_SETTINGS_INVALID';
+        throw error;
+    }
+
+    return {
+        ...normalized,
+        tokenExpiresAt: new Date(Date.parse(settings.tokenExpiresAt)).toISOString(),
+        userId: settings.userId === null || settings.userId === undefined ? null : String(settings.userId),
+        username: typeof settings.username === 'string' && settings.username.trim() ? settings.username.trim() : null,
+        isPremium: settings.isPremium === true,
+        premiumUntil: settings.premiumUntil === null || settings.premiumUntil === undefined ? null : String(settings.premiumUntil)
+    };
+};
+
 const normalizePlayerExecutablePath = (value) => {
     if (value === null || value === undefined || value === '') {
         return null;
@@ -43,7 +70,12 @@ const normalizePlayerExecutablePath = (value) => {
     return executablePath;
 };
 
-const createBackendSettings = (maxConcurrentDownloads, allDebrid = null, playerExecutablePath = null) => ({
+const createBackendSettings = (
+    maxConcurrentDownloads,
+    allDebrid = null,
+    playerExecutablePath = null,
+    realDebrid = null
+) => ({
     downloads: {
         maxConcurrentDownloads
     },
@@ -51,7 +83,8 @@ const createBackendSettings = (maxConcurrentDownloads, allDebrid = null, playerE
         executablePath: normalizePlayerExecutablePath(playerExecutablePath)
     },
     debrid: {
-        allDebrid: normalizeAllDebridSettings(allDebrid)
+        allDebrid: normalizeAllDebridSettings(allDebrid),
+        realDebrid: normalizeRealDebridSettings(realDebrid)
     }
 });
 
@@ -68,7 +101,8 @@ const validateBackendSettings = (settings) => {
     return createBackendSettings(
         maxConcurrentDownloads,
         settings?.debrid?.allDebrid ?? null,
-        settings?.player?.executablePath ?? null
+        settings?.player?.executablePath ?? null,
+        settings?.debrid?.realDebrid ?? null
     );
 };
 
@@ -88,6 +122,7 @@ const readBackendSettings = async (filePath = getDefaultSettingsPath(), fallback
         if (!document || typeof document !== 'object' || ![
             LEGACY_SETTINGS_STORE_VERSION,
             ALLDEBRID_SETTINGS_STORE_VERSION,
+            PLAYER_SETTINGS_STORE_VERSION,
             SETTINGS_STORE_VERSION
         ].includes(document.version)) {
             const formatError = new Error(`Backend settings use an unsupported format: ${filePath}`);
@@ -97,7 +132,14 @@ const readBackendSettings = async (filePath = getDefaultSettingsPath(), fallback
 
         const settings = document.version < SETTINGS_STORE_VERSION ? {
             ...document.settings,
-            player: fallbackSettings?.player ?? { executablePath: null }
+            player: document.version >= PLAYER_SETTINGS_STORE_VERSION ?
+                document.settings?.player
+                :
+                fallbackSettings?.player ?? { executablePath: null },
+            debrid: {
+                allDebrid: document.settings?.debrid?.allDebrid ?? null,
+                realDebrid: null
+            }
         } : document.settings;
         return validateBackendSettings(settings);
     } catch (error) {
@@ -152,8 +194,10 @@ module.exports = {
     SETTINGS_STORE_VERSION,
     LEGACY_SETTINGS_STORE_VERSION,
     ALLDEBRID_SETTINGS_STORE_VERSION,
+    PLAYER_SETTINGS_STORE_VERSION,
     SETTINGS_FILE_NAME,
     createBackendSettings,
+    normalizeRealDebridSettings,
     normalizePlayerExecutablePath,
     getDefaultSettingsPath,
     validateBackendSettings,

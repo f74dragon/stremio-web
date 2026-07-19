@@ -1,4 +1,6 @@
 const LOCAL_BACKEND_BASE_URL = 'http://127.0.0.1:5577';
+const ALLDEBRID_AVAILABILITY_BATCH_SIZE = 100;
+const REALDEBRID_AVAILABILITY_BATCH_SIZE = 50;
 
 const getJsonBody = async (response) => {
     const text = await response.text();
@@ -43,6 +45,51 @@ const requestJson = async (path, options = {}) => {
     return data;
 };
 
+const requestAvailabilityBatches = async (path, fieldName, items, maxBatchSize, options = {}) => {
+    const requestedBatchSize = Number.isSafeInteger(options.batchSize) && options.batchSize > 0 ?
+        options.batchSize
+        : maxBatchSize;
+    const batchSize = Math.min(requestedBatchSize, maxBatchSize);
+    const batches = [];
+    if (items.length === 0) {
+        batches.push([]);
+    } else {
+        for (let index = 0; index < items.length; index += batchSize) {
+            batches.push(items.slice(index, index + batchSize));
+        }
+    }
+
+    const results = [];
+    for (let batchIndex = 0; batchIndex < batches.length; batchIndex += 1) {
+        const batch = batches[batchIndex];
+        const progress = { batch, batchIndex, totalBatches: batches.length };
+        if (typeof options.onBatchStart === 'function') {
+            options.onBatchStart(progress);
+        }
+        const result = await requestJson(path, {
+            method: 'POST',
+            body: { [fieldName]: batch }
+        });
+        results.push(result);
+        if (typeof options.onBatchComplete === 'function') {
+            options.onBatchComplete({ ...progress, result });
+        }
+    }
+    if (results.length === 1) {
+        return results[0];
+    }
+
+    const cleanupWarnings = Array.from(new Set(results
+        .map((result) => result?.cleanupWarning)
+        .filter((warning) => typeof warning === 'string' && warning.length > 0)));
+    return {
+        ...results[results.length - 1],
+        connected: results.every((result) => result?.connected !== false),
+        items: results.flatMap((result) => Array.isArray(result?.items) ? result.items : []),
+        cleanupWarning: cleanupWarnings.length > 0 ? cleanupWarnings.join(' ') : null
+    };
+};
+
 const getBackendHealth = async () => requestJson('/health');
 
 const getBackendSettings = async () => requestJson('/settings');
@@ -70,19 +117,59 @@ const disconnectAllDebrid = async () => requestJson('/debrid/alldebrid/auth', {
     method: 'DELETE'
 });
 
+const startRealDebridDeviceAuth = async () => requestJson('/debrid/realdebrid/auth/device', {
+    method: 'POST'
+});
+
+const checkRealDebridDeviceAuth = async () => requestJson('/debrid/realdebrid/auth/device/check', {
+    method: 'POST'
+});
+
+const disconnectRealDebrid = async () => requestJson('/debrid/realdebrid/auth', {
+    method: 'DELETE'
+});
+
+const checkRealDebridAvailability = async (sources, options = {}) => {
+    if (!Array.isArray(sources)) {
+        throw new Error('checkRealDebridAvailability requires a sources array');
+    }
+    return requestAvailabilityBatches(
+        '/debrid/realdebrid/availability',
+        'sources',
+        sources,
+        REALDEBRID_AVAILABILITY_BATCH_SIZE,
+        options
+    );
+};
+
+const getRealDebridAvailabilityHistory = async (sources) => {
+    if (!Array.isArray(sources)) {
+        throw new Error('getRealDebridAvailabilityHistory requires a sources array');
+    }
+    return requestAvailabilityBatches(
+        '/debrid/realdebrid/availability/history',
+        'sources',
+        sources,
+        REALDEBRID_AVAILABILITY_BATCH_SIZE
+    );
+};
+
 const selectPlayerExecutable = async () => requestJson('/settings/player/select', {
     method: 'POST'
 });
 
-const checkAllDebridAvailability = async (hashes) => {
+const checkAllDebridAvailability = async (hashes, options = {}) => {
     if (!Array.isArray(hashes)) {
         throw new Error('checkAllDebridAvailability requires a hashes array');
     }
 
-    return requestJson('/debrid/alldebrid/availability', {
-        method: 'POST',
-        body: { hashes }
-    });
+    return requestAvailabilityBatches(
+        '/debrid/alldebrid/availability',
+        'hashes',
+        hashes,
+        ALLDEBRID_AVAILABILITY_BATCH_SIZE,
+        options
+    );
 };
 
 const getAllDebridAvailabilityHistory = async (hashes) => {
@@ -90,10 +177,12 @@ const getAllDebridAvailabilityHistory = async (hashes) => {
         throw new Error('getAllDebridAvailabilityHistory requires a hashes array');
     }
 
-    return requestJson('/debrid/alldebrid/availability/history', {
-        method: 'POST',
-        body: { hashes }
-    });
+    return requestAvailabilityBatches(
+        '/debrid/alldebrid/availability/history',
+        'hashes',
+        hashes,
+        ALLDEBRID_AVAILABILITY_BATCH_SIZE
+    );
 };
 
 const createDownload = async (payload) => {
@@ -179,6 +268,11 @@ module.exports = {
     startAllDebridPinAuth,
     checkAllDebridPinAuth,
     disconnectAllDebrid,
+    startRealDebridDeviceAuth,
+    checkRealDebridDeviceAuth,
+    disconnectRealDebrid,
+    checkRealDebridAvailability,
+    getRealDebridAvailabilityHistory,
     selectPlayerExecutable,
     checkAllDebridAvailability,
     getAllDebridAvailabilityHistory,

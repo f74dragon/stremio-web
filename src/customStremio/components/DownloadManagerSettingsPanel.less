@@ -34,6 +34,19 @@
     box-shadow: 0 0.6rem 1.6rem rgba(0, 0, 0, 0.12);
 }
 
+.realdebrid-panel {
+    display: grid;
+    width: 100%;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 1rem 2rem;
+    padding: 1rem 1.15rem;
+    border: 1px solid rgba(91, 154, 255, 0.22);
+    border-radius: calc(var(--border-radius) * 1.1);
+    background: linear-gradient(135deg, rgba(42, 86, 175, 0.14), rgba(255, 255, 255, 0.03));
+    box-shadow: 0 0.6rem 1.6rem rgba(0, 0, 0, 0.12);
+}
+
 .player-panel {
     display: grid;
     width: 100%;
@@ -151,7 +164,8 @@
 }
 
 .connection-premium,
-.connection-basic {
+.connection-basic,
+.realdebrid-premium {
     padding: 0.2rem 0.5rem;
     border-radius: 999px;
     color: rgba(218, 255, 238, 0.96);
@@ -159,6 +173,11 @@
     font-weight: 700;
     letter-spacing: 0.02em;
     background-color: rgba(48, 169, 120, 0.25);
+}
+
+.realdebrid-premium {
+    color: rgba(224, 238, 255, 0.98);
+    background-color: rgba(62, 120, 224, 0.3);
 }
 
 .connection-basic {
@@ -190,7 +209,9 @@
 
 .connect-button,
 .disconnect-button,
-.connect-link {
+.connect-link,
+.realdebrid-connect-button,
+.realdebrid-connect-link {
     display: inline-flex;
     min-height: 2.35rem;
     padding: 0 0.95rem;
@@ -214,6 +235,17 @@
     &:disabled {
         cursor: wait;
         opacity: 0.58;
+    }
+}
+
+.realdebrid-connect-button,
+.realdebrid-connect-link {
+    border-color: rgba(103, 164, 255, 0.38);
+    background-color: rgba(51, 105, 208, 0.28);
+
+    &:hover,
+    &:focus-visible {
+        background-color: rgba(51, 105, 208, 0.48);
     }
 }
 
@@ -245,6 +277,12 @@
 
 .pin-code {
     color: rgba(221, 255, 240, 0.98);
+    font-size: 1.15rem;
+    letter-spacing: 0.16em;
+}
+
+.realdebrid-code {
+    color: rgba(220, 235, 255, 0.98);
     font-size: 1.15rem;
     letter-spacing: 0.16em;
 }
@@ -493,6 +531,11 @@
     }
 
     .debrid-panel {
+        grid-template-columns: 1fr;
+        gap: 0.85rem;
+    }
+
+    .realdebrid-panel {
         grid-template-columns: 1fr;
         gap: 0.85rem;
     }

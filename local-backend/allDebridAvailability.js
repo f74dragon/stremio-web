@@ -6,7 +6,7 @@ const DELETE_RETRY_COUNT = 3;
 const {
     CACHED_TTL_MS,
     UNCACHED_TTL_MS,
-    RECENT_CACHED_WINDOW_MS
+    UNAVAILABLE_TTL_MS
 } = require('./allDebridAvailabilityStore');
 
 const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -116,7 +116,7 @@ class AllDebridAvailabilityService {
             }
             return {
                 ...entry,
-                previouslyVerified: entry.status === 'cached' && now - Date.parse(entry.verifiedAt) > RECENT_CACHED_WINDOW_MS
+                previouslyVerified: entry.status === 'cached'
             };
         });
         invalid.forEach((value) => items.push({
@@ -135,12 +135,12 @@ class AllDebridAvailabilityService {
         const entries = observations.map((observation) => {
             const { valid } = normalizeInfoHashes([observation?.hash]);
             const status = observation?.status;
-            if (valid.length !== 1 || !['cached', 'uncached'].includes(status)) {
-                const error = new Error('Availability observations require a valid hash and cached or uncached status');
+            if (valid.length !== 1 || !['cached', 'uncached', 'unavailable'].includes(status)) {
+                const error = new Error('Availability observations require a valid hash and cached, uncached, or unavailable status');
                 error.code = 'ALLDEBRID_INVALID_OBSERVATION';
                 throw error;
             }
-            const ttlMs = status === 'cached' ? CACHED_TTL_MS : UNCACHED_TTL_MS;
+            const ttlMs = status === 'cached' ? CACHED_TTL_MS : status === 'uncached' ? UNCACHED_TTL_MS : UNAVAILABLE_TTL_MS;
             return {
                 hash: valid[0],
                 status,
@@ -149,16 +149,21 @@ class AllDebridAvailabilityService {
                 source: observation?.source || 'unknown'
             };
         });
-        const existingEntries = await this.historyStore.load();
-        const existingByHash = new Map(existingEntries.map((entry) => [entry.hash, entry]));
-        const retainedEntries = entries.filter((entry) => {
-            const existingEntry = existingByHash.get(entry.hash);
-            return !(entry.status === 'uncached' && existingEntry?.status === 'cached' && Date.parse(existingEntry.expiresAt) > verifiedAtMs);
-        });
-        if (retainedEntries.length > 0) {
-            await this.historyStore.upsert(retainedEntries);
+        if (entries.length > 0) {
+            await this.historyStore.upsert(entries);
+            entries.forEach((entry) => {
+                if (entry.source === 'failed_download') {
+                    this.cache.delete(entry.hash);
+                } else {
+                    this.cache.set(entry.hash, {
+                        status: entry.status,
+                        checkedAt: entry.verifiedAt,
+                        expiresAt: this.now() + this.cacheTtlMs
+                    });
+                }
+            });
         }
-        return retainedEntries;
+        return entries;
     }
 
     async performSnapshotMatchingMagnetIds(apiKey, hash) {

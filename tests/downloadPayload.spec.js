@@ -125,4 +125,20 @@ describe('downloadPayload', () => {
         });
         expect(payload.infoHash).toBe(hash);
     });
+
+    test('carries the provider identity and provider-scoped readiness into the backend request', () => {
+        const payload = buildDownloadPayload({
+            addonName: 'Torrentio RD',
+            stream: {
+                name: '[RD Download] 1080p',
+                infoHash: '842783e3005495d5d1637f5364b59343c7844707',
+                deepLinks: { externalPlayer: { download: 'https://realdebrid.example/file.mkv' } }
+            }
+        });
+
+        expect(payload).toMatchObject({
+            debridProvider: 'realdebrid',
+            sourceReadiness: 'unknown'
+        });
+    });
 });

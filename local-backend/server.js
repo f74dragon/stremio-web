@@ -8,7 +8,7 @@ const {
     cancelDownload,
     isDownloadActive,
     isSupportedSourceUrl,
-    isKnownNotReadySourceUrl
+    classifyKnownPlaceholderSourceUrl
 } = require('./downloadManager');
 const { isDownloadRetryable, prepareDownloadRetry } = require('./downloadRetry');
 const { isDownloadResumable, prepareDownloadResume } = require('./downloadResume');
@@ -21,9 +21,17 @@ const {
 } = require('./downloadScheduler');
 const { createBackendSettings, BackendSettingsStore } = require('./backendSettingsStore');
 const { AllDebridClient } = require('./allDebridClient');
+const {
+    REALDEBRID_OPEN_SOURCE_CLIENT_ID,
+    RealDebridApiError,
+    RealDebridClient
+} = require('./realDebridClient');
 const { AllDebridCleanupStore } = require('./allDebridCleanupStore');
 const { AllDebridAvailabilityStore } = require('./allDebridAvailabilityStore');
 const { AllDebridAvailabilityService } = require('./allDebridAvailability');
+const { RealDebridCleanupStore } = require('./realDebridCleanupStore');
+const { RealDebridAvailabilityStore } = require('./realDebridAvailabilityStore');
+const { normalizeSource: normalizeRealDebridSource, RealDebridAvailabilityService } = require('./realDebridAvailability');
 const {
     getConfiguredPlayerPath,
     validatePlayerExecutable,
@@ -49,6 +57,15 @@ const TRUSTED_DEBRID_ORIGINS = new Set([
     ...String(process.env.CUSTOM_STREMIO_ALLOWED_ORIGINS || '').split(',').map((origin) => origin.trim()).filter(Boolean)
 ]);
 const ALLDEBRID_STREAM_MARKER = /(?:^|[^a-z0-9])ad\s*(?:\+|download)(?:$|[^a-z0-9])/i;
+const REALDEBRID_STREAM_MARKER = /(?:^|[^a-z0-9])rd\s*(?:\+|download)(?:$|[^a-z0-9])/i;
+const ALLDEBRID_ADDON_MARKER = /(?:all[\s._-]*debrid|(?:^|[\s([_-])ad(?:$|[\s)\]_-]))/i;
+const REALDEBRID_ADDON_MARKER = /(?:real[\s._-]*debrid|(?:^|[\s([_-])rd(?:$|[\s)\]_-]))/i;
+const DEBRID_PROVIDER = Object.freeze({
+    ALLDEBRID: 'alldebrid',
+    REALDEBRID: 'realdebrid',
+    UNKNOWN: 'unknown'
+});
+const BLOCKED_SOURCE_READINESS = new Set(['requires_caching', 'unavailable']);
 
 const app = express();
 const downloads = new Map();
@@ -61,17 +78,29 @@ const downloadScheduler = new DownloadScheduler({
 });
 const settingsStore = new BackendSettingsStore();
 const allDebridClient = new AllDebridClient();
+const realDebridClient = new RealDebridClient();
 const allDebridCleanupStore = new AllDebridCleanupStore();
 const allDebridAvailabilityStore = new AllDebridAvailabilityStore();
+const realDebridCleanupStore = new RealDebridCleanupStore();
+const realDebridAvailabilityStore = new RealDebridAvailabilityStore();
 const allDebridAvailability = new AllDebridAvailabilityService({
     client: allDebridClient,
     cleanupStore: allDebridCleanupStore,
     historyStore: allDebridAvailabilityStore,
     onWarning: (message) => console.warn(message)
 });
+const realDebridAvailability = new RealDebridAvailabilityService({
+    client: realDebridClient,
+    cleanupStore: realDebridCleanupStore,
+    historyStore: realDebridAvailabilityStore,
+    onWarning: (message) => console.warn(message)
+});
 let backendSettings = createBackendSettings(downloadScheduler.maxConcurrentDownloads);
 let allDebridPinSession = null;
+let realDebridDeviceSession = null;
+let realDebridRefreshPromise = null;
 let allDebridPendingCleanupCount = 0;
+let realDebridPendingCleanupCount = 0;
 let downloadCounter = 0;
 let httpServer = null;
 let shuttingDown = false;
@@ -86,11 +115,63 @@ const pickSourceUrl = (payload) => {
         null;
 };
 
-const isAllDebridResolverRecord = (record) => {
-    const searchableText = [record?.streamName, record?.streamDescription]
+const detectProviderInText = (text, allDebridPattern, realDebridPattern) => {
+    const allDebrid = allDebridPattern.test(text);
+    const realDebrid = realDebridPattern.test(text);
+    if (allDebrid === realDebrid) {
+        return DEBRID_PROVIDER.UNKNOWN;
+    }
+    return allDebrid ? DEBRID_PROVIDER.ALLDEBRID : DEBRID_PROVIDER.REALDEBRID;
+};
+
+const getRecordDebridProvider = (record) => {
+    if ([DEBRID_PROVIDER.ALLDEBRID, DEBRID_PROVIDER.REALDEBRID].includes(record?.debridProvider)) {
+        return record.debridProvider;
+    }
+    const streamText = [record?.streamName, record?.streamDescription]
         .filter((value) => typeof value === 'string')
         .join('\n');
-    return Boolean(record?.infoHash) && ALLDEBRID_STREAM_MARKER.test(searchableText);
+    const streamProvider = detectProviderInText(streamText, ALLDEBRID_STREAM_MARKER, REALDEBRID_STREAM_MARKER);
+    if (streamProvider !== DEBRID_PROVIDER.UNKNOWN) {
+        return streamProvider;
+    }
+    return detectProviderInText(String(record?.addonName || ''), ALLDEBRID_ADDON_MARKER, REALDEBRID_ADDON_MARKER);
+};
+
+const isAllDebridResolverRecord = (record) => {
+    return Boolean(record?.infoHash) && getRecordDebridProvider(record) === DEBRID_PROVIDER.ALLDEBRID;
+};
+
+const getPersistedProviderStatus = async (payload) => {
+    const provider = getRecordDebridProvider(payload);
+    if (provider === DEBRID_PROVIDER.ALLDEBRID && typeof payload?.infoHash === 'string') {
+        const history = await allDebridAvailability.getHistory([payload.infoHash]);
+        return history.items[0]?.status ?? 'unknown';
+    }
+    if (provider === DEBRID_PROVIDER.REALDEBRID && typeof payload?.infoHash === 'string') {
+        try {
+            const source = normalizeRealDebridSource({
+                hash: payload.infoHash,
+                fileIdx: payload.fileIdx,
+                filename: payload.behaviorHints?.filename ?? payload.fileName,
+                videoSize: payload.behaviorHints?.videoSize
+            });
+            const history = await realDebridAvailability.getHistory([source]);
+            return history.items[0]?.status ?? 'unknown';
+        } catch {
+            return 'unknown';
+        }
+    }
+    return 'unknown';
+};
+
+const getBlockedSourceMessage = (provider, readiness) => {
+    const providerName = provider === DEBRID_PROVIDER.REALDEBRID ? 'Real-Debrid' :
+        provider === DEBRID_PROVIDER.ALLDEBRID ? 'AllDebrid' : 'debrid provider';
+    return readiness === 'unavailable' ?
+        `This source is unavailable on ${providerName}. Choose a cached source instead.`
+        :
+        `This source is not cached on ${providerName}. Choose a cached source or try again later.`;
 };
 
 const createDownloadId = () => {
@@ -121,6 +202,7 @@ const createDownloadRecord = (payload) => {
         episode: typeof payload?.episode === 'number' ? payload.episode : null,
         videoReleased: payload?.videoReleased ?? null,
         addonName: payload?.addonName ?? null,
+        debridProvider: getRecordDebridProvider(payload),
         streamName: payload?.streamName ?? null,
         streamDescription: payload?.streamDescription ?? null,
         sourceReadiness: payload?.sourceReadiness ?? 'unknown',
@@ -250,6 +332,19 @@ const runScheduledDownload = async (recordId, options) => {
         }
     }
 
+    const isRealDebridResolver = getRecordDebridProvider(record) === DEBRID_PROVIDER.REALDEBRID &&
+        Boolean(record.infoHash) && Boolean(backendSettings.debrid.realDebrid?.refreshToken);
+    let realDebridAccessToken = null;
+    let preexistingTorrentIds = null;
+    if (isRealDebridResolver) {
+        try {
+            realDebridAccessToken = await getFreshRealDebridAccessToken();
+            preexistingTorrentIds = await realDebridAvailability.snapshotMatchingIds(realDebridAccessToken, record.infoHash);
+        } catch (error) {
+            console.warn(`Could not snapshot Real-Debrid torrents before download ${record.id}: ${error.message || 'unknown error'}`);
+        }
+    }
+
     try {
         await startDownload(record, updateDownloadRecordById, options);
         const completedRecord = downloads.get(record.id);
@@ -257,7 +352,7 @@ const runScheduledDownload = async (recordId, options) => {
             await allDebridAvailability.recordObservation(record.infoHash, 'cached', 'completed_download').catch((error) => {
                 console.warn(`Could not save cached AllDebrid history for download ${record.id}: ${error.message || 'unknown error'}`);
             });
-        } else if (isAllDebridResolver && completedRecord?.status === 'failed' && completedRecord.errorCode === 'SOURCE_NOT_READY') {
+        } else if (isAllDebridResolver && completedRecord?.status === 'failed') {
             if (preexistingMagnetIds !== null) {
                 await allDebridAvailability.cleanupNewMagnetsForHash(apiKey, record.infoHash, preexistingMagnetIds)
                     .then((cleanup) => {
@@ -267,9 +362,48 @@ const runScheduledDownload = async (recordId, options) => {
                         console.warn(`Could not identify or clean up AllDebrid magnets for download ${record.id}: ${error.message || 'unknown error'}`);
                     });
             }
-            await allDebridAvailability.recordObservation(record.infoHash, 'uncached', 'placeholder_response').catch((error) => {
-                console.warn(`Could not save not-cached AllDebrid history for download ${record.id}: ${error.message || 'unknown error'}`);
+            const failedStatus = completedRecord.errorCode === 'SOURCE_NOT_READY' ? 'uncached' : 'unavailable';
+            await allDebridAvailability.recordObservation(record.infoHash, failedStatus, 'failed_download').catch((error) => {
+                console.warn(`Could not save failed AllDebrid history for download ${record.id}: ${error.message || 'unknown error'}`);
             });
+        }
+        if (isRealDebridResolver && completedRecord?.status === 'completed') {
+            try {
+                const source = normalizeRealDebridSource({
+                    hash: record.infoHash,
+                    fileIdx: record.fileIdx,
+                    filename: record.behaviorHints?.filename ?? record.fileName,
+                    videoSize: record.behaviorHints?.videoSize
+                });
+                await realDebridAvailability.recordObservation(source, 'cached', 'completed_download');
+            } catch (error) {
+                console.warn(`Could not save cached Real-Debrid history for download ${record.id}: ${error.message || 'unknown error'}`);
+            }
+        } else if (isRealDebridResolver && completedRecord?.status === 'failed') {
+            if (realDebridAccessToken && preexistingTorrentIds !== null) {
+                await realDebridAvailability.reconcileNewTorrents(realDebridAccessToken, record.infoHash, preexistingTorrentIds)
+                    .then(async () => {
+                        realDebridPendingCleanupCount = await realDebridAvailability.getPendingCleanupCount();
+                    })
+                    .catch((error) => {
+                        console.warn(`Could not identify or clean up Real-Debrid torrents for download ${record.id}: ${error.message || 'unknown error'}`);
+                    });
+            }
+            try {
+                const source = normalizeRealDebridSource({
+                    hash: record.infoHash,
+                    fileIdx: record.fileIdx,
+                    filename: record.behaviorHints?.filename ?? record.fileName,
+                    videoSize: record.behaviorHints?.videoSize
+                });
+                await realDebridAvailability.recordObservation(
+                    source,
+                    completedRecord.errorCode === 'SOURCE_NOT_READY' ? 'uncached' : 'unavailable',
+                    'failed_download'
+                );
+            } catch (error) {
+                console.warn(`Could not save failed Real-Debrid history for download ${record.id}: ${error.message || 'unknown error'}`);
+            }
         }
     } catch (error) {
         const nextRecord = downloads.get(record.id);
@@ -353,6 +487,18 @@ const getAllDebridConnectionResponse = () => {
     };
 };
 
+const getRealDebridConnectionResponse = () => {
+    const settings = backendSettings.debrid.realDebrid;
+    return {
+        connected: Boolean(settings?.clientId && settings?.clientSecret && settings?.refreshToken),
+        userId: settings?.userId ?? null,
+        username: settings?.username ?? null,
+        isPremium: settings?.isPremium === true,
+        premiumUntil: settings?.premiumUntil ?? null,
+        pendingCleanup: realDebridPendingCleanupCount
+    };
+};
+
 const getBackendSettingsResponse = () => ({
     downloads: {
         maxConcurrentDownloads: backendSettings.downloads.maxConcurrentDownloads,
@@ -365,7 +511,8 @@ const getBackendSettingsResponse = () => ({
         executablePath: backendSettings.player.executablePath
     },
     debrid: {
-        allDebrid: getAllDebridConnectionResponse()
+        allDebrid: getAllDebridConnectionResponse(),
+        realDebrid: getRealDebridConnectionResponse()
     }
 });
 
@@ -373,9 +520,74 @@ const saveAllDebridConnection = async (allDebrid) => {
     backendSettings = await settingsStore.save(createBackendSettings(
         backendSettings.downloads.maxConcurrentDownloads,
         allDebrid,
-        backendSettings.player.executablePath
+        backendSettings.player.executablePath,
+        backendSettings.debrid.realDebrid
     ));
     return getAllDebridConnectionResponse();
+};
+
+const saveRealDebridConnection = async (realDebrid) => {
+    backendSettings = await settingsStore.save(createBackendSettings(
+        backendSettings.downloads.maxConcurrentDownloads,
+        backendSettings.debrid.allDebrid,
+        backendSettings.player.executablePath,
+        realDebrid
+    ));
+    return getRealDebridConnectionResponse();
+};
+
+const createRealDebridSettings = ({ credentials, token, user, previousSettings = null }) => {
+    const expiresIn = Number(token?.expires_in);
+    if (!credentials?.client_id || !credentials?.client_secret || !token?.access_token ||
+        !(token?.refresh_token || previousSettings?.refreshToken) || !Number.isFinite(expiresIn) || expiresIn <= 0) {
+        throw new RealDebridApiError('Real-Debrid returned incomplete authorization credentials');
+    }
+
+    const premiumSeconds = Number(user?.premium);
+    return {
+        clientId: credentials.client_id,
+        clientSecret: credentials.client_secret,
+        accessToken: token.access_token,
+        refreshToken: token.refresh_token || previousSettings.refreshToken,
+        tokenExpiresAt: new Date(Date.now() + expiresIn * 1000).toISOString(),
+        userId: user?.id ?? previousSettings?.userId ?? null,
+        username: user?.username ?? previousSettings?.username ?? null,
+        isPremium: user?.type === 'premium' && Number.isFinite(premiumSeconds) && premiumSeconds > 0,
+        premiumUntil: user?.expiration ?? previousSettings?.premiumUntil ?? null
+    };
+};
+
+const getFreshRealDebridAccessToken = async () => {
+    const settings = backendSettings.debrid.realDebrid;
+    if (!settings?.clientId || !settings?.clientSecret || !settings?.refreshToken) {
+        const error = new RealDebridApiError('Connect Real-Debrid before using this action', {
+            code: 'REALDEBRID_NOT_CONNECTED'
+        });
+        throw error;
+    }
+    if (settings.accessToken && Date.parse(settings.tokenExpiresAt) > Date.now() + 60000) {
+        return settings.accessToken;
+    }
+    if (!realDebridRefreshPromise) {
+        realDebridRefreshPromise = (async () => {
+            const token = await realDebridClient.refreshAccessToken(
+                settings.clientId,
+                settings.clientSecret,
+                settings.refreshToken
+            );
+            const user = await realDebridClient.getUser(token.access_token);
+            await saveRealDebridConnection(createRealDebridSettings({
+                credentials: { client_id: settings.clientId, client_secret: settings.clientSecret },
+                token,
+                user,
+                previousSettings: settings
+            }));
+            return backendSettings.debrid.realDebrid.accessToken;
+        })().finally(() => {
+            realDebridRefreshPromise = null;
+        });
+    }
+    return realDebridRefreshPromise;
 };
 
 const sendAllDebridError = (response, error, fallbackMessage) => {
@@ -385,6 +597,18 @@ const sendAllDebridError = (response, error, fallbackMessage) => {
     response.status(status).json({
         ok: false,
         errorCode: error?.code || 'ALLDEBRID_REQUEST_FAILED',
+        error: error?.message || fallbackMessage
+    });
+};
+
+const sendRealDebridError = (response, error, fallbackMessage) => {
+    const authenticationError = ['REALDEBRID_BAD_TOKEN', 'REALDEBRID_NOT_CONNECTED'].includes(error?.code);
+    const invalidRequest = ['REALDEBRID_INVALID_SOURCE', 'REALDEBRID_INVALID_SOURCES', 'REALDEBRID_TOO_MANY_SOURCES'].includes(error?.code);
+    const status = authenticationError ? 401 : invalidRequest ? 400 : error?.status === 404 ? 404 : 502;
+    response.status(status).json({
+        ok: false,
+        errorCode: error?.code || 'REALDEBRID_REQUEST_FAILED',
+        providerCode: error?.providerCode ?? null,
         error: error?.message || fallbackMessage
     });
 };
@@ -443,7 +667,8 @@ app.patch('/settings', requireTrustedLocalOrigin, async (request, response) => {
     const nextSettings = createBackendSettings(
         maxConcurrentDownloads,
         backendSettings.debrid.allDebrid,
-        backendSettings.player.executablePath
+        backendSettings.player.executablePath,
+        backendSettings.debrid.realDebrid
     );
     try {
         backendSettings = await settingsStore.save(nextSettings);
@@ -474,7 +699,8 @@ app.post('/settings/player/select', requireTrustedLocalOrigin, async (request, r
         backendSettings = await settingsStore.save(createBackendSettings(
             backendSettings.downloads.maxConcurrentDownloads,
             backendSettings.debrid.allDebrid,
-            executablePath
+            executablePath,
+            backendSettings.debrid.realDebrid
         ));
         response.json({ ...getBackendSettingsResponse(), selectionCanceled: false });
     } catch (error) {
@@ -616,6 +842,118 @@ app.post('/debrid/alldebrid/availability/history', async (request, response) => 
     }
 });
 
+app.post('/debrid/realdebrid/auth/device', async (request, response) => {
+    try {
+        const device = await realDebridClient.getDeviceCode(REALDEBRID_OPEN_SOURCE_CLIENT_ID);
+        const expiresIn = Number(device?.expires_in);
+        const intervalSeconds = Number(device?.interval);
+        if (!device?.device_code || !device?.user_code || !device?.verification_url) {
+            throw new RealDebridApiError('Real-Debrid returned an incomplete device authorization response');
+        }
+        const expiresAt = new Date(Date.now() + (Number.isFinite(expiresIn) ? expiresIn : 1800) * 1000).toISOString();
+        realDebridDeviceSession = {
+            clientId: REALDEBRID_OPEN_SOURCE_CLIENT_ID,
+            deviceCode: device.device_code,
+            userCode: device.user_code,
+            verificationUrl: device.verification_url,
+            expiresAt,
+            intervalSeconds: Number.isFinite(intervalSeconds) && intervalSeconds > 0 ? intervalSeconds : 5
+        };
+        response.status(201).json({
+            userCode: realDebridDeviceSession.userCode,
+            verificationUrl: realDebridDeviceSession.verificationUrl,
+            expiresAt,
+            intervalSeconds: realDebridDeviceSession.intervalSeconds
+        });
+    } catch (error) {
+        sendRealDebridError(response, error, 'Could not start Real-Debrid authorization');
+    }
+});
+
+app.post('/debrid/realdebrid/auth/device/check', async (request, response) => {
+    if (!realDebridDeviceSession) {
+        response.status(409).json({ ok: false, error: 'No Real-Debrid device connection is in progress' });
+        return;
+    }
+    if (Date.parse(realDebridDeviceSession.expiresAt) <= Date.now()) {
+        realDebridDeviceSession = null;
+        response.status(410).json({ ok: false, error: 'The Real-Debrid authorization code expired. Start a new connection.' });
+        return;
+    }
+
+    try {
+        const session = realDebridDeviceSession;
+        const credentials = await realDebridClient.getDeviceCredentials(session.clientId, session.deviceCode);
+        if (!credentials?.client_id || !credentials?.client_secret) {
+            response.json({ activated: false, expiresAt: session.expiresAt });
+            return;
+        }
+
+        const token = await realDebridClient.getToken(credentials.client_id, credentials.client_secret, session.deviceCode);
+        const user = await realDebridClient.getUser(token.access_token);
+        const connection = await saveRealDebridConnection(createRealDebridSettings({ credentials, token, user }));
+        realDebridDeviceSession = null;
+        response.json({ activated: true, connection });
+    } catch (error) {
+        sendRealDebridError(response, error, 'Could not complete Real-Debrid authorization');
+    }
+});
+
+app.delete('/debrid/realdebrid/auth', async (request, response) => {
+    try {
+        if (backendSettings.debrid.realDebrid) {
+            const accessToken = await getFreshRealDebridAccessToken();
+            const cleanup = await realDebridAvailability.retryPendingCleanup(accessToken);
+            realDebridPendingCleanupCount = cleanup.pending;
+            if (realDebridPendingCleanupCount > 0) {
+                response.status(409).json({
+                    ok: false,
+                    error: 'Temporary Real-Debrid torrents still need cleanup. Keep the connection and try again.'
+                });
+                return;
+            }
+            await realDebridClient.disableAccessToken(accessToken);
+        } else {
+            realDebridPendingCleanupCount = await realDebridAvailability.getPendingCleanupCount();
+        }
+        await saveRealDebridConnection(null);
+        realDebridDeviceSession = null;
+        realDebridAvailability.clearCache();
+        response.json({ ok: true, connection: getRealDebridConnectionResponse() });
+    } catch (error) {
+        sendRealDebridError(response, error, 'Could not disconnect Real-Debrid');
+    }
+});
+
+app.post('/debrid/realdebrid/availability', async (request, response) => {
+    try {
+        const accessToken = await getFreshRealDebridAccessToken();
+        const result = await realDebridAvailability.check(accessToken, request.body?.sources);
+        realDebridPendingCleanupCount = result.pendingCleanup;
+        response.json({
+            provider: 'realdebrid',
+            connected: true,
+            ...result
+        });
+    } catch (error) {
+        realDebridPendingCleanupCount = await realDebridAvailability.getPendingCleanupCount().catch(() => realDebridPendingCleanupCount);
+        sendRealDebridError(response, error, 'Could not check Real-Debrid availability');
+    }
+});
+
+app.post('/debrid/realdebrid/availability/history', async (request, response) => {
+    try {
+        const result = await realDebridAvailability.getHistory(request.body?.sources);
+        response.json({
+            provider: 'realdebrid',
+            connected: Boolean(backendSettings.debrid.realDebrid?.refreshToken),
+            ...result
+        });
+    } catch (error) {
+        sendRealDebridError(response, error, 'Could not read Real-Debrid availability history');
+    }
+});
+
 app.post('/downloads', async (request, response) => {
     const payload = request.body;
 
@@ -644,11 +982,33 @@ app.post('/downloads', async (request, response) => {
         return;
     }
 
-    if (payload.sourceReadiness === 'requires_caching' || isKnownNotReadySourceUrl(sourceUrl)) {
+    let persistedProviderStatus = 'unknown';
+    try {
+        persistedProviderStatus = await getPersistedProviderStatus(payload);
+    } catch (error) {
+        console.warn(`Could not read provider availability history before download: ${error.message || 'unknown error'}`);
+    }
+    const effectiveBlockedReadiness = BLOCKED_SOURCE_READINESS.has(payload.sourceReadiness) ?
+        payload.sourceReadiness
+        :
+        persistedProviderStatus === 'uncached' ? 'requires_caching' :
+            persistedProviderStatus === 'unavailable' ? 'unavailable' : null;
+
+    const placeholder = classifyKnownPlaceholderSourceUrl(sourceUrl);
+    if (effectiveBlockedReadiness || placeholder) {
+        const provider = getRecordDebridProvider(payload);
         response.status(409).json({
             ok: false,
-            errorCode: 'SOURCE_NOT_READY',
-            error: 'This source is not cached yet. Choose a cached source or try again later.'
+            errorCode: effectiveBlockedReadiness === 'unavailable' || placeholder?.status === 'unavailable' ?
+                'SOURCE_UNAVAILABLE'
+                :
+                'SOURCE_NOT_READY',
+            error: effectiveBlockedReadiness ?
+                getBlockedSourceMessage(provider, effectiveBlockedReadiness)
+                : placeholder?.status === 'unavailable' ?
+                    'This debrid source was rejected or removed by the provider. Choose another cached source.'
+                :
+                'This debrid source is not ready. Choose a verified cached source or try again later.'
         });
         return;
     }
@@ -1157,6 +1517,22 @@ const startServer = async () => {
         }
     } else {
         allDebridPendingCleanupCount = await allDebridAvailability.getPendingCleanupCount();
+    }
+
+    if (backendSettings.debrid.realDebrid?.refreshToken) {
+        try {
+            const accessToken = await getFreshRealDebridAccessToken();
+            const cleanup = await realDebridAvailability.retryPendingCleanup(accessToken);
+            realDebridPendingCleanupCount = cleanup.pending;
+            if (cleanup.cleaned > 0) {
+                console.log(`Cleaned up ${cleanup.cleaned} temporary Real-Debrid torrent(s) left by an interrupted check.`);
+            }
+        } catch (error) {
+            realDebridPendingCleanupCount = await realDebridAvailability.getPendingCleanupCount().catch(() => 0);
+            console.warn(`Could not retry pending Real-Debrid cleanup during startup: ${error.message || 'unknown error'}`);
+        }
+    } else {
+        realDebridPendingCleanupCount = await realDebridAvailability.getPendingCleanupCount();
     }
 
     const storedRecords = await recordStore.load();

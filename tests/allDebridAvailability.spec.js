@@ -118,7 +118,7 @@ describe('AllDebridAvailabilityService', () => {
         expect(cleanup).toEqual({ cleaned: 1, pending: 0, discovered: 1 });
     });
 
-    test('keeps positive history long term, softens older positives, and expires negative history quickly', async () => {
+    test('keeps positive history long term but replaces it when a later download proves the source unavailable', async () => {
         let now = Date.parse('2026-07-18T12:00:00.000Z');
         const service = new AllDebridAvailabilityService({
             client: {},
@@ -128,7 +128,6 @@ describe('AllDebridAvailabilityService', () => {
         });
         await service.recordObservation(HASH_CACHED, 'cached', 'completed_download');
         await service.recordObservation(HASH_UNCACHED, 'uncached', 'placeholder_response');
-        await service.recordObservation(HASH_CACHED, 'uncached', 'placeholder_response');
 
         now += 2 * 24 * 60 * 60 * 1000;
         await expect(service.getHistory([HASH_CACHED, HASH_UNCACHED])).resolves.toMatchObject({
@@ -136,6 +135,11 @@ describe('AllDebridAvailabilityService', () => {
                 { hash: HASH_CACHED, status: 'cached', source: 'completed_download', previouslyVerified: true },
                 { hash: HASH_UNCACHED, status: 'unknown', previouslyVerified: false }
             ]
+        });
+
+        await service.recordObservation(HASH_CACHED, 'unavailable', 'failed_download');
+        await expect(service.getHistory([HASH_CACHED])).resolves.toMatchObject({
+            items: [{ hash: HASH_CACHED, status: 'unavailable', source: 'failed_download', previouslyVerified: false }]
         });
 
         now += 29 * 24 * 60 * 60 * 1000;

@@ -200,6 +200,78 @@ describe('download lifecycle API integration', () => {
         fs.rmSync(tempDirectory, { recursive: true, force: true });
     });
 
+    test('rejects provider-scoped known-negative downloads before contacting the source URL', async () => {
+        const realDebridResponse = await requestJson(backendPort, '/downloads', {
+            method: 'POST',
+            body: {
+                metaId: 'tt-rd-unavailable',
+                type: 'movie',
+                parentTitle: 'Unavailable RD Movie',
+                addonName: 'Torrentio RD',
+                debridProvider: 'realdebrid',
+                sourceReadiness: 'unavailable',
+                downloadUrl: `http://127.0.0.1:${sourcePort}/rd-placeholder.mp4`
+            }
+        });
+        expect(realDebridResponse).toMatchObject({
+            statusCode: 409,
+            body: {
+                errorCode: 'SOURCE_UNAVAILABLE',
+                error: 'This source is unavailable on Real-Debrid. Choose a cached source instead.'
+            }
+        });
+
+        const allDebridResponse = await requestJson(backendPort, '/downloads', {
+            method: 'POST',
+            body: {
+                metaId: 'tt-ad-uncached',
+                type: 'movie',
+                parentTitle: 'Uncached AD Movie',
+                addonName: 'Torrentio AD',
+                debridProvider: 'alldebrid',
+                sourceReadiness: 'requires_caching',
+                downloadUrl: `http://127.0.0.1:${sourcePort}/ad-placeholder.mp4`
+            }
+        });
+        expect(allDebridResponse.statusCode).toBe(409);
+        expect(allDebridResponse.body.error).toContain('not cached on AllDebrid');
+
+        const hash = '842783e3005495d5d1637f5364b59343c7844707';
+        const dataDirectory = path.join(tempDirectory, 'data');
+        fs.mkdirSync(dataDirectory, { recursive: true });
+        fs.writeFileSync(path.join(dataDirectory, 'realdebrid-availability-history.json'), JSON.stringify({
+            version: 1,
+            updatedAt: new Date().toISOString(),
+            entries: [{
+                key: `${hash}::::::`,
+                hash,
+                fileIdx: null,
+                filename: null,
+                videoSize: null,
+                status: 'uncached',
+                verifiedAt: new Date().toISOString(),
+                expiresAt: new Date(Date.now() + 60000).toISOString(),
+                source: 'explicit_check'
+            }]
+        }));
+        const persistedNegativeResponse = await requestJson(backendPort, '/downloads', {
+            method: 'POST',
+            body: {
+                metaId: 'tt-rd-history',
+                type: 'movie',
+                parentTitle: 'Persisted RD Negative',
+                addonName: 'Torrentio RD',
+                debridProvider: 'realdebrid',
+                sourceReadiness: 'unknown',
+                infoHash: hash,
+                downloadUrl: `http://127.0.0.1:${sourcePort}/rd-history-placeholder.mp4`
+            }
+        });
+        expect(persistedNegativeResponse.statusCode).toBe(409);
+        expect(persistedNegativeResponse.body.error).toContain('not cached on Real-Debrid');
+        expect(sourceRequests).toEqual([]);
+    });
+
     test('retries a failed record in place and completes the replacement transfer', async () => {
         const createdResponse = await requestJson(backendPort, '/downloads', {
             method: 'POST',

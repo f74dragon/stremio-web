@@ -14,20 +14,52 @@ const { default: SeasonEpisodePicker } = require('../EpisodePicker');
 const { buildDownloadPayload } = require('stremio/customStremio/downloadPayload');
 const {
     createDownload,
+    getBackendSettings,
     checkAllDebridAvailability,
-    getAllDebridAvailabilityHistory
+    getAllDebridAvailabilityHistory,
+    checkRealDebridAvailability,
+    getRealDebridAvailabilityHistory
 } = require('stremio/customStremio/localBackendClient');
-const { findMatchingDownloadRecord, getPayloadSourceUrl, isActiveDownloadRecord } = require('stremio/customStremio/downloadRecordMatching');
 const {
-    classifyDebridSourceReadiness,
+    findMatchingDownloadRecord,
+    findMatchingFailedDownloadRecord,
+    getPayloadSourceUrl,
+    isActiveDownloadRecord
+} = require('stremio/customStremio/downloadRecordMatching');
+const {
+    DEBRID_PROVIDER,
+    SOURCE_READINESS,
+    createRealDebridSourceKey,
     getStreamInfoHash,
-    getSourceReadinessSortRank
+    getSourceReadinessSortRank,
+    getRealDebridSourceDescriptor,
+    getDebridProvider,
+    classifyProviderSourceReadiness
 } = require('stremio/customStremio/debridSourceReadiness');
 
 const ALL_ADDONS_KEY = 'ALL';
 const PREFERRED_ADDON_STORAGE_KEY = 'customStremio.preferredAddon';
 
 const normalizeAddonName = (value) => String(value ?? '').trim().toLowerCase();
+const getAvailabilityObservationTime = (item) => {
+    const value = Date.parse(item?.checkedAt || item?.verifiedAt);
+    return Number.isFinite(value) ? value : null;
+};
+
+const shouldReplaceAvailabilityItem = (currentItem, nextItem) => {
+    if (!currentItem) {
+        return true;
+    }
+    const currentTime = getAvailabilityObservationTime(currentItem);
+    const nextTime = getAvailabilityObservationTime(nextItem);
+    if (currentTime !== null && nextTime !== null) {
+        return nextTime >= currentTime;
+    }
+    if (nextTime === null && ['completed_download', 'failed_download'].includes(currentItem.source)) {
+        return false;
+    }
+    return true;
+};
 
 const StreamsList = ({
     className,
@@ -59,7 +91,13 @@ const StreamsList = ({
     const [availabilityByHash, setAvailabilityByHash] = React.useState({});
     const [allDebridConnected, setAllDebridConnected] = React.useState(false);
     const [availabilityChecking, setAvailabilityChecking] = React.useState(false);
+    const [availabilityProgress, setAvailabilityProgress] = React.useState(null);
     const [availabilityError, setAvailabilityError] = React.useState(null);
+    const [realDebridAvailabilityByKey, setRealDebridAvailabilityByKey] = React.useState({});
+    const [realDebridConnected, setRealDebridConnected] = React.useState(false);
+    const [realDebridChecking, setRealDebridChecking] = React.useState(false);
+    const [realDebridProgress, setRealDebridProgress] = React.useState(null);
+    const [realDebridError, setRealDebridError] = React.useState(null);
     const [preferredAddon, setPreferredAddon] = React.useState(() => {
         try {
             if (typeof window === 'undefined' || !window.localStorage) {
@@ -116,18 +154,27 @@ const StreamsList = ({
             .reduce((streamsByAddon, streams) => {
                 streamsByAddon[streams.addon.transportUrl] = {
                     addon: streams.addon,
-                    streams: streams.content.content.map((stream) => ({
-                        ...stream,
-                        onClick: () => {
-                            core.transport.analytics({
-                                event: 'StreamClicked',
-                                args: {
-                                    stream
-                                }
-                            });
-                        },
-                        addonName: streams.addon.manifest.name
-                    }))
+                    streams: streams.content.content.map((stream) => {
+                        const enrichedStream = {
+                            ...stream,
+                            addonName: streams.addon.manifest.name,
+                            addonId: streams.addon.manifest.id,
+                            addonDescription: streams.addon.manifest.description,
+                            addonTransportUrl: streams.addon.transportUrl
+                        };
+                        return {
+                            ...enrichedStream,
+                            debridProvider: getDebridProvider(enrichedStream),
+                            onClick: () => {
+                                core.transport.analytics({
+                                    event: 'StreamClicked',
+                                    args: {
+                                        stream
+                                    }
+                                });
+                            }
+                        };
+                    })
                 };
 
                 return streamsByAddon;
@@ -146,9 +193,32 @@ const StreamsList = ({
                 [];
     }, [streamsByAddon, selectedAddon]);
     const filteredInfoHashes = React.useMemo(() => Array.from(new Set(
-        filteredStreams.map(getStreamInfoHash).filter(Boolean)
+        filteredStreams
+            .filter((stream) => getDebridProvider(stream) === DEBRID_PROVIDER.ALLDEBRID)
+            .map(getStreamInfoHash)
+            .filter(Boolean)
     )), [filteredStreams]);
     const filteredInfoHashesKey = filteredInfoHashes.join(',');
+    const filteredAllDebridRowCount = React.useMemo(() => filteredStreams.filter(
+        (stream) => getDebridProvider(stream) === DEBRID_PROVIDER.ALLDEBRID
+    ).length, [filteredStreams]);
+    const filteredRealDebridRowCount = React.useMemo(() => filteredStreams.filter(
+        (stream) => getDebridProvider(stream) === DEBRID_PROVIDER.REALDEBRID
+    ).length, [filteredStreams]);
+    const filteredRealDebridSources = React.useMemo(() => {
+        const byKey = new Map();
+        filteredStreams.forEach((stream) => {
+            if (getDebridProvider(stream) !== DEBRID_PROVIDER.REALDEBRID) {
+                return;
+            }
+            const descriptor = getRealDebridSourceDescriptor(stream);
+            if (descriptor && !byKey.has(descriptor.key)) {
+                byKey.set(descriptor.key, descriptor);
+            }
+        });
+        return Array.from(byKey.values());
+    }, [filteredStreams]);
+    const filteredRealDebridSourcesKey = filteredRealDebridSources.map((source) => source.key).join(',');
     const applyAvailabilityItems = React.useCallback((items) => {
         if (!Array.isArray(items)) {
             return;
@@ -156,7 +226,7 @@ const StreamsList = ({
         setAvailabilityByHash((currentItems) => {
             const nextItems = { ...currentItems };
             items.forEach((item) => {
-                if (typeof item?.hash === 'string') {
+                if (typeof item?.hash === 'string' && shouldReplaceAvailabilityItem(nextItems[item.hash.toLowerCase()], item)) {
                     nextItems[item.hash.toLowerCase()] = item;
                 }
             });
@@ -164,12 +234,64 @@ const StreamsList = ({
         });
     }, []);
     const getStreamAvailability = React.useCallback((stream) => {
+        if (getDebridProvider(stream) !== DEBRID_PROVIDER.ALLDEBRID) {
+            return null;
+        }
         const hash = getStreamInfoHash(stream);
         return hash ? availabilityByHash[hash] || null : null;
     }, [availabilityByHash]);
+    const applyRealDebridAvailabilityItems = React.useCallback((items) => {
+        if (!Array.isArray(items)) {
+            return;
+        }
+        setRealDebridAvailabilityByKey((currentItems) => {
+            const nextItems = { ...currentItems };
+            items.forEach((item) => {
+                if (typeof item?.key === 'string' && shouldReplaceAvailabilityItem(nextItems[item.key], item)) {
+                    nextItems[item.key] = item;
+                }
+            });
+            return nextItems;
+        });
+    }, []);
+    const getStreamRealDebridAvailability = React.useCallback((stream) => {
+        if (getDebridProvider(stream) !== DEBRID_PROVIDER.REALDEBRID) {
+            return null;
+        }
+        const descriptor = getRealDebridSourceDescriptor(stream);
+        return descriptor ? realDebridAvailabilityByKey[descriptor.key] || null : null;
+    }, [realDebridAvailabilityByKey]);
     const getStreamReadiness = React.useCallback((stream) => {
-        return classifyDebridSourceReadiness(stream, getStreamAvailability(stream));
-    }, [getStreamAvailability]);
+        return classifyProviderSourceReadiness(stream, {
+            allDebridAvailability: getStreamAvailability(stream),
+            realDebridAvailability: getStreamRealDebridAvailability(stream)
+        });
+    }, [getStreamAvailability, getStreamRealDebridAvailability]);
+
+    React.useEffect(() => {
+        let canceled = false;
+        getBackendSettings()
+            .then((settings) => {
+                if (canceled) {
+                    return;
+                }
+                setAllDebridConnected(settings?.debrid?.allDebrid?.connected === true);
+                setRealDebridConnected(settings?.debrid?.realDebrid?.connected === true);
+            })
+            .catch((error) => {
+                if (canceled) {
+                    return;
+                }
+                setAllDebridConnected(false);
+                setRealDebridConnected(false);
+                const message = error?.backendError || error?.message || 'Local download backend is offline.';
+                setAvailabilityError(message);
+                setRealDebridError(message);
+            });
+        return () => {
+            canceled = true;
+        };
+    }, []);
 
     React.useEffect(() => {
         let canceled = false;
@@ -178,13 +300,12 @@ const StreamsList = ({
                 if (canceled) {
                     return;
                 }
-                setAllDebridConnected(result?.connected === true);
                 applyAvailabilityItems(result?.items);
                 setAvailabilityError(null);
             })
-            .catch(() => {
+            .catch((error) => {
                 if (!canceled) {
-                    setAllDebridConnected(false);
+                    setAvailabilityError(error?.backendError || error?.message || 'Could not load AllDebrid availability history.');
                 }
             });
         return () => {
@@ -192,17 +313,91 @@ const StreamsList = ({
         };
     }, [filteredInfoHashesKey, applyAvailabilityItems]);
 
+    React.useEffect(() => {
+        let canceled = false;
+        getRealDebridAvailabilityHistory(filteredRealDebridSources)
+            .then((result) => {
+                if (canceled) {
+                    return;
+                }
+                applyRealDebridAvailabilityItems(result?.items);
+                setRealDebridError(null);
+            })
+            .catch((error) => {
+                if (!canceled) {
+                    setRealDebridError(error?.backendError || error?.message || 'Could not load Real-Debrid availability history.');
+                }
+            });
+        return () => {
+            canceled = true;
+        };
+    }, [filteredRealDebridSourcesKey, applyRealDebridAvailabilityItems]);
+
+    React.useEffect(() => {
+        const allDebridItems = [];
+        const realDebridItems = [];
+        [...downloadRecords].sort((left, right) => {
+            return (Date.parse(left?.updatedAt) || 0) - (Date.parse(right?.updatedAt) || 0);
+        }).forEach((record) => {
+            if (!['completed', 'failed'].includes(record?.status) || !/^[a-f0-9]{40}$/i.test(record?.infoHash || '')) {
+                return;
+            }
+            const status = record.status === 'completed' ? 'cached' :
+                record.errorCode === 'SOURCE_NOT_READY' ? 'uncached' : 'unavailable';
+            const verifiedAt = record.updatedAt || new Date().toISOString();
+            const observationSource = record.status === 'completed' ? 'completed_download' : 'failed_download';
+            const provider = getDebridProvider(record);
+            if (provider === DEBRID_PROVIDER.ALLDEBRID) {
+                allDebridItems.push({
+                    hash: record.infoHash.toLowerCase(),
+                    status,
+                    verifiedAt,
+                    source: observationSource,
+                    previouslyVerified: false
+                });
+            } else if (provider === DEBRID_PROVIDER.REALDEBRID) {
+                const source = {
+                    hash: record.infoHash.toLowerCase(),
+                    fileIdx: Number.isSafeInteger(record.fileIdx) ? record.fileIdx : null,
+                    filename: record.behaviorHints?.filename || record.fileName || null,
+                    videoSize: Number.isSafeInteger(record.behaviorHints?.videoSize) && record.behaviorHints.videoSize > 0 ?
+                        record.behaviorHints.videoSize
+                        : null
+                };
+                realDebridItems.push({
+                    ...source,
+                    key: createRealDebridSourceKey(source),
+                    status,
+                    verifiedAt,
+                    source: observationSource,
+                    previouslyVerified: false
+                });
+            }
+        });
+        applyAvailabilityItems(allDebridItems);
+        applyRealDebridAvailabilityItems(realDebridItems);
+    }, [downloadRecords, applyAvailabilityItems, applyRealDebridAvailabilityItems]);
+
     const onCheckAvailability = React.useCallback(async () => {
         if (availabilityChecking || filteredInfoHashes.length === 0) {
             return;
         }
         setAvailabilityChecking(true);
+        setAvailabilityProgress({ completed: 0, total: filteredInfoHashes.length, currentHash: null });
         setAvailabilityError(null);
         try {
-            const checked = await checkAllDebridAvailability(filteredInfoHashes);
+            const checked = await checkAllDebridAvailability(filteredInfoHashes, {
+                batchSize: 1,
+                onBatchStart: ({ batch, batchIndex, totalBatches }) => {
+                    setAvailabilityProgress({ completed: batchIndex, total: totalBatches, currentHash: batch[0] || null });
+                },
+                onBatchComplete: ({ batchIndex, totalBatches, result }) => {
+                    applyAvailabilityItems(result?.items);
+                    setAvailabilityProgress({ completed: batchIndex + 1, total: totalBatches, currentHash: null });
+                }
+            });
             setAllDebridConnected(checked?.connected === true);
-            const history = await getAllDebridAvailabilityHistory(filteredInfoHashes);
-            applyAvailabilityItems(history?.items);
+            applyAvailabilityItems(checked?.items);
             if (checked?.cleanupWarning) {
                 setAvailabilityError(checked.cleanupWarning);
             }
@@ -210,8 +405,47 @@ const StreamsList = ({
             setAvailabilityError(error?.backendError || error?.message || 'Could not check AllDebrid availability.');
         } finally {
             setAvailabilityChecking(false);
+            setAvailabilityProgress(null);
         }
     }, [availabilityChecking, filteredInfoHashesKey, applyAvailabilityItems]);
+
+    const onCheckRealDebridAvailability = React.useCallback(async () => {
+        if (realDebridChecking || filteredRealDebridSources.length === 0) {
+            return;
+        }
+        setRealDebridChecking(true);
+        setRealDebridProgress({ completed: 0, total: filteredRealDebridSources.length, currentKey: null });
+        setRealDebridError(null);
+        try {
+            const checked = await checkRealDebridAvailability(filteredRealDebridSources, {
+                batchSize: 1,
+                onBatchStart: ({ batch, batchIndex, totalBatches }) => {
+                    setRealDebridProgress({ completed: batchIndex, total: totalBatches, currentKey: batch[0]?.key || null });
+                },
+                onBatchComplete: ({ batchIndex, totalBatches, result }) => {
+                    applyRealDebridAvailabilityItems(result?.items);
+                    setRealDebridProgress({ completed: batchIndex + 1, total: totalBatches, currentKey: null });
+                }
+            });
+            setRealDebridConnected(checked?.connected === true);
+            applyRealDebridAvailabilityItems(checked?.items);
+            if (checked?.cleanupWarning) {
+                setRealDebridError(checked.cleanupWarning);
+            } else {
+                const unresolvedCount = Array.isArray(checked?.items) ? checked.items.filter((item) =>
+                    ['error', 'invalid', 'unknown'].includes(item?.status) && item?.error
+                ).length : 0;
+                if (unresolvedCount > 0) {
+                    setRealDebridError(`${unresolvedCount} source${unresolvedCount === 1 ? '' : 's'} could not be safely matched or checked.`);
+                }
+            }
+        } catch (error) {
+            setRealDebridError(error?.backendError || error?.message || 'Could not check Real-Debrid availability.');
+        } finally {
+            setRealDebridChecking(false);
+            setRealDebridProgress(null);
+        }
+    }, [realDebridChecking, filteredRealDebridSourcesKey, applyRealDebridAvailabilityItems]);
     const orderedFilteredStreams = React.useMemo(() => {
         return filteredStreams
             .map((stream, index) => ({ stream, index }))
@@ -225,7 +459,10 @@ const StreamsList = ({
 
                 const readinessDifference = getSourceReadinessSortRank(getStreamReadiness(left.stream)) -
                     getSourceReadinessSortRank(getStreamReadiness(right.stream));
-                return readinessDifference !== 0 ? readinessDifference : left.index - right.index;
+                if (readinessDifference !== 0) {
+                    return readinessDifference;
+                }
+                return left.index - right.index;
             })
             .map(({ stream }) => stream);
     }, [filteredStreams, selectedAddon, preferredAddon, isPreferredAddonStream, getStreamReadiness]);
@@ -287,10 +524,21 @@ const StreamsList = ({
                 summary.cached += 1;
             } else if (status === 'uncached') {
                 summary.uncached += 1;
+            } else if (status === 'unavailable') {
+                summary.unavailable += 1;
             }
             return summary;
-        }, { cached: 0, uncached: 0 });
+        }, { cached: 0, uncached: 0, unavailable: 0 });
     }, [filteredInfoHashesKey, availabilityByHash]);
+    const realDebridAvailabilitySummary = React.useMemo(() => {
+        return filteredRealDebridSources.reduce((summary, source) => {
+            const status = realDebridAvailabilityByKey[source.key]?.status;
+            if (Object.prototype.hasOwnProperty.call(summary, status)) {
+                summary[status] += 1;
+            }
+            return summary;
+        }, { cached: 0, uncached: 0, unavailable: 0 });
+    }, [filteredRealDebridSourcesKey, realDebridAvailabilityByKey]);
     const showDownloadStatus = React.useCallback((message, tone) => {
         const statusId = Date.now();
         setDownloadStatus({ id: statusId, message, tone, visible: true });
@@ -366,7 +614,40 @@ const StreamsList = ({
                 status: error?.status ?? null,
                 backendError: error?.backendError ?? null
             });
-            showDownloadStatus('Download backend unavailable.', 'error');
+            const errorCode = error?.responseBody?.errorCode;
+            if (['SOURCE_NOT_READY', 'SOURCE_UNAVAILABLE'].includes(errorCode)) {
+                const status = errorCode === 'SOURCE_NOT_READY' ? 'uncached' : 'unavailable';
+                const verifiedAt = new Date().toISOString();
+                if (downloadPayload.debridProvider === DEBRID_PROVIDER.ALLDEBRID && downloadPayload.infoHash) {
+                    applyAvailabilityItems([{
+                        hash: downloadPayload.infoHash,
+                        status,
+                        verifiedAt,
+                        source: 'rejected_download',
+                        previouslyVerified: false
+                    }]);
+                } else if (downloadPayload.debridProvider === DEBRID_PROVIDER.REALDEBRID && downloadPayload.infoHash) {
+                    const source = {
+                        hash: downloadPayload.infoHash,
+                        fileIdx: Number.isSafeInteger(downloadPayload.fileIdx) ? downloadPayload.fileIdx : null,
+                        filename: downloadPayload.behaviorHints?.filename || downloadPayload.fileName || null,
+                        videoSize: Number.isSafeInteger(downloadPayload.behaviorHints?.videoSize) && downloadPayload.behaviorHints.videoSize > 0 ?
+                            downloadPayload.behaviorHints.videoSize
+                            : null
+                    };
+                    applyRealDebridAvailabilityItems([{
+                        ...source,
+                        key: createRealDebridSourceKey(source),
+                        status,
+                        verifiedAt,
+                        source: 'rejected_download',
+                        previouslyVerified: false
+                    }]);
+                }
+                showDownloadStatus(error?.backendError || (status === 'unavailable' ? 'Source unavailable.' : 'Source not cached.'), 'error');
+            } else {
+                showDownloadStatus('Download backend unavailable.', 'error');
+            }
         } finally {
             if (pendingDownloadKey) {
                 setPendingDownloadKeys((currentKeys) => {
@@ -376,7 +657,7 @@ const StreamsList = ({
                 });
             }
         }
-    }, [getPendingDownloadKey, onDownloadCreated, showDownloadStatus]);
+    }, [getPendingDownloadKey, onDownloadCreated, showDownloadStatus, applyAvailabilityItems, applyRealDebridAvailabilityItems]);
 
     React.useEffect(() => {
         return () => {
@@ -446,37 +727,101 @@ const StreamsList = ({
                         null
                 }
                 {
-                    allDebridConnected && filteredInfoHashes.length > 0 ?
+                    filteredStreams.length > 0 ?
                         <div className={styles['availability-controls']}>
-                            <Button
-                                className={styles['availability-check-button']}
-                                title={t('CUSTOM_STREAM_CHECK_AVAILABILITY_TITLE', { defaultValue: 'Check the visible torrent hashes on AllDebrid' })}
-                                disabled={availabilityChecking}
-                                aria-busy={availabilityChecking}
-                                onClick={onCheckAvailability}
-                            >
-                                <Icon className={classnames(styles['availability-check-icon'], availabilityChecking ? styles['availability-check-icon-active'] : null)} name={'checkmark'} />
-                                <span>{availabilityChecking ?
-                                    t('CUSTOM_STREAM_CHECKING_AVAILABILITY', { defaultValue: 'Checking…' })
-                                    :
-                                    t('CUSTOM_STREAM_CHECK_AVAILABILITY', { defaultValue: 'Check availability' })}
-                                </span>
-                            </Button>
                             {
-                                availabilitySummary.cached > 0 || availabilitySummary.uncached > 0 ?
-                                    <span className={styles['availability-summary']}>
-                                        {`${availabilitySummary.cached} cached · ${availabilitySummary.uncached} not cached`}
-                                    </span>
+                                filteredStreams.length > 0 ?
+                                    <div className={styles['availability-provider']}>
+                                        <Button
+                                            className={styles['availability-check-button']}
+                                            title={t('CUSTOM_STREAM_CHECK_AVAILABILITY_TITLE', { defaultValue: 'Check the visible torrent hashes on AllDebrid' })}
+                                            disabled={!allDebridConnected || availabilityChecking || filteredInfoHashes.length === 0}
+                                            aria-busy={availabilityChecking}
+                                            onClick={onCheckAvailability}
+                                        >
+                                            <Icon className={classnames(styles['availability-check-icon'], availabilityChecking ? styles['availability-check-icon-active'] : null)} name={'checkmark'} />
+                                            <span>{availabilityChecking ?
+                                                `Checking AllDebrid ${availabilityProgress?.completed || 0}/${availabilityProgress?.total || filteredInfoHashes.length}...`
+                                                : !allDebridConnected ?
+                                                    t('CUSTOM_STREAM_ALLDEBRID_NOT_CONNECTED', { defaultValue: 'AllDebrid not connected' })
+                                                    : filteredAllDebridRowCount === 0 ?
+                                                        t('CUSTOM_STREAM_NO_ALLDEBRID_SOURCES', { defaultValue: 'No AllDebrid sources' })
+                                                        : filteredInfoHashes.length === 0 ?
+                                                            t('CUSTOM_STREAM_ALLDEBRID_HASH_UNAVAILABLE', { defaultValue: 'AD hash unavailable' })
+                                                            :
+                                                            t('CUSTOM_STREAM_CHECK_AVAILABILITY', { defaultValue: 'Check AllDebrid' })}
+                                            </span>
+                                        </Button>
+                                        {
+                                            availabilitySummary.cached > 0 || availabilitySummary.uncached > 0 || availabilitySummary.unavailable > 0 ?
+                                                <span className={styles['availability-summary']}>
+                                                    {`${availabilitySummary.cached} cached · ${availabilitySummary.uncached} not cached · ${availabilitySummary.unavailable} unavailable`}
+                                                </span>
+                                                : null
+                                        }
+                                        <span className={styles['availability-disclosure']}>
+                                            {filteredAllDebridRowCount === 0 ?
+                                                t('CUSTOM_STREAM_NO_ALLDEBRID_SOURCES_HELP', {
+                                                    defaultValue: 'The current filter does not contain an AllDebrid source.'
+                                                })
+                                                : filteredInfoHashes.length === 0 ?
+                                                    t('CUSTOM_STREAM_ALLDEBRID_HASH_UNAVAILABLE_HELP', {
+                                                        defaultValue: 'The visible AllDebrid source did not expose a torrent hash that can be checked safely.'
+                                                    })
+                                                    : t('CUSTOM_STREAM_CHECK_AVAILABILITY_DISCLOSURE', {
+                                                        defaultValue: 'Checks briefly create and remove temporary magnet entries in your AllDebrid account.'
+                                                    })}
+                                        </span>
+                                        {availabilityError ? <span className={styles['availability-error']} role={'alert'}>{availabilityError}</span> : null}
+                                    </div>
                                     : null
                             }
-                            <span className={styles['availability-disclosure']}>
-                                {t('CUSTOM_STREAM_CHECK_AVAILABILITY_DISCLOSURE', {
-                                    defaultValue: 'Checks briefly create and remove temporary magnet entries in your AllDebrid account.'
-                                })}
-                            </span>
                             {
-                                availabilityError ?
-                                    <span className={styles['availability-error']} role={'alert'}>{availabilityError}</span>
+                                filteredStreams.length > 0 ?
+                                    <div className={styles['availability-provider']}>
+                                        <Button
+                                            className={classnames(styles['availability-check-button'], styles['availability-check-button-realdebrid'])}
+                                            title={t('CUSTOM_STREAM_CHECK_REALDEBRID_TITLE', { defaultValue: 'Check each visible source file on Real-Debrid' })}
+                                            disabled={!realDebridConnected || realDebridChecking || filteredRealDebridSources.length === 0}
+                                            aria-busy={realDebridChecking}
+                                            onClick={onCheckRealDebridAvailability}
+                                        >
+                                            <Icon className={classnames(styles['availability-check-icon'], realDebridChecking ? styles['availability-check-icon-active'] : null)} name={'checkmark'} />
+                                            <span>{realDebridChecking ?
+                                                `Checking Real-Debrid ${realDebridProgress?.completed || 0}/${realDebridProgress?.total || filteredRealDebridSources.length}...`
+                                                : !realDebridConnected ?
+                                                    t('CUSTOM_STREAM_REALDEBRID_NOT_CONNECTED', { defaultValue: 'Real-Debrid not connected' })
+                                                    : filteredRealDebridRowCount === 0 ?
+                                                        t('CUSTOM_STREAM_NO_REALDEBRID_SOURCES', { defaultValue: 'No Real-Debrid sources' })
+                                                        : filteredRealDebridSources.length === 0 ?
+                                                            t('CUSTOM_STREAM_REALDEBRID_HASH_UNAVAILABLE', { defaultValue: 'RD hash unavailable' })
+                                                            :
+                                                            t('CUSTOM_STREAM_CHECK_REALDEBRID', { defaultValue: 'Check Real-Debrid' })}
+                                            </span>
+                                        </Button>
+                                        {
+                                            realDebridAvailabilitySummary.cached > 0 || realDebridAvailabilitySummary.uncached > 0 || realDebridAvailabilitySummary.unavailable > 0 ?
+                                                <span className={styles['availability-summary']}>
+                                                    {`${realDebridAvailabilitySummary.cached} cached · ${realDebridAvailabilitySummary.uncached} not cached · ${realDebridAvailabilitySummary.unavailable} unavailable`}
+                                                </span>
+                                                : null
+                                        }
+                                        <span className={styles['availability-disclosure']}>
+                                            {filteredRealDebridRowCount === 0 ?
+                                                t('CUSTOM_STREAM_NO_REALDEBRID_SOURCES_HELP', {
+                                                    defaultValue: 'The current filter does not contain a Real-Debrid source.'
+                                                })
+                                                : filteredRealDebridSources.length === 0 ?
+                                                    t('CUSTOM_STREAM_REALDEBRID_HASH_UNAVAILABLE_HELP', {
+                                                        defaultValue: 'This addon identified the row as Real-Debrid but did not expose a torrent hash that can be checked safely.'
+                                                    })
+                                                    :
+                                                    t('CUSTOM_STREAM_CHECK_REALDEBRID_DISCLOSURE', {
+                                                        defaultValue: 'Explicitly adds, selects, and removes temporary Real-Debrid torrents.'
+                                                    })}
+                                        </span>
+                                        {realDebridError ? <span className={styles['availability-error']} role={'alert'}>{realDebridError}</span> : null}
+                                    </div>
                                     : null
                             }
                         </div>
@@ -530,22 +875,36 @@ const StreamsList = ({
                                 <div className={styles['streams-container']} ref={streamsContainerRef}>
                                     {orderedFilteredStreams.map((stream, index) => {
                                         const availability = getStreamAvailability(stream);
-                                        const sourceReadiness = getStreamReadiness(stream);
-                                        const downloadPayload = {
-                                            ...buildDownloadPayload({
-                                                metaId,
-                                                parentTitle,
-                                                poster,
-                                                background,
-                                                mediaMetadata,
-                                                type,
-                                                video,
-                                                addonName: stream.addonName,
-                                                stream
-                                            }),
-                                            sourceReadiness
-                                        };
-                                        const downloadRecord = findMatchingDownloadRecord(downloadRecords, downloadPayload);
+                                        const realDebridAvailability = getStreamRealDebridAvailability(stream);
+                                        const streamProvider = getDebridProvider(stream);
+                                        const streamInfoHash = streamProvider === DEBRID_PROVIDER.ALLDEBRID ? getStreamInfoHash(stream) : null;
+                                        const realDebridDescriptor = streamProvider === DEBRID_PROVIDER.REALDEBRID ? getRealDebridSourceDescriptor(stream) : null;
+                                        const isAvailabilityChecking = streamProvider === DEBRID_PROVIDER.ALLDEBRID ?
+                                            Boolean(streamInfoHash && availabilityProgress?.currentHash === streamInfoHash)
+                                            : streamProvider === DEBRID_PROVIDER.REALDEBRID ?
+                                                Boolean(realDebridDescriptor && realDebridProgress?.currentKey === realDebridDescriptor.key)
+                                                : false;
+                                        const availabilityCheckError = availability?.error || realDebridAvailability?.error || null;
+                                        const baseDownloadPayload = buildDownloadPayload({
+                                            metaId,
+                                            parentTitle,
+                                            poster,
+                                            background,
+                                            mediaMetadata,
+                                            type,
+                                            video,
+                                            addonName: stream.addonName,
+                                            stream
+                                        });
+                                        const downloadRecord = findMatchingDownloadRecord(downloadRecords, baseDownloadPayload);
+                                        const failedDownloadRecord = downloadRecord ? null :
+                                            findMatchingFailedDownloadRecord(downloadRecords, baseDownloadPayload);
+                                        const sourceReadiness = failedDownloadRecord ?
+                                            failedDownloadRecord.errorCode === 'SOURCE_NOT_READY' ?
+                                                SOURCE_READINESS.REQUIRES_CACHING
+                                                : SOURCE_READINESS.UNAVAILABLE
+                                            : getStreamReadiness(stream);
+                                        const downloadPayload = { ...baseDownloadPayload, sourceReadiness };
                                         const activeDownloadRecord = isActiveDownloadRecord(downloadRecord) ? downloadRecord : null;
                                         const downloadRecordId = activeDownloadRecord?.id;
                                         const pendingDownloadKey = getPendingDownloadKey(downloadPayload);
@@ -557,6 +916,7 @@ const StreamsList = ({
                                                 videoId={video?.id}
                                                 videoReleased={video?.released}
                                                 addonName={stream.addonName}
+                                                debridProvider={streamProvider}
                                                 name={stream.name}
                                                 description={stream.description}
                                                 thumbnail={stream.thumbnail}
@@ -568,6 +928,9 @@ const StreamsList = ({
                                                 downloadActionError={downloadRecordId ? downloadActionErrors[downloadRecordId] : null}
                                                 sourceReadiness={sourceReadiness}
                                                 availabilityVerifiedAt={availability?.verifiedAt ?? null}
+                                                realDebridAvailability={realDebridAvailability}
+                                                isAvailabilityChecking={isAvailabilityChecking}
+                                                availabilityCheckError={availabilityCheckError}
                                                 isDownloadPending={isDownloadPending}
                                                 onDownloadPlaceholder={onDownloadPlaceholder}
                                                 onPlayDownload={onPlayDownload}

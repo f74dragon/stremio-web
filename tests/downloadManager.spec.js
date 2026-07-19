@@ -1,6 +1,11 @@
 /* global jest, describe, afterEach, test, expect */
 
-const { parseContentRange, buildProgressUpdate, isKnownNotReadySourceUrl } = require('../local-backend/downloadManager');
+const {
+    parseContentRange,
+    buildProgressUpdate,
+    classifyKnownPlaceholderSourceUrl,
+    isKnownNotReadySourceUrl
+} = require('../local-backend/downloadManager');
 
 describe('downloadManager range helpers', () => {
     afterEach(() => {
@@ -44,7 +49,14 @@ describe('downloadManager range helpers', () => {
         expect(isKnownNotReadySourceUrl('https://torrentio.strem.fun/videos/downloading_v2.mp4')).toBe(true);
         expect(isKnownNotReadySourceUrl('https://torrentio.strem.fun/videos/downloading.mp4?source=ad')).toBe(true);
         expect(isKnownNotReadySourceUrl('https://torrentio.strem.fun/videos/downloading_v12.mp4')).toBe(true);
+        expect(isKnownNotReadySourceUrl('https://torrentio.strem.fun/videos/failed_infringement_v2.mp4')).toBe(true);
+        expect(isKnownNotReadySourceUrl('https://torrentio.strem.fun/videos/failed_file-unavailable_v12.mp4')).toBe(true);
         expect(isKnownNotReadySourceUrl('https://torrentio.strem.fun/videos/movie.mkv')).toBe(false);
         expect(isKnownNotReadySourceUrl('https://media.example/videos/downloading_v2.mp4')).toBe(false);
+        expect(classifyKnownPlaceholderSourceUrl('https://torrentio.strem.fun/videos/failed_infringement_v2.mp4')).toEqual({
+            status: 'unavailable',
+            errorCode: 'SOURCE_UNAVAILABLE',
+            reason: 'infringement'
+        });
     });
 });

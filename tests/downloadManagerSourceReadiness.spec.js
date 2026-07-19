@@ -52,7 +52,78 @@ describe('download manager source readiness', () => {
             update: {
                 status: 'failed',
                 errorCode: 'SOURCE_NOT_READY',
-                error: 'AllDebrid is still preparing this source. Choose another cached source or try again later.'
+                error: 'This debrid source is still being prepared. Choose another cached source or try again later.'
+            }
+        });
+    });
+
+    test('rejects Real-Debrid infringement placeholders before requesting or writing them', async () => {
+        const request = new EventEmitter();
+        request.setTimeout = jest.fn();
+        request.destroyed = false;
+        const response = new EventEmitter();
+        response.statusCode = 302;
+        response.headers = {
+            location: 'https://torrentio.strem.fun/videos/failed_infringement_v2.mp4'
+        };
+        response.resume = jest.fn();
+        response.destroyed = false;
+
+        const getSpy = jest.spyOn(http, 'get').mockImplementation((url, options, callback) => {
+            setImmediate(() => callback(response));
+            return request;
+        });
+        const updates = [];
+
+        await startDownload({
+            id: 'source-infringement-test',
+            sourceUrl: 'http://source.example/resolve',
+            parentTitle: 'Test Movie',
+            type: 'movie'
+        }, (id, update) => updates.push({ id, update }));
+
+        expect(getSpy).toHaveBeenCalledTimes(1);
+        expect(response.resume).toHaveBeenCalledTimes(1);
+        expect(fileUtils.finalizePartialDownload).not.toHaveBeenCalled();
+        expect(updates.at(-1)).toMatchObject({
+            id: 'source-infringement-test',
+            update: {
+                status: 'failed',
+                errorCode: 'SOURCE_UNAVAILABLE',
+                error: 'This debrid source was rejected or removed by the provider. Choose another cached source.'
+            }
+        });
+    });
+
+    test('classifies an HTTP 451 media response as unavailable', async () => {
+        const request = new EventEmitter();
+        request.setTimeout = jest.fn();
+        request.destroyed = false;
+        const response = new EventEmitter();
+        response.statusCode = 451;
+        response.headers = {};
+        response.resume = jest.fn();
+        response.destroyed = false;
+
+        jest.spyOn(http, 'get').mockImplementation((url, options, callback) => {
+            setImmediate(() => callback(response));
+            return request;
+        });
+        const updates = [];
+
+        await startDownload({
+            id: 'source-http-451-test',
+            sourceUrl: 'http://source.example/infringing',
+            parentTitle: 'Test Movie',
+            type: 'movie'
+        }, (id, update) => updates.push({ id, update }));
+
+        expect(response.resume).toHaveBeenCalledTimes(1);
+        expect(fileUtils.finalizePartialDownload).not.toHaveBeenCalled();
+        expect(updates.at(-1)).toMatchObject({
+            update: {
+                status: 'failed',
+                errorCode: 'SOURCE_UNAVAILABLE'
             }
         });
     });

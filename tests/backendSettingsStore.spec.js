@@ -7,6 +7,7 @@ const {
     SETTINGS_STORE_VERSION,
     LEGACY_SETTINGS_STORE_VERSION,
     ALLDEBRID_SETTINGS_STORE_VERSION,
+    PLAYER_SETTINGS_STORE_VERSION,
     createBackendSettings,
     readBackendSettings,
     writeBackendSettings,
@@ -30,7 +31,7 @@ describe('backendSettingsStore', () => {
         await expect(readBackendSettings(settingsPath, createBackendSettings(2))).resolves.toEqual({
             downloads: { maxConcurrentDownloads: 2 },
             player: { executablePath: null },
-            debrid: { allDebrid: null }
+            debrid: { allDebrid: null, realDebrid: null }
         });
 
         const store = new BackendSettingsStore({ filePath: settingsPath });
@@ -39,7 +40,7 @@ describe('backendSettingsStore', () => {
         await expect(store.load(createBackendSettings(1))).resolves.toEqual({
             downloads: { maxConcurrentDownloads: 3 },
             player: { executablePath: null },
-            debrid: { allDebrid: null }
+            debrid: { allDebrid: null, realDebrid: null }
         });
 
         const document = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
@@ -57,15 +58,15 @@ describe('backendSettingsStore', () => {
     test('persists custom and unlimited concurrency values', async () => {
         await expect(writeBackendSettings(settingsPath, {
             downloads: { maxConcurrentDownloads: 128 }
-        })).resolves.toEqual({ downloads: { maxConcurrentDownloads: 128 }, player: { executablePath: null }, debrid: { allDebrid: null } });
+        })).resolves.toEqual({ downloads: { maxConcurrentDownloads: 128 }, player: { executablePath: null }, debrid: { allDebrid: null, realDebrid: null } });
 
         await expect(writeBackendSettings(settingsPath, {
             downloads: { maxConcurrentDownloads: 'unlimited' }
-        })).resolves.toEqual({ downloads: { maxConcurrentDownloads: 'unlimited' }, player: { executablePath: null }, debrid: { allDebrid: null } });
+        })).resolves.toEqual({ downloads: { maxConcurrentDownloads: 'unlimited' }, player: { executablePath: null }, debrid: { allDebrid: null, realDebrid: null } });
         await expect(readBackendSettings(settingsPath, createBackendSettings(2))).resolves.toEqual({
             downloads: { maxConcurrentDownloads: 'unlimited' },
             player: { executablePath: null },
-            debrid: { allDebrid: null }
+            debrid: { allDebrid: null, realDebrid: null }
         });
     });
 
@@ -85,7 +86,8 @@ describe('backendSettingsStore', () => {
                     username: 'viewer',
                     isPremium: true,
                     premiumUntil: '1900000000'
-                }
+                },
+                realDebrid: null
             }
         });
 
@@ -96,7 +98,7 @@ describe('backendSettingsStore', () => {
         await expect(readBackendSettings(settingsPath, createBackendSettings(1))).resolves.toEqual({
             downloads: { maxConcurrentDownloads: 4 },
             player: { executablePath: null },
-            debrid: { allDebrid: null }
+            debrid: { allDebrid: null, realDebrid: null }
         });
 
         fs.writeFileSync(settingsPath, JSON.stringify({
@@ -108,6 +110,43 @@ describe('backendSettingsStore', () => {
             player: { executablePath: 'C:\\Players\\mpc-hc64.exe' },
             debrid: { allDebrid: { apiKey: 'secret-api-key' } }
         });
+
+        fs.writeFileSync(settingsPath, JSON.stringify({
+            version: PLAYER_SETTINGS_STORE_VERSION,
+            settings: createBackendSettings(2, null, 'C:\\Players\\mpc-hc64.exe')
+        }), 'utf8');
+        await expect(readBackendSettings(settingsPath, createBackendSettings(1))).resolves.toEqual({
+            downloads: { maxConcurrentDownloads: 2 },
+            player: { executablePath: 'C:\\Players\\mpc-hc64.exe' },
+            debrid: { allDebrid: null, realDebrid: null }
+        });
+    });
+
+    test('persists backend-only Real-Debrid OAuth credentials', async () => {
+        const realDebrid = {
+            clientId: 'bound-client-id',
+            clientSecret: 'bound-client-secret',
+            accessToken: 'access-token',
+            refreshToken: 'refresh-token',
+            tokenExpiresAt: '2030-01-01T00:00:00.000Z',
+            userId: 42,
+            username: 'viewer',
+            isPremium: true,
+            premiumUntil: '2031-01-01T00:00:00.000Z'
+        };
+        await expect(writeBackendSettings(settingsPath, createBackendSettings(2, null, null, realDebrid))).resolves.toEqual({
+            downloads: { maxConcurrentDownloads: 2 },
+            player: { executablePath: null },
+            debrid: {
+                allDebrid: null,
+                realDebrid: { ...realDebrid, userId: '42' }
+            }
+        });
+
+        expect(() => createBackendSettings(2, null, null, {
+            ...realDebrid,
+            refreshToken: ''
+        })).toThrow(expect.objectContaining({ code: 'BACKEND_SETTINGS_INVALID' }));
     });
 
     test('persists a validated player executable path', async () => {
@@ -115,12 +154,12 @@ describe('backendSettingsStore', () => {
         await expect(writeBackendSettings(settingsPath, createBackendSettings(2, null, executablePath))).resolves.toEqual({
             downloads: { maxConcurrentDownloads: 2 },
             player: { executablePath },
-            debrid: { allDebrid: null }
+            debrid: { allDebrid: null, realDebrid: null }
         });
         await expect(writeBackendSettings(settingsPath, {
             downloads: { maxConcurrentDownloads: 2 },
             player: { executablePath: 'relative-player.exe' },
-            debrid: { allDebrid: null }
+            debrid: { allDebrid: null, realDebrid: null }
         })).rejects.toMatchObject({
             code: 'BACKEND_SETTINGS_INVALID'
         });
