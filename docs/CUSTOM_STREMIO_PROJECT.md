@@ -979,6 +979,14 @@ Restart the local backend, then manually validate Milestone 6K.4 on a Real-Debri
   - Switch the existing addon filter to one specific addon and confirm only that addon’s streams appear, unchanged from prior behavior.
   - Set the preferred addon back to `No preference` and confirm the original order is restored.
 
+## Milestone 3A.1 Findings: Persistent Stream Addon Filter
+
+- The original Stremio addon filter now remembers its last specific-addon selection in browser local storage independently of the custom preferred-addon setting.
+- The stored value remains the addon transport URL, matching the existing grouping/filter key without changing addon ordering or stream behavior.
+- When the remembered addon is present on a later movie or episode, that addon is selected automatically. When it is absent, the page temporarily displays **All addons** instead of an empty list while retaining the remembered choice for titles where it is available again.
+- Selecting **All addons** clears the stored override and restores the original default behavior.
+- Storage access is guarded so private/incognito restrictions cannot break the stream page; the current in-memory selection still works.
+
 ## Milestone 2 Findings: Stream and Title Data Flow
 
 ### 1. Title page to episode/video stream page

@@ -38,8 +38,13 @@ const {
     classifyProviderSourceReadiness,
     shouldProbeRealDebridAvailability
 } = require('stremio/customStremio/debridSourceReadiness');
+const {
+    ALL_ADDONS_KEY,
+    readStreamAddonFilter,
+    persistStreamAddonFilter,
+    resolveStreamAddonFilter
+} = require('stremio/customStremio/streamAddonFilter');
 
-const ALL_ADDONS_KEY = 'ALL';
 const PREFERRED_ADDON_STORAGE_KEY = 'customStremio.preferredAddon';
 
 const normalizeAddonName = (value) => String(value ?? '').trim().toLowerCase();
@@ -87,7 +92,13 @@ const StreamsList = ({
     const streamsContainerRef = React.useRef(null);
     const downloadStatusHideTimeoutRef = React.useRef(null);
     const downloadStatusClearTimeoutRef = React.useRef(null);
-    const [selectedAddon, setSelectedAddon] = React.useState(ALL_ADDONS_KEY);
+    const [selectedAddon, setSelectedAddon] = React.useState(() => {
+        try {
+            return readStreamAddonFilter(typeof window === 'undefined' ? null : window.localStorage);
+        } catch {
+            return ALL_ADDONS_KEY;
+        }
+    });
     const [downloadStatus, setDownloadStatus] = React.useState(null);
     const [pendingDownloadKeys, setPendingDownloadKeys] = React.useState({});
     const [availabilityByHash, setAvailabilityByHash] = React.useState({});
@@ -114,6 +125,12 @@ const StreamsList = ({
     const onAddonSelected = React.useCallback((value) => {
         streamsContainerRef.current.scrollTo({ top: 0, left: 0, behavior: platform.name === 'ios' ? 'smooth' : 'instant' });
         setSelectedAddon(value);
+
+        try {
+            persistStreamAddonFilter(typeof window === 'undefined' ? null : window.localStorage, value);
+        } catch {
+            // Keep the in-memory filter working when browser storage is unavailable.
+        }
     }, [platform]);
     const onPreferredAddonSelected = React.useCallback((value) => {
         setPreferredAddon(value);
@@ -185,15 +202,19 @@ const StreamsList = ({
     const isPreferredAddonStream = React.useCallback((stream) => {
         return normalizeAddonName(stream?.addonName) === normalizeAddonName(preferredAddon);
     }, [preferredAddon]);
+    const effectiveSelectedAddon = React.useMemo(
+        () => resolveStreamAddonFilter(selectedAddon, streamsByAddon),
+        [streamsByAddon, selectedAddon]
+    );
     const filteredStreams = React.useMemo(() => {
-        return selectedAddon === ALL_ADDONS_KEY ?
+        return effectiveSelectedAddon === ALL_ADDONS_KEY ?
             Object.values(streamsByAddon).map(({ streams }) => streams).flat(1)
             :
-            streamsByAddon[selectedAddon] ?
-                streamsByAddon[selectedAddon].streams
+            streamsByAddon[effectiveSelectedAddon] ?
+                streamsByAddon[effectiveSelectedAddon].streams
                 :
                 [];
-    }, [streamsByAddon, selectedAddon]);
+    }, [streamsByAddon, effectiveSelectedAddon]);
     const filteredInfoHashes = React.useMemo(() => Array.from(new Set(
         filteredStreams
             .filter((stream) => getDebridProvider(stream) === DEBRID_PROVIDER.ALLDEBRID)
@@ -486,7 +507,7 @@ const StreamsList = ({
         return filteredStreams
             .map((stream, index) => ({ stream, index }))
             .sort((left, right) => {
-                if (selectedAddon === ALL_ADDONS_KEY && normalizeAddonName(preferredAddon)) {
+                if (effectiveSelectedAddon === ALL_ADDONS_KEY && normalizeAddonName(preferredAddon)) {
                     const preferredDifference = Number(isPreferredAddonStream(right.stream)) - Number(isPreferredAddonStream(left.stream));
                     if (preferredDifference !== 0) {
                         return preferredDifference;
@@ -501,7 +522,7 @@ const StreamsList = ({
                 return left.index - right.index;
             })
             .map(({ stream }) => stream);
-    }, [filteredStreams, selectedAddon, preferredAddon, isPreferredAddonStream, getStreamReadiness]);
+    }, [filteredStreams, effectiveSelectedAddon, preferredAddon, isPreferredAddonStream, getStreamReadiness]);
     const selectableOptions = React.useMemo(() => {
         return {
             options: [
@@ -516,10 +537,10 @@ const StreamsList = ({
                     title: streamsByAddon[transportUrl].addon.manifest.name,
                 }))
             ],
-            value: selectedAddon,
+            value: effectiveSelectedAddon,
             onSelect: onAddonSelected
         };
-    }, [streamsByAddon, selectedAddon, t, onAddonSelected]);
+    }, [streamsByAddon, effectiveSelectedAddon, t, onAddonSelected]);
     const preferredAddonOptions = React.useMemo(() => {
         const options = [
             {
