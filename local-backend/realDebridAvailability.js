@@ -1,8 +1,10 @@
 const {
     CACHED_TTL_MS,
+    READY_TTL_MS,
     UNCACHED_TTL_MS,
     UNAVAILABLE_TTL_MS
 } = require('./realDebridAvailabilityStore');
+const { probeSourceHead } = require('./sourceHeadProbe');
 
 const INFO_HASH_PATTERN = /^[a-f0-9]{40}$/i;
 const VIDEO_FILE_PATTERN = /\.(mkv|mp4|avi|mov|m4v|ts|m2ts|webm|wmv)$/i;
@@ -17,6 +19,18 @@ const AVAILABILITY_POLL_MS = 150;
 const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 const normalizeFilename = (value) => typeof value === 'string' ? value.trim().replace(/\\/g, '/').toLowerCase() : '';
 const getBasename = (value) => normalizeFilename(value).split('/').pop() || '';
+const normalizeProbeUrl = (value) => {
+    if (typeof value !== 'string' || !value.trim()) {
+        return null;
+    }
+    const candidate = value.trim().slice(0, 8192);
+    try {
+        const parsed = new URL(candidate);
+        return ['http:', 'https:'].includes(parsed.protocol) ? parsed.toString() : null;
+    } catch {
+        return null;
+    }
+};
 
 const createSourceKey = ({ hash, fileIdx = null, filename = null, videoSize = null }) => [
     hash,
@@ -40,7 +54,8 @@ const normalizeSource = (source) => {
     }
     const filename = typeof source.filename === 'string' && source.filename.trim() ? source.filename.trim().slice(0, 1000) : null;
     const videoSize = Number.isSafeInteger(source.videoSize) && source.videoSize > 0 ? source.videoSize : null;
-    const normalized = { hash, fileIdx, filename, videoSize };
+    const probeUrl = normalizeProbeUrl(source?.probeUrl);
+    const normalized = { hash, fileIdx, filename, videoSize, probeUrl };
     return { ...normalized, key: createSourceKey(normalized) };
 };
 
@@ -149,6 +164,7 @@ class RealDebridAvailabilityService {
         cacheTtlMs = DEFAULT_CACHE_TTL_MS,
         now = () => Date.now(),
         sleep = wait,
+        headProbe = probeSourceHead,
         onWarning = () => undefined
     }) {
         this.client = client;
@@ -157,6 +173,7 @@ class RealDebridAvailabilityService {
         this.cacheTtlMs = cacheTtlMs;
         this.now = now;
         this.sleep = sleep;
+        this.headProbe = headProbe;
         this.onWarning = onWarning;
         this.cache = new Map();
         this.operationQueue = Promise.resolve();
@@ -170,6 +187,10 @@ class RealDebridAvailabilityService {
 
     check(accessToken, sources) {
         return this.enqueue(() => this.performCheck(accessToken, sources));
+    }
+
+    probe(accessToken, source) {
+        return this.enqueue(() => this.performProbe(accessToken, source));
     }
 
     getHistory(sources) {
@@ -224,11 +245,13 @@ class RealDebridAvailabilityService {
     }
 
     async performRecordObservation(source, status, observationSource = 'explicit_check') {
-        if (!['cached', 'uncached', 'unavailable'].includes(status)) {
+        if (!['cached', 'ready', 'uncached', 'unavailable'].includes(status)) {
             return null;
         }
         const verifiedAtMs = this.now();
-        const ttlMs = status === 'cached' ? CACHED_TTL_MS : status === 'uncached' ? UNCACHED_TTL_MS : UNAVAILABLE_TTL_MS;
+        const ttlMs = status === 'cached' ? CACHED_TTL_MS :
+            status === 'ready' ? READY_TTL_MS :
+                status === 'uncached' ? UNCACHED_TTL_MS : UNAVAILABLE_TTL_MS;
         const entry = {
             ...source,
             status,
@@ -288,6 +311,47 @@ class RealDebridAvailabilityService {
         };
     }
 
+    async performProbe(accessToken, sourceInput) {
+        const { valid, invalid } = normalizeSources([sourceInput]);
+        if (invalid.length > 0 || valid.length !== 1) {
+            return {
+                item: {
+                    key: null,
+                    hash: typeof sourceInput?.hash === 'string' ? sourceInput.hash : null,
+                    status: 'invalid',
+                    error: invalid[0]?.error || 'Resolver HEAD probe requires one valid source.'
+                },
+                pendingCleanup: await this.getPendingCleanupCount(),
+                cleanupWarning: null
+            };
+        }
+
+        const source = valid[0];
+        let result;
+        if (!source.probeUrl) {
+            result = { status: 'unknown', error: 'This Stremio source did not expose an HTTP download URL for the resolver HEAD fallback.' };
+        } else {
+            result = await this.probeUnresolvedSource(accessToken, source, {
+                status: 'unknown',
+                error: 'The exact Real-Debrid file cache check was inconclusive'
+            });
+        }
+        const item = { ...source, ...result, checkedAt: new Date(this.now()).toISOString(), fromCache: false };
+        if (['ready', 'uncached', 'unavailable'].includes(item.status)) {
+            this.cache.set(source.key, {
+                result: { status: item.status, targetFile: null },
+                expiresAt: this.now() + this.cacheTtlMs
+            });
+            await this.performRecordObservation(source, item.status, 'resolver_head');
+        }
+        const pendingCleanup = await this.getPendingCleanupCount();
+        return {
+            item,
+            pendingCleanup,
+            cleanupWarning: pendingCleanup > 0 ? 'Some temporary Real-Debrid torrents still need cleanup. The backend will keep retrying.' : null
+        };
+    }
+
     async snapshotMatchingIds(accessToken, hash) {
         const torrents = await this.client.getTorrents(accessToken);
         return (Array.isArray(torrents) ? torrents : [])
@@ -307,6 +371,38 @@ class RealDebridAvailabilityService {
             await this.cleanupStore.add({ id, hash, createdAt });
         }
         await this.performPendingCleanup(accessToken);
+    }
+
+    async probeUnresolvedSource(accessToken, source, cacheResult) {
+        let protectedIds;
+        try {
+            protectedIds = await this.snapshotMatchingIds(accessToken, source.hash);
+        } catch (error) {
+            return {
+                ...cacheResult,
+                error: `${cacheResult.error}. Resolver HEAD fallback was skipped because account entries could not be protected.`
+            };
+        }
+
+        let probeResult;
+        try {
+            probeResult = await this.headProbe(source.probeUrl);
+        } finally {
+            await this.reconcileNewTorrents(accessToken, source.hash, protectedIds).catch((error) => {
+                this.onWarning(`Could not reconcile Real-Debrid HEAD probe for ${source.hash}: ${error.message || 'unknown error'}`);
+            });
+        }
+
+        if (probeResult.status === 'unknown') {
+            return {
+                ...probeResult,
+                error: `${cacheResult.error}. ${probeResult.error || 'Resolver HEAD fallback was inconclusive.'}`
+            };
+        }
+        return {
+            ...probeResult,
+            cacheCheckError: cacheResult.error
+        };
     }
 
     async waitForFiles(accessToken, id) {

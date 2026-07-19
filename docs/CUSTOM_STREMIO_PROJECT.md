@@ -59,7 +59,7 @@ Notes:
 - `4. Add placeholder Download / Play Download buttons`: In progress (`Milestone 4A` implemented)
 - `5. Create local backend prototype`: In progress (`Milestone 5B` backend skeleton created)
 - `7. Add title-specific downloads panel`: In progress (`Milestone 7A` implemented)
-- `6. Implement real download manager`: In progress (`Milestones 6A-6K.3` real downloads, persistence, retry/resume, FIFO scheduling, queue controls, concurrency settings, hybrid provider availability, and provider-aware download safety implemented)
+- `6. Implement real download manager`: In progress (`Milestones 6A-6K.4` real downloads, persistence, retry/resume, FIFO scheduling, queue controls, concurrency settings, hybrid provider availability, provider-aware download safety, and resolver HEAD fallback implemented)
 - `8. Add global downloads page`: In progress (`Milestones 8A-8C.2` implemented)
 - `9. Add MPC-HC launch support`: In progress (`Milestones 9A-9C` panel playback, stream-row playback, and persistent in-app player selection implemented)
 - `10. Add watched/unwatched integration`: Not started
@@ -78,7 +78,17 @@ Notes:
 
 ## Next Recommended Step
 
-Manually validate Milestone 6K.3 with the provider-specific AllDebrid and Real-Debrid addons. Check one cached and one known-negative source on each provider, confirm only that provider's row is affected, verify negative rows cannot create a download record, and confirm a cached row on the other provider remains downloadable. After that checkpoint, design a separate provider-resolver action only if the app should automatically switch a failed row to a different cached provider/quality instead of requiring the user to choose the valid row.
+Restart the local backend, then manually validate Milestone 6K.4 on a Real-Debrid episode row that previously returned **Could not safely check**. Confirm the row visibly advances from provider checking to resolver-link checking, a valid link becomes **Ready to download**, known placeholder/451 links remain blocked, and the Real-Debrid account returns to its pre-check torrent list. After that checkpoint, design automatic provider/source switching only if the app should choose another cached quality instead of requiring the user to select it.
+
+## Milestone 6K.4 Findings: HEAD Resolver Fallback
+
+- Every non-positive exact-file Real-Debrid result now triggers a second, separately visible resolver stage for that row. This includes unknown or protected-error matches as well as potentially false-negative uncached/unavailable results. A verified cached result remains authoritative. A source without an HTTP(S) Stremio download URL receives that explicit reason without making a HEAD or provider-account request.
+- The fallback uses HTTP `HEAD` only, follows at most five redirects, applies five-second request timeouts, destroys responses after inspecting headers, and never attaches a body reader or writes media. This pass intentionally does not use a ranged GET.
+- Torrentio `downloading_vN.mp4` becomes not cached, `failed_*_vN.mp4` and HTTP `451` become unavailable, and a final successful response with credible media headers becomes the distinct **Ready to download** state. Ready proves current link usability, not Real-Debrid cache state. It supersedes an earlier negative exact-file result and is retained for only five minutes so resolver URLs are not trusted as durable cache evidence.
+- HTTP `403`, `405`, `501`, timeouts, redirect loops, malformed redirects, missing media headers, and other network ambiguity remain **Could not safely check** with the detailed reason preserved.
+- The provider account is snapshotted before HEAD resolution and reconciled afterward. Only newly created exact-hash torrent IDs are added to the durable cleanup journal and deleted; pre-existing and unrelated entries remain protected.
+- The UI keeps completed/total progress and changes the active row label from **Checking Real-Debrid...** to **Checking resolver link...** during the fallback. Completed rows update immediately, and the summary separates cached from link-ready results.
+- Validation: all 211 Jest tests pass, frontend ESLint passes, backend syntax checks pass, and the production build completes with only the repository's existing bundle-size warnings.
 
 ## Milestone 6K.3 Findings: Provider-Aware Download Safety
 

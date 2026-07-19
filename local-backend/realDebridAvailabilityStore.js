@@ -5,9 +5,10 @@ const { getDefaultDataDirectory } = require('./downloadRecordStore');
 const AVAILABILITY_STORE_VERSION = 1;
 const AVAILABILITY_FILE_NAME = 'realdebrid-availability-history.json';
 const CACHED_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const READY_TTL_MS = 5 * 60 * 1000;
 const UNCACHED_TTL_MS = 15 * 60 * 1000;
 const UNAVAILABLE_TTL_MS = 24 * 60 * 60 * 1000;
-const VALID_STATUSES = new Set(['cached', 'uncached', 'unavailable']);
+const VALID_STATUSES = new Set(['cached', 'ready', 'uncached', 'unavailable']);
 
 const getDefaultAvailabilityPath = () => path.join(getDefaultDataDirectory(), AVAILABILITY_FILE_NAME);
 
@@ -99,6 +100,7 @@ module.exports = {
     AVAILABILITY_STORE_VERSION,
     AVAILABILITY_FILE_NAME,
     CACHED_TTL_MS,
+    READY_TTL_MS,
     UNCACHED_TTL_MS,
     UNAVAILABLE_TTL_MS,
     getDefaultAvailabilityPath,

@@ -18,6 +18,7 @@ const {
     checkAllDebridAvailability,
     getAllDebridAvailabilityHistory,
     checkRealDebridAvailability,
+    probeRealDebridAvailability,
     getRealDebridAvailabilityHistory
 } = require('stremio/customStremio/localBackendClient');
 const {
@@ -34,7 +35,8 @@ const {
     getSourceReadinessSortRank,
     getRealDebridSourceDescriptor,
     getDebridProvider,
-    classifyProviderSourceReadiness
+    classifyProviderSourceReadiness,
+    shouldProbeRealDebridAvailability
 } = require('stremio/customStremio/debridSourceReadiness');
 
 const ALL_ADDONS_KEY = 'ALL';
@@ -417,24 +419,58 @@ const StreamsList = ({
         setRealDebridProgress({ completed: 0, total: filteredRealDebridSources.length, currentKey: null });
         setRealDebridError(null);
         try {
-            const checked = await checkRealDebridAvailability(filteredRealDebridSources, {
-                batchSize: 1,
-                onBatchStart: ({ batch, batchIndex, totalBatches }) => {
-                    setRealDebridProgress({ completed: batchIndex, total: totalBatches, currentKey: batch[0]?.key || null });
-                },
-                onBatchComplete: ({ batchIndex, totalBatches, result }) => {
-                    applyRealDebridAvailabilityItems(result?.items);
-                    setRealDebridProgress({ completed: batchIndex + 1, total: totalBatches, currentKey: null });
+            const checkedItems = [];
+            const cleanupWarnings = new Set();
+            let connected = true;
+            for (let index = 0; index < filteredRealDebridSources.length; index += 1) {
+                const source = filteredRealDebridSources[index];
+                setRealDebridProgress({
+                    completed: index,
+                    total: filteredRealDebridSources.length,
+                    currentKey: source.key,
+                    stage: 'cache'
+                });
+                const cacheResult = await checkRealDebridAvailability([source]);
+                connected = connected && cacheResult?.connected !== false;
+                if (cacheResult?.cleanupWarning) {
+                    cleanupWarnings.add(cacheResult.cleanupWarning);
                 }
-            });
-            setRealDebridConnected(checked?.connected === true);
-            applyRealDebridAvailabilityItems(checked?.items);
-            if (checked?.cleanupWarning) {
-                setRealDebridError(checked.cleanupWarning);
+                let item = Array.isArray(cacheResult?.items) ? cacheResult.items[0] : null;
+                applyRealDebridAvailabilityItems(item ? [item] : []);
+
+                if (shouldProbeRealDebridAvailability(item)) {
+                    setRealDebridProgress({
+                        completed: index,
+                        total: filteredRealDebridSources.length,
+                        currentKey: source.key,
+                        stage: 'resolver'
+                    });
+                    const probeResult = await probeRealDebridAvailability(source);
+                    connected = connected && probeResult?.connected !== false;
+                    if (probeResult?.cleanupWarning) {
+                        cleanupWarnings.add(probeResult.cleanupWarning);
+                    }
+                    item = probeResult?.item || item;
+                    applyRealDebridAvailabilityItems(item ? [item] : []);
+                }
+                if (item) {
+                    checkedItems.push(item);
+                }
+                setRealDebridProgress({
+                    completed: index + 1,
+                    total: filteredRealDebridSources.length,
+                    currentKey: null,
+                    stage: null
+                });
+            }
+
+            setRealDebridConnected(connected);
+            if (cleanupWarnings.size > 0) {
+                setRealDebridError(Array.from(cleanupWarnings).join(' '));
             } else {
-                const unresolvedCount = Array.isArray(checked?.items) ? checked.items.filter((item) =>
+                const unresolvedCount = checkedItems.filter((item) =>
                     ['error', 'invalid', 'unknown'].includes(item?.status) && item?.error
-                ).length : 0;
+                ).length;
                 if (unresolvedCount > 0) {
                     setRealDebridError(`${unresolvedCount} source${unresolvedCount === 1 ? '' : 's'} could not be safely matched or checked.`);
                 }
@@ -537,7 +573,7 @@ const StreamsList = ({
                 summary[status] += 1;
             }
             return summary;
-        }, { cached: 0, uncached: 0, unavailable: 0 });
+        }, { cached: 0, ready: 0, uncached: 0, unavailable: 0 });
     }, [filteredRealDebridSourcesKey, realDebridAvailabilityByKey]);
     const showDownloadStatus = React.useCallback((message, tone) => {
         const statusId = Date.now();
@@ -800,9 +836,9 @@ const StreamsList = ({
                                             </span>
                                         </Button>
                                         {
-                                            realDebridAvailabilitySummary.cached > 0 || realDebridAvailabilitySummary.uncached > 0 || realDebridAvailabilitySummary.unavailable > 0 ?
+                                            realDebridAvailabilitySummary.cached > 0 || realDebridAvailabilitySummary.ready > 0 || realDebridAvailabilitySummary.uncached > 0 || realDebridAvailabilitySummary.unavailable > 0 ?
                                                 <span className={styles['availability-summary']}>
-                                                    {`${realDebridAvailabilitySummary.cached} cached · ${realDebridAvailabilitySummary.uncached} not cached · ${realDebridAvailabilitySummary.unavailable} unavailable`}
+                                                    {`${realDebridAvailabilitySummary.cached} cached · ${realDebridAvailabilitySummary.ready} link ready · ${realDebridAvailabilitySummary.uncached} not cached · ${realDebridAvailabilitySummary.unavailable} unavailable`}
                                                 </span>
                                                 : null
                                         }
@@ -884,6 +920,9 @@ const StreamsList = ({
                                             : streamProvider === DEBRID_PROVIDER.REALDEBRID ?
                                                 Boolean(realDebridDescriptor && realDebridProgress?.currentKey === realDebridDescriptor.key)
                                                 : false;
+                                        const availabilityCheckStage = isAvailabilityChecking && streamProvider === DEBRID_PROVIDER.REALDEBRID ?
+                                            realDebridProgress?.stage || 'cache'
+                                            : 'cache';
                                         const availabilityCheckError = availability?.error || realDebridAvailability?.error || null;
                                         const baseDownloadPayload = buildDownloadPayload({
                                             metaId,
@@ -930,6 +969,7 @@ const StreamsList = ({
                                                 availabilityVerifiedAt={availability?.verifiedAt ?? null}
                                                 realDebridAvailability={realDebridAvailability}
                                                 isAvailabilityChecking={isAvailabilityChecking}
+                                                availabilityCheckStage={availabilityCheckStage}
                                                 availabilityCheckError={availabilityCheckError}
                                                 isDownloadPending={isDownloadPending}
                                                 onDownloadPlaceholder={onDownloadPlaceholder}

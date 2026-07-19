@@ -328,13 +328,14 @@ The frontend sends explicit checks one source per request so it can render live 
       "hash": "842783e3005495d5d1637f5364b59343c7844707",
       "fileIdx": 3,
       "filename": "Show.Name.S01E04.1080p.mkv",
-      "videoSize": 2147483648
+      "videoSize": 2147483648,
+      "probeUrl": "https://resolver.example/download"
     }
   ]
 }
 ```
 
-- Accepts at most 50 source descriptors and deduplicates their exact source keys. A valid 40-character hexadecimal `hash` is required; `fileIdx`, `filename`, and `videoSize` are optional matching evidence.
+- Accepts at most 50 source descriptors and deduplicates their exact source keys. A valid 40-character hexadecimal `hash` is required; `fileIdx`, `filename`, and `videoSize` are optional matching evidence. `probeUrl` is an optional HTTP(S) Stremio resolver URL and is not part of the persistent source key.
 - For each source, snapshots preexisting exact-hash torrent IDs, adds one temporary magnet, waits for its file metadata, and selects only a uniquely matched requested file. Ambiguous multi-file matches return `status: "unknown"` without selecting a file.
 - Only provider status `downloaded` with `progress: 100` returns `status: "cached"`. A persistent non-downloaded state or observed peer activity returns `status: "uncached"`. HTTP `451` / provider code `35` returns `status: "unavailable"` without cleanup when no ID was created.
 - Every newly returned ID is durably journaled before selection, deleted in `finally`, and verified absent. Existing same-hash IDs are protected. Lost add responses trigger exact-hash reconciliation against the pre-request snapshot.
@@ -343,12 +344,23 @@ The frontend sends explicit checks one source per request so it can render live 
 - This endpoint reports availability only. It never changes or replaces the Stremio URL used by `POST /downloads`.
 - The frontend splits larger explicit checks and history reads into requests of at most 50 exact source descriptors, preserving the route limit without treating an HTTP validation response as an offline backend.
 
+#### `POST /debrid/realdebrid/availability/head`
+
+Explicit fallback used after every non-positive normal Real-Debrid result, including unresolved matches, protected per-source errors, and potentially false-negative `uncached` or `unavailable` file matches. A verified `cached` result does not need the fallback. Accepts `{ "source": <source descriptor> }` and makes a bounded HTTP `HEAD` request to `source.probeUrl`.
+
+- Follows at most five redirects with a five-second timeout per request and never attaches a response-body reader or writes media to disk.
+- Known Torrentio `downloading_vN.mp4` redirects return `uncached`; `failed_*_vN.mp4` and HTTP `451` return `unavailable`.
+- A successful final response with credible video/content-disposition headers returns `ready`. This means the resolver link currently appears usable and can supersede an earlier negative exact-file result; it is deliberately not reported as provider-cache proof. The result is persisted for only five minutes because resolver URLs may expire.
+- HTTP `403`, `405`, `501`, timeouts, redirect loops, malformed redirects, missing media headers, and network failures remain `unknown` with a specific explanation. There is no ranged-GET fallback in this pass.
+- The backend snapshots exact-hash account IDs before probing, reconciles afterward, and journals/deletes only newly created IDs. Existing account entries remain protected and pending cleanup remains restart-safe.
+- The frontend calls this endpoint as a separate stage for every non-positive result so the active row can change from **Checking Real-Debrid...** to **Checking resolver link...**. If the source lacks an HTTP(S) resolver URL, the endpoint returns that explicit reason without making a HEAD or provider-account request.
+
 #### `POST /debrid/realdebrid/availability/history`
 
 Local-only history lookup. It accepts the same `sources` array, makes no Real-Debrid API request, and is safe to call while browsing.
 
-- Returns `cached`, `uncached`, `unavailable`, `unknown`, or `invalid` for each exact source key.
-- Cached observations expire after 30 days and history-loaded positives return `previouslyVerified: true`. Uncached observations expire after 15 minutes; unavailable observations expire after 24 hours.
+- Returns `cached`, `ready`, `uncached`, `unavailable`, `unknown`, or `invalid` for each exact source key.
+- Cached observations expire after 30 days and history-loaded cached positives return `previouslyVerified: true`. Resolver-ready observations expire after five minutes; uncached observations after 15 minutes; unavailable observations after 24 hours.
 - Later definitive download/check evidence replaces an older observation for the same exact source file. Failed-download observations clear the short in-memory check cache so an explicit recheck contacts the provider.
 - Authenticated testing proved the historical `GET /torrents/instantAvailability/{hash}` route returns provider error code `37`, `disabled_endpoint`; that diagnostic route and client method are intentionally absent.
 
@@ -361,7 +373,7 @@ Purpose:
 Request body:
 - The frontend `buildDownloadPayload(input)` output fields listed above.
 - `debridProvider` identifies which provider owns the submitted source URL. Conservative addon/stream metadata detection supplies `alldebrid`, `realdebrid`, or `unknown`.
-- `sourceReadiness` is provider-scoped and is one of `cached`, `previously_cached`, `requires_caching`, `unavailable`, or `unknown`. Persistent provider observations override addon label hints; an unchecked download-route label remains `unknown` and usable.
+- `sourceReadiness` is provider-scoped and is one of `cached`, `ready`, `previously_cached`, `requires_caching`, `unavailable`, or `unknown`. `ready` is an ephemeral successful resolver-HEAD observation, not a cached-provider claim. Persistent provider observations override addon label hints; an unchecked download-route label remains `unknown` and usable.
 - Before accepting a job, the backend also reads persistent history for the identified provider. AllDebrid uses the hash record; Real-Debrid uses the exact hash/file-index/filename/size key. A stored `uncached` or `unavailable` result is rejected even if the request claims `unknown`.
 - Provider results are not interchangeable: a failed Real-Debrid URL remains blocked even when an AllDebrid row for the same media is cached, and vice versa. The valid provider's own row remains downloadable.
 - Redirect inspection rejects both Torrentio `downloading_vN.mp4` and `failed_*_vN.mp4` families before requesting their bodies. The observed infringement placeholder is `https://torrentio.strem.fun/videos/failed_infringement_v2.mp4`.

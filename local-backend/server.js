@@ -941,6 +941,22 @@ app.post('/debrid/realdebrid/availability', async (request, response) => {
     }
 });
 
+app.post('/debrid/realdebrid/availability/head', async (request, response) => {
+    try {
+        const accessToken = await getFreshRealDebridAccessToken();
+        const result = await realDebridAvailability.probe(accessToken, request.body?.source);
+        realDebridPendingCleanupCount = result.pendingCleanup;
+        response.json({
+            provider: 'realdebrid',
+            connected: true,
+            ...result
+        });
+    } catch (error) {
+        realDebridPendingCleanupCount = await realDebridAvailability.getPendingCleanupCount().catch(() => realDebridPendingCleanupCount);
+        sendRealDebridError(response, error, 'Could not probe the Real-Debrid resolver link');
+    }
+});
+
 app.post('/debrid/realdebrid/availability/history', async (request, response) => {
     try {
         const result = await realDebridAvailability.getHistory(request.body?.sources);

@@ -11,6 +11,7 @@ const {
     checkRealDebridDeviceAuth,
     disconnectRealDebrid,
     checkRealDebridAvailability,
+    probeRealDebridAvailability,
     getRealDebridAvailabilityHistory,
     selectPlayerExecutable,
     moveDownloadInQueue
@@ -171,6 +172,23 @@ describe('localBackendClient settings', () => {
         expect(JSON.parse(global.fetch.mock.calls[5][1].body).sources).toHaveLength(1);
         expect(JSON.parse(global.fetch.mock.calls[6][1].body).sources).toHaveLength(50);
         expect(JSON.parse(global.fetch.mock.calls[7][1].body).sources).toHaveLength(1);
+    });
+
+    test('probes one unresolved Real-Debrid resolver source through the backend', async () => {
+        const source = {
+            hash: '842783e3005495d5d1637f5364b59343c7844707',
+            fileIdx: null,
+            probeUrl: 'https://resolver.example/download'
+        };
+        const responseBody = { provider: 'realdebrid', connected: true, item: { ...source, status: 'ready' } };
+        global.fetch.mockResolvedValue(createJsonResponse(responseBody));
+
+        await expect(probeRealDebridAvailability(source)).resolves.toEqual(responseBody);
+        expect(global.fetch).toHaveBeenCalledWith(`${LOCAL_BACKEND_BASE_URL}/debrid/realdebrid/availability/head`, {
+            method: 'POST',
+            body: JSON.stringify({ source }),
+            headers: { 'Content-Type': 'application/json' }
+        });
     });
 
     test('reports explicit availability progress one source at a time when requested', async () => {

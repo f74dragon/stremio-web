@@ -124,6 +124,107 @@ describe('RealDebridAvailabilityService', () => {
         expect(client.deleteTorrent).toHaveBeenCalledWith('token', 'ambiguous-id');
     });
 
+    test('uses a HEAD probe after an ambiguous file match and briefly persists a ready link', async () => {
+        const client = {
+            getTorrents: jest.fn().mockResolvedValue([]),
+            addMagnet: jest.fn().mockResolvedValue({ id: 'ambiguous-id' }),
+            getTorrentInfo: jest.fn().mockResolvedValue({ status: 'waiting_files_selection', files }),
+            selectFiles: jest.fn(),
+            deleteTorrent: jest.fn().mockResolvedValue(null)
+        };
+        const headProbe = jest.fn().mockResolvedValue({
+            status: 'ready',
+            verification: 'resolver_head',
+            contentType: 'video/x-matroska',
+            contentLength: 4000
+        });
+        const probeUrl = 'https://resolver.example/download';
+        const unresolvedSource = source(HASH_CACHED, {
+            fileIdx: null,
+            filename: null,
+            videoSize: null,
+            probeUrl
+        });
+        const service = new RealDebridAvailabilityService({ client, cleanupStore, historyStore, sleep: jest.fn(), headProbe });
+
+        const cacheResult = await service.check('token', [unresolvedSource]);
+        const result = await service.probe('token', unresolvedSource);
+
+        expect(cacheResult.items[0]).toMatchObject({ status: 'unknown' });
+        expect(result.item).toMatchObject({
+            status: 'ready',
+            verification: 'resolver_head',
+            cacheCheckError: 'The exact Real-Debrid file cache check was inconclusive'
+        });
+        expect(headProbe).toHaveBeenCalledWith(probeUrl);
+        expect(client.selectFiles).not.toHaveBeenCalled();
+        expect(client.deleteTorrent).toHaveBeenCalledWith('token', 'ambiguous-id');
+        await expect(service.getHistory([unresolvedSource])).resolves.toMatchObject({
+            items: [expect.objectContaining({ status: 'ready', source: 'resolver_head' })]
+        });
+    });
+
+    test.each(['uncached', 'unavailable'])(
+        'allows a valid resolver HEAD result to supersede an exact-check %s result',
+        async (negativeStatus) => {
+            const client = { getTorrents: jest.fn().mockResolvedValue([]) };
+            const headProbe = jest.fn().mockResolvedValue({
+                status: 'ready',
+                verification: 'resolver_head',
+                httpStatus: 200,
+                contentType: 'application/force-download',
+                contentLength: 24464375258
+            });
+            const checkedSource = normalizeSources([source(HASH_UNCACHED, {
+                probeUrl: 'https://resolver.example/download'
+            })]).valid[0];
+            const service = new RealDebridAvailabilityService({ client, cleanupStore, historyStore, sleep: jest.fn(), headProbe });
+            await service.recordObservation(checkedSource, negativeStatus, 'explicit_check');
+
+            const result = await service.probe('token', checkedSource);
+
+            expect(result.item).toMatchObject({
+                status: 'ready',
+                verification: 'resolver_head',
+                contentLength: 24464375258
+            });
+            await expect(service.getHistory([checkedSource])).resolves.toMatchObject({
+                items: [expect.objectContaining({ status: 'ready', source: 'resolver_head' })]
+            });
+        }
+    );
+
+    test('persists a not-ready placeholder found by the HEAD fallback', async () => {
+        const client = {
+            getTorrents: jest.fn().mockResolvedValue([]),
+            addMagnet: jest.fn().mockResolvedValue({ id: 'ambiguous-id' }),
+            getTorrentInfo: jest.fn().mockResolvedValue({ status: 'waiting_files_selection', files }),
+            selectFiles: jest.fn(),
+            deleteTorrent: jest.fn().mockResolvedValue(null)
+        };
+        const headProbe = jest.fn().mockResolvedValue({
+            status: 'uncached',
+            verification: 'resolver_head',
+            errorCode: 'SOURCE_NOT_READY'
+        });
+        const unresolvedSource = source(HASH_UNCACHED, {
+            fileIdx: null,
+            filename: null,
+            videoSize: null,
+            probeUrl: 'https://resolver.example/download'
+        });
+        const service = new RealDebridAvailabilityService({ client, cleanupStore, historyStore, sleep: jest.fn(), headProbe });
+
+        const cacheResult = await service.check('token', [unresolvedSource]);
+        const result = await service.probe('token', unresolvedSource);
+
+        expect(cacheResult.items[0]).toMatchObject({ status: 'unknown' });
+        expect(result.item).toMatchObject({ status: 'uncached', verification: 'resolver_head' });
+        await expect(service.getHistory([unresolvedSource])).resolves.toMatchObject({
+            items: [expect.objectContaining({ status: 'uncached', source: 'resolver_head' })]
+        });
+    });
+
     test('treats HTTP 451 as unavailable without creating a cleanup record', async () => {
         const client = {
             getTorrents: jest.fn().mockResolvedValue([]),

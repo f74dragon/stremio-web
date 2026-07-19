@@ -5,11 +5,13 @@ const {
     SOURCE_READINESS,
     extractInfoHashFromValue,
     getStreamInfoHash,
+    getStreamProbeUrl,
     getRealDebridSourceDescriptor,
     getRealDebridAvailabilitySortRank,
     getDebridProvider,
     classifyDebridSourceReadiness,
     classifyProviderSourceReadiness,
+    shouldProbeRealDebridAvailability,
     isSourceReadinessBlocked,
     getSourceReadinessSortRank
 } = require('../src/customStremio/debridSourceReadiness');
@@ -66,10 +68,23 @@ describe('debrid source readiness', () => {
         expect(classifyProviderSourceReadiness({ addonName: 'Torrentio RD' }, {
             realDebridAvailability: { status: 'unavailable' }
         })).toBe(SOURCE_READINESS.UNAVAILABLE);
+        expect(classifyProviderSourceReadiness({ addonName: 'Torrentio RD' }, {
+            realDebridAvailability: { status: 'ready' }
+        })).toBe(SOURCE_READINESS.READY);
         expect(classifyProviderSourceReadiness({ name: '[RD+] Torrentio 1080p' })).toBe(SOURCE_READINESS.UNKNOWN);
         expect(isSourceReadinessBlocked(SOURCE_READINESS.REQUIRES_CACHING)).toBe(true);
         expect(isSourceReadinessBlocked(SOURCE_READINESS.UNAVAILABLE)).toBe(true);
         expect(isSourceReadinessBlocked(SOURCE_READINESS.CACHED)).toBe(false);
+    });
+
+    test('uses resolver fallback for every non-positive Real-Debrid result', () => {
+        expect(shouldProbeRealDebridAvailability({ status: 'unknown', error: 'ambiguous_files' })).toBe(true);
+        expect(shouldProbeRealDebridAvailability({ status: 'error', error: 'pre-existing torrent protected' })).toBe(true);
+        expect(shouldProbeRealDebridAvailability({ status: 'uncached' })).toBe(true);
+        expect(shouldProbeRealDebridAvailability({ status: 'unavailable' })).toBe(true);
+        expect(shouldProbeRealDebridAvailability({ status: 'invalid', error: 'bad source' })).toBe(false);
+        expect(shouldProbeRealDebridAvailability({ status: 'cached' })).toBe(false);
+        expect(shouldProbeRealDebridAvailability({ status: 'ready' })).toBe(false);
     });
 
     test('builds exact Real-Debrid source descriptors for per-file history', () => {
@@ -83,20 +98,28 @@ describe('debrid source readiness', () => {
             fileIdx: 3,
             filename: 'Show.S01E04.mkv',
             videoSize: 1234,
+            probeUrl: null,
             key: `${hash}::3::show.s01e04.mkv::1234`
         });
+        expect(getRealDebridSourceDescriptor({
+            infoHash: hash,
+            deepLinks: { externalPlayer: { download: 'https://resolver.example/download' } }
+        })).toMatchObject({ probeUrl: 'https://resolver.example/download' });
+        expect(getStreamProbeUrl({ url: 'magnet:?xt=urn:btih:test' })).toBeNull();
     });
 
     test('sorts exact Real-Debrid cached results before unknown and unavailable results', () => {
         expect([
             { status: 'unavailable' },
             null,
+            { status: 'ready' },
             { status: 'cached', previouslyVerified: true },
             { status: 'uncached' },
             { status: 'cached' }
         ].sort((left, right) => getRealDebridAvailabilitySortRank(left) - getRealDebridAvailabilitySortRank(right)))
             .toEqual([
                 { status: 'cached' },
+                { status: 'ready' },
                 { status: 'cached', previouslyVerified: true },
                 null,
                 { status: 'uncached' },
@@ -116,10 +139,12 @@ describe('debrid source readiness', () => {
             SOURCE_READINESS.REQUIRES_CACHING,
             SOURCE_READINESS.UNAVAILABLE,
             SOURCE_READINESS.UNKNOWN,
+            SOURCE_READINESS.READY,
             SOURCE_READINESS.PREVIOUSLY_CACHED,
             SOURCE_READINESS.CACHED
         ].sort((left, right) => getSourceReadinessSortRank(left) - getSourceReadinessSortRank(right))).toEqual([
             SOURCE_READINESS.CACHED,
+            SOURCE_READINESS.READY,
             SOURCE_READINESS.PREVIOUSLY_CACHED,
             SOURCE_READINESS.UNKNOWN,
             SOURCE_READINESS.REQUIRES_CACHING,

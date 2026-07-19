@@ -1,5 +1,6 @@
 const SOURCE_READINESS = Object.freeze({
     CACHED: 'cached',
+    READY: 'ready',
     PREVIOUSLY_CACHED: 'previously_cached',
     REQUIRES_CACHING: 'requires_caching',
     UNAVAILABLE: 'unavailable',
@@ -77,6 +78,31 @@ const getStreamInfoHash = (stream) => {
     return null;
 };
 
+const getStreamProbeUrl = (stream) => {
+    const candidates = [
+        stream?.deepLinks?.externalPlayer?.download,
+        stream?.downloadUrl,
+        stream?.deepLinks?.externalPlayer?.streaming,
+        stream?.streamingUrl,
+        stream?.url,
+        stream?.externalUrl
+    ];
+    for (const candidate of candidates) {
+        if (typeof candidate !== 'string' || !candidate.trim()) {
+            continue;
+        }
+        try {
+            const parsed = new URL(candidate.trim());
+            if (['http:', 'https:'].includes(parsed.protocol)) {
+                return parsed.toString();
+            }
+        } catch {
+            // Ignore malformed and non-HTTP resolver candidates.
+        }
+    }
+    return null;
+};
+
 const normalizeAvailabilityFilename = (value) => typeof value === 'string' ? value.trim().replace(/\\/g, '/').toLowerCase() : '';
 
 const createRealDebridSourceKey = ({ hash, fileIdx = null, filename = null, videoSize = null }) => [
@@ -97,7 +123,8 @@ const getRealDebridSourceDescriptor = (stream) => {
         filename: stream?.behaviorHints?.filename || stream?.deepLinks?.externalPlayer?.fileName || null,
         videoSize: Number.isSafeInteger(stream?.behaviorHints?.videoSize) && stream.behaviorHints.videoSize > 0 ?
             stream.behaviorHints.videoSize
-            : null
+            : null,
+        probeUrl: getStreamProbeUrl(stream)
     };
     return { ...descriptor, key: createRealDebridSourceKey(descriptor) };
 };
@@ -105,6 +132,9 @@ const getRealDebridSourceDescriptor = (stream) => {
 const getRealDebridAvailabilitySortRank = (availability) => {
     if (availability?.status === 'cached') {
         return availability.previouslyVerified === true ? 1 : 0;
+    }
+    if (availability?.status === 'ready') {
+        return 1;
     }
     if (availability?.status === 'uncached') {
         return 3;
@@ -182,11 +212,21 @@ const classifyRealDebridSourceReadiness = (stream, availability = null) => {
     if (availability?.status === 'uncached') {
         return SOURCE_READINESS.REQUIRES_CACHING;
     }
+    if (availability?.status === 'ready') {
+        return SOURCE_READINESS.READY;
+    }
     if (availability?.status === 'unavailable') {
         return SOURCE_READINESS.UNAVAILABLE;
     }
     return SOURCE_READINESS.UNKNOWN;
 };
+
+const shouldProbeRealDebridAvailability = (availability) => [
+    'unknown',
+    'error',
+    'uncached',
+    'unavailable'
+].includes(availability?.status);
 
 const classifyProviderSourceReadiness = (stream, { allDebridAvailability = null, realDebridAvailability = null } = {}) => {
     switch (getDebridProvider(stream)) {
@@ -208,6 +248,8 @@ const getSourceReadinessSortRank = (readiness) => {
     switch (readiness) {
         case SOURCE_READINESS.CACHED:
             return 0;
+        case SOURCE_READINESS.READY:
+            return 1;
         case SOURCE_READINESS.PREVIOUSLY_CACHED:
             return 1;
         case SOURCE_READINESS.REQUIRES_CACHING:
@@ -225,12 +267,14 @@ module.exports = {
     normalizeInfoHash,
     extractInfoHashFromValue,
     getStreamInfoHash,
+    getStreamProbeUrl,
     createRealDebridSourceKey,
     getRealDebridSourceDescriptor,
     getRealDebridAvailabilitySortRank,
     getDebridProvider,
     classifyDebridSourceReadiness,
     classifyRealDebridSourceReadiness,
+    shouldProbeRealDebridAvailability,
     classifyProviderSourceReadiness,
     isSourceReadinessBlocked,
     getSourceReadinessSortRank

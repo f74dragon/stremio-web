@@ -142,6 +142,16 @@ const checkRealDebridAvailability = async (sources, options = {}) => {
     );
 };
 
+const probeRealDebridAvailability = async (source) => {
+    if (!source || typeof source !== 'object' || Array.isArray(source)) {
+        throw new Error('probeRealDebridAvailability requires a source object');
+    }
+    return requestJson('/debrid/realdebrid/availability/head', {
+        method: 'POST',
+        body: { source }
+    });
+};
+
 const getRealDebridAvailabilityHistory = async (sources) => {
     if (!Array.isArray(sources)) {
         throw new Error('getRealDebridAvailabilityHistory requires a sources array');
@@ -272,6 +282,7 @@ module.exports = {
     checkRealDebridDeviceAuth,
     disconnectRealDebrid,
     checkRealDebridAvailability,
+    probeRealDebridAvailability,
     getRealDebridAvailabilityHistory,
     selectPlayerExecutable,
     checkAllDebridAvailability,
