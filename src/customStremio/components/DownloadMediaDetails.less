@@ -50,7 +50,9 @@
 }
 
 .back-button,
-.stremio-link {
+.stremio-link,
+.selection-button,
+.selection-button-active {
     display: flex;
     align-items: center;
     gap: 0.4rem;
@@ -71,6 +73,11 @@
         border-color: rgba(189, 178, 255, 0.5);
         background-color: rgba(119, 91, 255, 0.2);
     }
+}
+
+.selection-button-active {
+    border-color: rgba(204, 193, 255, 0.62);
+    background-color: rgba(105, 80, 233, 0.4);
 }
 
 .back-symbol {
@@ -318,6 +325,12 @@
     margin-bottom: 1rem;
 }
 
+.section-heading-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
 .section-title {
     margin: 0.25rem 0 0;
     font-size: 1.5rem;
@@ -341,6 +354,77 @@
     padding-bottom: 0.2rem;
     overflow-x: auto;
     scrollbar-width: thin;
+}
+
+.season-selection-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin: -0.2rem 0 1rem;
+    padding: 0.75rem 0.9rem;
+    border: 1px solid rgba(177, 162, 255, 0.2);
+    border-radius: var(--border-radius);
+    background-color: rgba(105, 80, 233, 0.08);
+
+    > span {
+        font-size: 0.72rem;
+        opacity: 0.58;
+    }
+}
+
+.scope-selection-button,
+.record-selection-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0;
+    border: 0;
+    color: inherit;
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.76rem;
+    font-weight: 650;
+    background: transparent;
+
+    &:hover .selection-check,
+    &:focus-visible .selection-check {
+        border-color: rgba(215, 206, 255, 0.9);
+        background-color: rgba(105, 80, 233, 0.22);
+    }
+
+    &:disabled {
+        cursor: not-allowed;
+        opacity: 0.42;
+    }
+}
+
+.record-selection-button {
+    align-self: center;
+    justify-content: center;
+    width: 2.5rem;
+    min-height: 2.5rem;
+}
+
+.selection-check,
+.selection-check-selected {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.35rem;
+    height: 1.35rem;
+    flex: none;
+    border: 2px solid rgba(255, 255, 255, 0.45);
+    border-radius: 0.42rem;
+    color: white;
+    font-size: 0.78rem;
+    line-height: 1;
+    background-color: rgba(14, 12, 28, 0.62);
+}
+
+.selection-check-selected {
+    border-color: rgba(221, 214, 255, 0.98);
+    background-color: rgba(105, 80, 233, 0.96);
 }
 
 .season-button,
@@ -393,6 +477,55 @@
     display: grid;
     grid-template-columns: minmax(12rem, 18rem) minmax(0, 1fr);
     gap: 0.8rem;
+}
+
+.record-row-selecting {
+    display: grid;
+    grid-template-columns: 2.5rem minmax(12rem, 18rem) minmax(0, 1fr);
+    gap: 0.8rem;
+}
+
+.episode-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.7rem;
+    padding: 0.9rem;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: calc(var(--border-radius) * 1.15);
+    background-color: rgba(255, 255, 255, 0.025);
+}
+
+.episode-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+
+    > div {
+        display: flex;
+        align-items: baseline;
+        min-width: 0;
+        gap: 0.65rem;
+
+        > strong {
+            flex: none;
+            font-size: 0.82rem;
+        }
+
+        > span {
+            overflow: hidden;
+            font-size: 0.76rem;
+            opacity: 0.62;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+    }
+}
+
+.episode-records {
+    display: flex;
+    flex-direction: column;
+    gap: 0.7rem;
 }
 
 .thumbnail-container {
@@ -462,6 +595,10 @@
     .record-row {
         grid-template-columns: minmax(10rem, 13rem) minmax(0, 1fr);
     }
+
+    .record-row-selecting {
+        grid-template-columns: 2.5rem minmax(10rem, 13rem) minmax(0, 1fr);
+    }
 }
 
 @media only screen and (max-width: @minimum) {
@@ -500,5 +637,19 @@
 
     .record-row {
         grid-template-columns: minmax(0, 1fr);
+    }
+
+    .record-row-selecting {
+        grid-template-columns: 2.5rem minmax(0, 1fr);
+
+        > :last-child {
+            grid-column: 1 / -1;
+        }
+    }
+
+    .season-selection-bar,
+    .episode-heading {
+        align-items: flex-start;
+        flex-direction: column;
     }
 }

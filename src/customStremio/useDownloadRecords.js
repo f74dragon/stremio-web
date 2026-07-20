@@ -12,6 +12,7 @@ const {
     openDownloadLocation
 } = require('./localBackendClient');
 const { ACTIVE_DOWNLOAD_STATUSES, POLLING_DOWNLOAD_STATUSES } = require('./downloadRecordPresentation');
+const { executeDownloadMediaBatch } = require('./downloadBatchDeletion');
 
 const DEFAULT_POLL_INTERVAL = 1500;
 
@@ -268,6 +269,46 @@ const useDownloadRecords = ({ metaId, enabled = true, pollInterval = DEFAULT_POL
         }
     }, [clearActionError, load, setAction, updateItems]);
 
+    const removeMediaBatch = React.useCallback(async (recordIds, options = {}) => {
+        const requestedIds = Array.from(new Set((recordIds || []).map((id) => String(id)).filter(Boolean)));
+        if (requestedIds.length === 0) {
+            return { requested: 0, successes: [], failures: [] };
+        }
+
+        const recordsSnapshot = recordsRef.current;
+        requestedIds.forEach((recordId) => {
+            clearActionError(recordId);
+            setAction(recordId, 'deleteMedia');
+        });
+        let result;
+        try {
+            result = await executeDownloadMediaBatch({
+                records: recordsSnapshot,
+                recordIds: requestedIds,
+                deleteMedia: deleteDownloadMedia,
+                removeRecord: deleteDownload,
+                cancelDownload,
+                onStep: ({ outcome, completed, total }) => {
+                    if (outcome.ok) {
+                        clearActionError(outcome.id);
+                        updateItems((currentItems) => currentItems.filter((record) => record?.id !== outcome.id));
+                    } else {
+                        setActionErrors((currentErrors) => ({
+                            ...currentErrors,
+                            [outcome.id]: outcome.error
+                        }));
+                    }
+                    setAction(outcome.id, null);
+                    options?.onProgress?.({ outcome, completed, total });
+                }
+            });
+        } finally {
+            requestedIds.forEach((recordId) => setAction(recordId, null));
+        }
+        await load({ silent: true });
+        return result;
+    }, [clearActionError, load, setAction, updateItems]);
+
     const retry = React.useCallback(async (recordId) => {
         if (!recordId || actionsRef.current[recordId]) {
             return;
@@ -377,7 +418,8 @@ const useDownloadRecords = ({ metaId, enabled = true, pollInterval = DEFAULT_POL
         play,
         openLocation,
         remove,
-        removeMedia
+        removeMedia,
+        removeMediaBatch
     };
 };
 

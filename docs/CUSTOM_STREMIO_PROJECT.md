@@ -58,7 +58,7 @@ Notes:
 - `3. Preferred addon stream sorting/filtering`: Completed for the planned scope (`Milestones 3A-3A.1`; preferred ordering and persistent original Stremio addon-filter state implemented)
 - `4. Add placeholder Download / Play Download buttons`: Completed and superseded by the real record-aware Download and Play controls
 - `5. Create local backend prototype`: Completed and superseded by the persistent local download backend
-- `6. Implement real download manager`: In progress (`Milestones 6A-6L` real downloads, persistence, retry/resume, FIFO scheduling, queue controls, concurrency settings, hybrid provider availability, provider-aware download safety, resolver HEAD fallback, and safe local-media deletion implemented)
+- `6. Implement real download manager`: In progress (`Milestones 6A-6M` real downloads, persistence, retry/resume, FIFO scheduling, queue controls, concurrency settings, hybrid provider availability, provider-aware download safety, resolver HEAD fallback, safe local-media deletion, and bulk selection/deletion implemented)
 - `7. Add title-specific downloads panel`: Completed for the planned panel scope (`Milestones 7A-7B`; later shared file-management actions remain tracked under the download manager)
 - `8. Add global downloads page`: In progress (`Milestones 8A-8C.2` implemented)
 - `9. Add MPC-HC launch support`: Completed for the planned scope (`Milestones 9A-9C`; panel playback, stream-row playback, and persistent in-app player selection implemented)
@@ -78,14 +78,14 @@ Notes:
 
 ## Next Recommended Step
 
-Implement **Milestone 6M: bulk selection and safe batch deletion** as the next focused pass. Add an explicit selection mode to the Downloads library with per-title and Select all controls; movie details should select individual source records, while series details should support individual episodes, whole seasons, Select all in season, and Select all episodes. Show one confirmation summary before deletion and report partial failures without hiding records that were not safely removed.
+Implement **Milestone 6N: permanent local download history** as the next focused pass. Create a separate append-only history store for download attempts and lifecycle outcomes so deleting active records or local media never erases the historical event. Define privacy-conscious retained fields and migration/backfill behavior before adding the browsing UI.
 
-Do not combine multi-episode downloading, watched progress, filesystem discovery, automatic provider/source switching, or Windows packaging into the bulk-delete pass.
+Do not combine multi-episode downloading, watched progress, filesystem discovery, automatic provider/source switching, or Windows packaging into the history pass.
 
 ## Remaining Tracked Work
 
 - Multi-episode/season batch download planning, explicit source selection, and queue submission. Do not silently choose among multiple qualities or providers without a documented selection rule.
-- Bulk deletion selection is planned for the next pass: title selection and Select all on the library, per-source selection for movies, and episode/season hierarchy controls for series.
+- Permanent local download history: keep a separate append-only history of every past download and its final outcome. Removing an active-library record or deleting its local media must never erase the history entry. History should retain useful title/episode, source/addon, size, timestamps, outcome, and deletion-event metadata without retaining sensitive credentials or unnecessary expiring download URLs. This is separate from active download records, filesystem discovery, provider cache history, and future watch history.
 - Watched/unwatched and playback-progress integration for real **Continue Watching**, resume position, next-episode behavior, and show-card progress.
 - Filesystem discovery for media that exists without a current record, plus metadata/artwork backfill for legacy persisted records.
 - Availability-history management UI, including an explicit clear-history action; current cached history remains intentionally retained by default.
@@ -94,6 +94,17 @@ Do not combine multi-episode downloading, watched progress, filesystem discovery
 - Windows application packaging after the local backend, download lifecycle, and playback integration are stable.
 
 The milestone findings below are chronological implementation records. Older sections may describe a feature as deferred or unavailable at that historical point even when a later milestone subsequently implemented it; the **Current Status**, **Next Recommended Step**, and **Remaining Tracked Work** sections above are authoritative for present planning.
+
+## Milestone 6M Findings: Bulk Selection and Safe Batch Deletion
+
+- The Downloads library now has an explicit selection mode with per-title selection, **Select all**, selected-count feedback, and one destructive confirmation before any files are removed.
+- Movie details support selecting individual downloaded sources or all versions. Series details group source records by episode and support individual episodes, the current season, or all downloaded episodes across seasons.
+- Queued and downloading records are excluded from destructive selection. Paused, completed, failed, and canceled records remain eligible so completed media and retained partial data can be intentionally cleaned up.
+- Batch work is deliberately sequential and reuses the existing per-record deletion safety boundary. The frontend does not introduce a broad filesystem or backend batch-delete primitive.
+- Shared-file duplicate records are resolved only when every referenced record is part of the same confirmed selection. Duplicate metadata is removed first, allowing the final verified owner to delete the artifact; any unselected owner blocks that shortcut.
+- The UI shows completed/total deletion progress. Successful records disappear as they finish, while partial failures stay visible and selected with the backend safety reason so they can be reviewed or retried.
+- The global library, movie-source, episode, and season controls share the same eligibility and selection helpers, with focused coverage for grouping, sequential execution, duplicate resolution, paused-record cancellation, and unsafe shared-reference refusal.
+- Validation: all 249 Jest tests pass across 30 suites, full frontend ESLint passes, the translation-string scan passes, `git diff --check` passes, and the production build completes with only the repository's existing bundle-size warnings.
 
 ## Milestone 6L Findings: Safe Local-Media Deletion
 

@@ -126,7 +126,8 @@ const DownloadRecordCard = ({
     onPlay,
     onOpenLocation,
     onRemove,
-    onDeleteMedia
+    onDeleteMedia,
+    selectionMode = false
 }) => {
     const { t } = useTranslation();
     const recordId = record?.id;
@@ -157,7 +158,7 @@ const DownloadRecordCard = ({
 
     React.useEffect(() => {
         setConfirmingMediaDelete(false);
-    }, [recordId]);
+    }, [recordId, selectionMode]);
 
     return (
         <article
@@ -232,7 +233,7 @@ const DownloadRecordCard = ({
             }
             {actionError ? <div className={styles['record-action-error']} role={'alert'}>{actionError}</div> : null}
             {
-                confirmingMediaDelete && canDeleteMedia ?
+                !selectionMode && confirmingMediaDelete && canDeleteMedia ?
                     <div className={styles['delete-confirmation']} role={'alertdialog'} aria-label={t('CUSTOM_DOWNLOAD_DELETE_CONFIRM_TITLE', { defaultValue: 'Confirm local download deletion' })}>
                         <strong>
                             {isPartialMedia ?
@@ -274,7 +275,7 @@ const DownloadRecordCard = ({
                     : null
             }
             {
-                canPause || canResume || canCancel || canRetry || canPlay || canOpenLocation || canRemove || canDeleteMedia ?
+                !selectionMode && (canPause || canResume || canCancel || canRetry || canPlay || canOpenLocation || canRemove || canDeleteMedia) ?
                     <div className={styles['record-actions']}>
                         {
                             canOpenLocation ?
@@ -468,7 +469,8 @@ DownloadRecordCard.propTypes = {
     onPlay: PropTypes.func,
     onOpenLocation: PropTypes.func,
     onRemove: PropTypes.func,
-    onDeleteMedia: PropTypes.func
+    onDeleteMedia: PropTypes.func,
+    selectionMode: PropTypes.bool
 };
 
 module.exports = DownloadRecordCard;

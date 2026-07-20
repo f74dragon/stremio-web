@@ -12,7 +12,14 @@ const DownloadMediaGroup = ({
     actionStates,
     actionErrors,
     onPlay,
-    onOpen
+    onOpen,
+    selectionMode = false,
+    selected = false,
+    partiallySelected = false,
+    selectionDisabled = false,
+    selectableCount = 0,
+    selectedCount = 0,
+    onToggleSelection
 }) => {
     const { t } = useTranslation();
     const isMovie = group.type === 'movie';
@@ -39,8 +46,8 @@ const DownloadMediaGroup = ({
     };
 
     return (
-        <article className={styles['media-card']}>
-            <div className={styles['poster-container']}>
+        <article className={classnames(styles['media-card'], selected && styles['media-card-selected'])}>
+            <div className={classnames(styles['poster-container'], selected && styles['poster-container-selected'])}>
                 {
                     groupArtwork ?
                         <Image className={styles['poster']} src={groupArtwork} alt={group.title} />
@@ -51,13 +58,34 @@ const DownloadMediaGroup = ({
                 <button
                     type={'button'}
                     className={styles['poster-details-hit-area']}
-                    title={t('CUSTOM_DOWNLOADS_OPEN_TITLE', { defaultValue: 'Open downloads for {{title}}', title: group.title })}
-                    aria-label={t('CUSTOM_DOWNLOADS_OPEN_TITLE', { defaultValue: 'Open downloads for {{title}}', title: group.title })}
-                    onClick={() => onOpen?.(group.key)}
+                    title={selectionMode ?
+                        t('CUSTOM_DOWNLOADS_SELECT_TITLE', { defaultValue: 'Select {{title}} for deletion', title: group.title })
+                        : t('CUSTOM_DOWNLOADS_OPEN_TITLE', { defaultValue: 'Open downloads for {{title}}', title: group.title })}
+                    aria-label={selectionMode ?
+                        t('CUSTOM_DOWNLOADS_SELECT_TITLE', { defaultValue: 'Select {{title}} for deletion', title: group.title })
+                        : t('CUSTOM_DOWNLOADS_OPEN_TITLE', { defaultValue: 'Open downloads for {{title}}', title: group.title })}
+                    aria-pressed={selectionMode ? selected : undefined}
+                    disabled={selectionMode && selectionDisabled}
+                    onClick={() => selectionMode ? onToggleSelection?.(group.key) : onOpen?.(group.key)}
                 />
-                {group.attentionCount > 0 ? <span className={styles['attention-indicator']} title={t('CUSTOM_DOWNLOADS_ATTENTION_SHORT', { defaultValue: 'Needs attention' })}><Icon name={'warning'} /></span> : null}
                 {
-                    isMovie ?
+                    selectionMode ?
+                        <span
+                            className={classnames(
+                                styles['selection-indicator'],
+                                selected && styles['selection-indicator-selected'],
+                                partiallySelected && styles['selection-indicator-partial'],
+                                selectionDisabled && styles['selection-indicator-disabled']
+                            )}
+                            aria-hidden={'true'}
+                        >
+                            {selected ? '\u2713' : partiallySelected ? '\u2212' : ''}
+                        </span>
+                        : null
+                }
+                {group.attentionCount > 0 ? <span className={classnames(styles['attention-indicator'], selectionMode && styles['attention-indicator-selection'])} title={t('CUSTOM_DOWNLOADS_ATTENTION_SHORT', { defaultValue: 'Needs attention' })}><Icon name={'warning'} /></span> : null}
+                {
+                    !selectionMode && isMovie ?
                         activity.count > 0 ?
                             <div
                                 className={classnames(styles['movie-progress'], activity.indeterminate && styles['movie-progress-indeterminate'])}
@@ -83,15 +111,29 @@ const DownloadMediaGroup = ({
                                 </button>
                                 :
                                 null
-                        :
-                        <div className={styles['episode-count-badge']} title={episodeCountLabel} aria-label={episodeCountLabel}>
-                            <strong>{group.episodeCount}</strong>
-                            <span>{t('CUSTOM_DOWNLOADS_EPISODES_SHORT', { defaultValue: 'EP' })}</span>
-                        </div>
+                        : !selectionMode ?
+                            <div className={styles['episode-count-badge']} title={episodeCountLabel} aria-label={episodeCountLabel}>
+                                <strong>{group.episodeCount}</strong>
+                                <span>{t('CUSTOM_DOWNLOADS_EPISODES_SHORT', { defaultValue: 'EP' })}</span>
+                            </div>
+                            : null
                 }
             </div>
             <div className={styles['media-info']}>
                 <h2 className={styles['media-title']} title={group.title}>{group.title}</h2>
+                {
+                    selectionMode ?
+                        <div className={styles['selection-meta']}>
+                            {selectionDisabled ?
+                                t('CUSTOM_DOWNLOADS_ACTIVE_NOT_SELECTABLE', { defaultValue: 'Active downloads must be paused or canceled first' })
+                                : t('CUSTOM_DOWNLOADS_SELECTED_FILE_COUNT', {
+                                    defaultValue: '{{selected}} of {{count}} selected',
+                                    selected: selectedCount,
+                                    count: selectableCount
+                                })}
+                        </div>
+                        : null
+                }
                 {playError ? <div className={styles['action-error']} role={'alert'}>{playError}</div> : null}
             </div>
         </article>
@@ -115,7 +157,14 @@ DownloadMediaGroup.propTypes = {
     actionStates: PropTypes.object.isRequired,
     actionErrors: PropTypes.object.isRequired,
     onPlay: PropTypes.func,
-    onOpen: PropTypes.func
+    onOpen: PropTypes.func,
+    selectionMode: PropTypes.bool,
+    selected: PropTypes.bool,
+    partiallySelected: PropTypes.bool,
+    selectionDisabled: PropTypes.bool,
+    selectableCount: PropTypes.number,
+    selectedCount: PropTypes.number,
+    onToggleSelection: PropTypes.func
 };
 
 module.exports = DownloadMediaGroup;

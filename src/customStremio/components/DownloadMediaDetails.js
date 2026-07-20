@@ -4,6 +4,10 @@ const { useTranslation } = require('react-i18next');
 const { default: Icon } = require('@stremio/stremio-icons/react');
 const { Button, Image } = require('stremio/components');
 const { groupSeriesRecordsBySeason } = require('../downloadRecordPresentation');
+const {
+    getSelectionState,
+    groupSeriesRecordsByEpisode
+} = require('../downloadBatchDeletion');
 const DownloadRecordCard = require('./DownloadRecordCard');
 const styles = require('./DownloadMediaDetails.less');
 
@@ -57,7 +61,12 @@ const DownloadMediaDetails = ({
     onPlay,
     onOpenLocation,
     onRemove,
-    onDeleteMedia
+    onDeleteMedia,
+    selectionMode = false,
+    selectedRecordIds,
+    onStartSelection,
+    onCancelSelection,
+    onToggleRecords
 }) => {
     const { t } = useTranslation();
     const isMovie = group.type === 'movie';
@@ -76,6 +85,10 @@ const DownloadMediaDetails = ({
     const seasonGroups = React.useMemo(() => isMovie ? [] : groupSeriesRecordsBySeason(group.records), [group.records, isMovie]);
     const selectedSeasonGroup = seasonGroups.find(({ key }) => key === selectedSeasonKey) || seasonGroups[0] || null;
     const displayedRecords = isMovie ? group.records : selectedSeasonGroup?.records || [];
+    const episodeGroups = React.useMemo(() => isMovie ? [] : groupSeriesRecordsByEpisode(displayedRecords), [displayedRecords, isMovie]);
+    const selectedIds = selectedRecordIds instanceof Set ? selectedRecordIds : new Set();
+    const allSelection = getSelectionState(group.records, selectedIds);
+    const displayedSelection = getSelectionState(displayedRecords, selectedIds);
     const itemCountLabel = group.type === 'series' ?
         t('CUSTOM_DOWNLOADS_EPISODE_COUNT', {
             defaultValue: group.episodeCount === 1 ? '{{count}} episode' : '{{count}} episodes',
@@ -104,6 +117,12 @@ const DownloadMediaDetails = ({
                     </button>
                     <div className={styles['toolbar-actions']}>
                         {refreshing ? <span className={styles['refreshing-label']}>{t('CUSTOM_DOWNLOADS_REFRESHING', { defaultValue: 'Refreshing...' })}</span> : null}
+                        <Button
+                            className={selectionMode ? styles['selection-button-active'] : styles['selection-button']}
+                            onClick={selectionMode ? onCancelSelection : onStartSelection}
+                        >
+                            {selectionMode ? t('CUSTOM_DOWNLOADS_DONE_SELECTING', { defaultValue: 'Done selecting' }) : t('CUSTOM_DOWNLOADS_SELECT', { defaultValue: 'Select' })}
+                        </Button>
                         {group.href ? <Button className={styles['stremio-link']} href={group.href}>{t('CUSTOM_DOWNLOADS_VIEW_TITLE', { defaultValue: 'View in Stremio' })}</Button> : null}
                     </div>
                 </div>
@@ -197,7 +216,26 @@ const DownloadMediaDetails = ({
                         <div className={styles['section-eyebrow']}>{isMovie ? t('CUSTOM_DOWNLOADS_VERSIONS', { defaultValue: 'Local versions' }) : t('CUSTOM_DOWNLOADS_EPISODES', { defaultValue: 'Downloaded episodes' })}</div>
                         <h2 className={styles['section-title']}>{isMovie ? t('CUSTOM_DOWNLOADS_CHOOSE_DOWNLOAD', { defaultValue: 'Choose a download' }) : t('CUSTOM_DOWNLOADS_CHOOSE_EPISODE', { defaultValue: 'Choose an episode' })}</h2>
                     </div>
-                    <span className={styles['record-count']}>{displayedRecords.length}</span>
+                    <div className={styles['section-heading-actions']}>
+                        {
+                            selectionMode ?
+                                <button
+                                    type={'button'}
+                                    className={styles['scope-selection-button']}
+                                    disabled={allSelection.selectableCount === 0}
+                                    onClick={() => onToggleRecords?.(allSelection.selectableIds)}
+                                >
+                                    <span className={allSelection.allSelected ? styles['selection-check-selected'] : styles['selection-check']} aria-hidden={'true'}>
+                                        {allSelection.allSelected ? '\u2713' : allSelection.partiallySelected ? '\u2212' : ''}
+                                    </span>
+                                    {isMovie ?
+                                        t('CUSTOM_DOWNLOADS_SELECT_ALL_VERSIONS', { defaultValue: 'Select all versions' })
+                                        : t('CUSTOM_DOWNLOADS_SELECT_ALL_EPISODES', { defaultValue: 'Select all episodes' })}
+                                </button>
+                                : null
+                        }
+                        <span className={styles['record-count']}>{displayedRecords.length}</span>
+                    </div>
                 </div>
                 {
                     !isMovie && seasonGroups.length > 0 ?
@@ -226,12 +264,52 @@ const DownloadMediaDetails = ({
                         :
                         null
                 }
+                {
+                    selectionMode && !isMovie && selectedSeasonGroup ?
+                        <div className={styles['season-selection-bar']}>
+                            <button
+                                type={'button'}
+                                className={styles['scope-selection-button']}
+                                disabled={displayedSelection.selectableCount === 0}
+                                onClick={() => onToggleRecords?.(displayedSelection.selectableIds)}
+                            >
+                                <span className={displayedSelection.allSelected ? styles['selection-check-selected'] : styles['selection-check']} aria-hidden={'true'}>
+                                    {displayedSelection.allSelected ? '\u2713' : displayedSelection.partiallySelected ? '\u2212' : ''}
+                                </span>
+                                {t('CUSTOM_DOWNLOADS_SELECT_CURRENT_SEASON', { defaultValue: 'Select this season' })}
+                            </button>
+                            <span>
+                                {t('CUSTOM_DOWNLOADS_SELECTABLE_EPISODES', {
+                                    defaultValue: '{{count}} removable downloads in this season',
+                                    count: displayedSelection.selectableCount
+                                })}
+                            </span>
+                        </div>
+                        : null
+                }
                 <div className={styles['record-list']}>
-                    {displayedRecords.map((record) => {
+                    {isMovie ? displayedRecords.map((record) => {
                         const artwork = getRecordArtwork(record, group);
                         const artworkLabel = getRecordArtworkLabel(record, group.title);
+                        const recordSelection = getSelectionState([record], selectedIds);
                         return (
-                            <div className={styles['record-row']} key={record.id || `${record.videoId}-${record.createdAt}`}>
+                            <div className={selectionMode ? styles['record-row-selecting'] : styles['record-row']} key={record.id || `${record.videoId}-${record.createdAt}`}>
+                                {
+                                    selectionMode ?
+                                        <button
+                                            type={'button'}
+                                            className={styles['record-selection-button']}
+                                            disabled={recordSelection.selectableCount === 0}
+                                            aria-pressed={recordSelection.allSelected}
+                                            aria-label={t('CUSTOM_DOWNLOADS_SELECT_VERSION', { defaultValue: 'Select this movie version' })}
+                                            onClick={() => onToggleRecords?.(recordSelection.selectableIds)}
+                                        >
+                                            <span className={recordSelection.allSelected ? styles['selection-check-selected'] : styles['selection-check']} aria-hidden={'true'}>
+                                                {recordSelection.allSelected ? '\u2713' : ''}
+                                            </span>
+                                        </button>
+                                        : null
+                                }
                                 <div className={styles['thumbnail-container']}>
                                     {
                                         artwork ?
@@ -254,8 +332,71 @@ const DownloadMediaDetails = ({
                                     onOpenLocation={onOpenLocation}
                                     onRemove={onRemove}
                                     onDeleteMedia={onDeleteMedia}
+                                    selectionMode={selectionMode}
                                 />
                             </div>
+                        );
+                    }) : episodeGroups.map((episodeGroup) => {
+                        const episodeSelection = getSelectionState(episodeGroup.records, selectedIds);
+                        const episodeLabel = episodeGroup.season !== null && episodeGroup.episode !== null ?
+                            `S${episodeGroup.season} E${episodeGroup.episode}`
+                            : episodeGroup.title;
+                        return (
+                            <section className={styles['episode-group']} key={episodeGroup.key}>
+                                <div className={styles['episode-heading']}>
+                                    <div>
+                                        <strong>{episodeLabel}</strong>
+                                        {episodeGroup.title !== episodeLabel ? <span>{episodeGroup.title}</span> : null}
+                                    </div>
+                                    {
+                                        selectionMode ?
+                                            <button
+                                                type={'button'}
+                                                className={styles['scope-selection-button']}
+                                                disabled={episodeSelection.selectableCount === 0}
+                                                aria-pressed={episodeSelection.allSelected}
+                                                onClick={() => onToggleRecords?.(episodeSelection.selectableIds)}
+                                            >
+                                                <span className={episodeSelection.allSelected ? styles['selection-check-selected'] : styles['selection-check']} aria-hidden={'true'}>
+                                                    {episodeSelection.allSelected ? '\u2713' : episodeSelection.partiallySelected ? '\u2212' : ''}
+                                                </span>
+                                                {t('CUSTOM_DOWNLOADS_SELECT_EPISODE', { defaultValue: 'Select episode' })}
+                                            </button>
+                                            : null
+                                    }
+                                </div>
+                                <div className={styles['episode-records']}>
+                                    {episodeGroup.records.map((record) => {
+                                        const artwork = getRecordArtwork(record, group);
+                                        const artworkLabel = getRecordArtworkLabel(record, group.title);
+                                        return (
+                                            <div className={styles['record-row']} key={record.id || `${record.videoId}-${record.createdAt}`}>
+                                                <div className={styles['thumbnail-container']}>
+                                                    {artwork ?
+                                                        <Image className={styles['thumbnail']} src={artwork} alt={artworkLabel} />
+                                                        : <div className={styles['thumbnail-fallback']} aria-hidden={'true'}><Icon name={'play'} /></div>}
+                                                    <div className={styles['thumbnail-label']} title={artworkLabel}>{artworkLabel}</div>
+                                                </div>
+                                                <DownloadRecordCard
+                                                    record={record}
+                                                    variant={'library'}
+                                                    action={record.id ? actionStates[record.id] : null}
+                                                    actionError={record.id ? actionErrors[record.id] : null}
+                                                    onPause={onPause}
+                                                    onResume={onResume}
+                                                    onCancel={onCancel}
+                                                    onRetry={onRetry}
+                                                    onPlay={onPlay}
+                                                    onOpenLocation={onOpenLocation}
+                                                    onRemove={onRemove}
+                                                    onDeleteMedia={onDeleteMedia}
+                                                    selectionMode={selectionMode}
+                                                />
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </section>
                         );
                     })}
                 </div>
@@ -296,7 +437,12 @@ DownloadMediaDetails.propTypes = {
     onPlay: PropTypes.func,
     onOpenLocation: PropTypes.func,
     onRemove: PropTypes.func,
-    onDeleteMedia: PropTypes.func
+    onDeleteMedia: PropTypes.func,
+    selectionMode: PropTypes.bool,
+    selectedRecordIds: PropTypes.instanceOf(Set),
+    onStartSelection: PropTypes.func,
+    onCancelSelection: PropTypes.func,
+    onToggleRecords: PropTypes.func
 };
 
 module.exports = DownloadMediaDetails;
