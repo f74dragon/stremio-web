@@ -58,7 +58,7 @@ Notes:
 - `3. Preferred addon stream sorting/filtering`: Completed for the planned scope (`Milestones 3A-3A.1`; preferred ordering and persistent original Stremio addon-filter state implemented)
 - `4. Add placeholder Download / Play Download buttons`: Completed and superseded by the real record-aware Download and Play controls
 - `5. Create local backend prototype`: Completed and superseded by the persistent local download backend
-- `6. Implement real download manager`: In progress (`Milestones 6A-6N.1` real downloads, persistence, retry/resume, FIFO scheduling, queue controls, concurrency settings, hybrid provider availability, provider-aware download safety, resolver HEAD fallback, safe local-media deletion, bulk selection/deletion, and permanent history persistence implemented)
+- `6. Implement real download manager`: In progress (`Milestones 6A-6N.2` real downloads, persistence, retry/resume, FIFO scheduling, queue controls, concurrency settings, hybrid provider availability, provider-aware download safety, resolver HEAD fallback, safe local-media deletion, bulk selection/deletion, and permanent history persistence/browsing implemented)
 - `7. Add title-specific downloads panel`: Completed for the planned panel scope (`Milestones 7A-7B`; later shared file-management actions remain tracked under the download manager)
 - `8. Add global downloads page`: In progress (`Milestones 8A-8C.2` implemented)
 - `9. Add MPC-HC launch support`: Completed for the planned scope (`Milestones 9A-9C`; panel playback, stream-row playback, and persistent in-app player selection implemented)
@@ -78,14 +78,14 @@ Notes:
 
 ## Next Recommended Step
 
-Implement **Milestone 6N.2: permanent download history UI** as the next focused pass. Add a polished, poster-based History view backed by the read-only local history API, with useful date/outcome filters and title or episode details. Keep history visually and technically separate from active downloads and provider cache history.
+Plan **Milestone 6O: multi-episode and season batch downloads** as the next focused pass. Define the source-selection experience before implementation so a batch never silently chooses an arbitrary quality, addon, or debrid provider. Then submit the confirmed episodes through the existing persistent FIFO scheduler instead of creating a second queue.
 
-Do not add permanent-history deletion, multi-episode downloading, watched progress, filesystem discovery, automatic provider/source switching, or Windows packaging to the History UI pass.
+Keep the first 6O pass focused on planning and the smallest safe queue-submission slice. Do not combine it with watched progress, filesystem discovery, automatic provider switching, or Windows packaging.
 
 ## Remaining Tracked Work
 
 - Multi-episode/season batch download planning, explicit source selection, and queue submission. Do not silently choose among multiple qualities or providers without a documented selection rule.
-- Permanent download history browsing UI: present the completed 6N.1 event history as poster-based titles with outcome/date filtering and detailed lifecycle events, separate from active download records, provider cache history, and future watch history.
+- Optional download-history search and date-range controls if the permanent local record grows beyond comfortable outcome-based browsing.
 - Watched/unwatched and playback-progress integration for real **Continue Watching**, resume position, next-episode behavior, and show-card progress.
 - Filesystem discovery for media that exists without a current record, plus metadata/artwork backfill for legacy persisted records.
 - Availability-history management UI, including an explicit clear-history action; current cached history remains intentionally retained by default.
@@ -94,6 +94,17 @@ Do not add permanent-history deletion, multi-episode downloading, watched progre
 - Windows application packaging after the local backend, download lifecycle, and playback integration are stable.
 
 The milestone findings below are chronological implementation records. Older sections may describe a feature as deferred or unavailable at that historical point even when a later milestone subsequently implemented it; the **Current Status**, **Next Recommended Step**, and **Remaining Tracked Work** sections above are authoritative for present planning.
+
+## Milestone 6N.2 Findings: Permanent Download History UI
+
+- The Downloads route now has separate **Downloads** and **History** views. Active file management remains in Downloads; permanent lifecycle evidence is presented in a read-only History browser with no file, record, or history deletion controls.
+- History events are projected into poster-based movie and show cards. Outcome filters expose completed, needs-attention, and deleted titles only when those categories exist, while every card shows its latest activity date and current outcome.
+- Movie details show each source attempt directly. Show details group attempts into seasons and episodes, preserving retries and alternate-source attempts without flattening unrelated episodes into one long list.
+- Each attempt displays the sanitized source/provider label, size, attempt number, latest date, whether its active record still exists, and a chronological lifecycle timeline. Only successful media-deletion events display reclaimed disk space.
+- Initial loading, empty history, truncated-result, damaged-entry, offline, stale-data, and background-refresh states are handled without clearing already loaded history or disrupting the active Downloads view.
+- Projection is deliberately separate from provider availability history and future watch/progress history. It consumes only the read-only `GET /downloads/history` API and cross-references current records in memory to mark items that still exist in Downloads.
+- Focused projection tests cover retries, deletion precedence, series grouping, outcome filters, and malformed-event isolation. The live browser check covered tab switching, filtering, poster details, corrected deletion-space display, responsive overflow, and console errors.
+- Validation: all 263 Jest tests pass across 32 suites, full frontend ESLint and `git diff --check` pass, and the production build completes with only the repository's existing bundle-size warnings.
 
 ## Milestone 6N.1 Findings: Permanent Download History Foundation
 

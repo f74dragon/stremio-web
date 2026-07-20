@@ -15,6 +15,55 @@
     color: var(--primary-foreground-color);
 }
 
+.view-tabs {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    width: fit-content;
+    max-width: 100rem;
+    margin: 0 auto 1.35rem;
+    padding: 0.28rem;
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.view-tab,
+.view-tab-selected {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-height: 2.35rem;
+    padding: 0.52rem 0.85rem;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    color: inherit;
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.78rem;
+    background: transparent;
+
+    small {
+        min-width: 1.2rem;
+        padding: 0.1rem 0.32rem;
+        border-radius: 999px;
+        text-align: center;
+        background: rgba(255, 255, 255, 0.08);
+        opacity: 0.72;
+    }
+
+    &:hover,
+    &:focus-visible {
+        background: rgba(255, 255, 255, 0.07);
+    }
+}
+
+.view-tab-selected {
+    border-color: rgba(190, 176, 255, 0.38);
+    background: rgba(105, 81, 255, 0.24);
+    box-shadow: 0 0 1rem rgba(105, 81, 255, 0.1);
+}
+
 .page-header {
     display: flex;
     align-items: flex-end;
