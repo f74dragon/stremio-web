@@ -10,6 +10,7 @@ const CANCELABLE_STATUSES = new Set(['queued', 'downloading', 'paused']);
 const PAUSABLE_STATUSES = new Set(['queued', 'downloading']);
 const REMOVABLE_STATUSES = new Set(['completed', 'failed', 'canceled']);
 const RETRYABLE_STATUSES = new Set(['failed', 'canceled']);
+const MEDIA_DELETABLE_STATUSES = new Set(['paused', 'completed', 'failed', 'canceled']);
 
 const formatProgress = (value) => {
     const numericValue = Number(value);
@@ -124,10 +125,12 @@ const DownloadRecordCard = ({
     onRetry,
     onPlay,
     onOpenLocation,
-    onRemove
+    onRemove,
+    onDeleteMedia
 }) => {
     const { t } = useTranslation();
     const recordId = record?.id;
+    const [confirmingMediaDelete, setConfirmingMediaDelete] = React.useState(false);
     const status = record?.status || 'unknown';
     const labels = getRecordLabels(record, variant, t('CUSTOM_DOWNLOAD_UNTITLED', { defaultValue: 'Untitled download' }));
     const detailsHref = variant === 'library' ? getDownloadDetailsHref(record) : null;
@@ -140,12 +143,21 @@ const DownloadRecordCard = ({
     const canResume = recordId && status === 'paused';
     const canPlay = recordId && status === 'completed';
     const canOpenLocation = recordId && variant === 'library' && Boolean(record?.localPath);
-    const canRemove = recordId && REMOVABLE_STATUSES.has(status);
+    const hasSharedPartialOwner = Number(record?.sharedPartialOwnerCount) > 0;
+    const canRemove = recordId && REMOVABLE_STATUSES.has(status) &&
+        (status === 'completed' || !record?.partialPath || hasSharedPartialOwner);
     const canRetry = recordId && RETRYABLE_STATUSES.has(status);
+    const canDeleteMedia = recordId && MEDIA_DELETABLE_STATUSES.has(status) && typeof onDeleteMedia === 'function';
+    const isPartialMedia = status !== 'completed';
+    const localDataSize = formatBytes(isPartialMedia ? record?.bytesDownloaded : record?.bytesTotal ?? record?.bytesDownloaded);
     const playTitle = t('CUSTOM_DOWNLOAD_PLAY_TITLE', {
         defaultValue: 'Play {{title}} in MPC-HC',
         title: labels.title
     });
+
+    React.useEffect(() => {
+        setConfirmingMediaDelete(false);
+    }, [recordId]);
 
     return (
         <article
@@ -220,7 +232,49 @@ const DownloadRecordCard = ({
             }
             {actionError ? <div className={styles['record-action-error']} role={'alert'}>{actionError}</div> : null}
             {
-                canPause || canResume || canCancel || canRetry || canPlay || canOpenLocation || canRemove ?
+                confirmingMediaDelete && canDeleteMedia ?
+                    <div className={styles['delete-confirmation']} role={'alertdialog'} aria-label={t('CUSTOM_DOWNLOAD_DELETE_CONFIRM_TITLE', { defaultValue: 'Confirm local download deletion' })}>
+                        <strong>
+                            {isPartialMedia ?
+                                t('CUSTOM_DOWNLOAD_DELETE_PARTIAL_CONFIRM_TITLE', { defaultValue: 'Delete partial download data?' })
+                                : t('CUSTOM_DOWNLOAD_DELETE_FILE_CONFIRM_TITLE', { defaultValue: 'Delete downloaded file?' })}
+                        </strong>
+                        <span>
+                            {isPartialMedia ?
+                                t('CUSTOM_DOWNLOAD_DELETE_PARTIAL_CONFIRM_BODY', {
+                                    defaultValue: '{{size}} of partial data and this record will be permanently removed. It cannot be resumed.',
+                                    size: localDataSize || t('CUSTOM_DOWNLOAD_SIZE_UNKNOWN', { defaultValue: 'Any saved' })
+                                })
+                                : t('CUSTOM_DOWNLOAD_DELETE_FILE_CONFIRM_BODY', {
+                                    defaultValue: 'The {{size}} local media file and this record will be permanently removed.',
+                                    size: localDataSize || t('CUSTOM_DOWNLOAD_FILE', { defaultValue: 'downloaded' })
+                                })}
+                        </span>
+                        <div className={styles['delete-confirmation-actions']}>
+                            <Button
+                                className={styles['keep-button']}
+                                disabled={actionInProgress}
+                                onClick={() => !actionInProgress && setConfirmingMediaDelete(false)}
+                            >
+                                {t('CUSTOM_DOWNLOAD_KEEP', { defaultValue: 'Keep download' })}
+                            </Button>
+                            <Button
+                                className={styles['confirm-delete-button']}
+                                disabled={actionInProgress}
+                                onClick={() => !actionInProgress && onDeleteMedia(recordId)}
+                            >
+                                {action === 'deleteMedia' ?
+                                    t('CUSTOM_DOWNLOAD_DELETING', { defaultValue: 'Deleting...' })
+                                    : isPartialMedia ?
+                                        t('CUSTOM_DOWNLOAD_DELETE_PARTIAL', { defaultValue: 'Delete partial data' })
+                                        : t('CUSTOM_DOWNLOAD_DELETE_FILE', { defaultValue: 'Delete file' })}
+                            </Button>
+                        </div>
+                    </div>
+                    : null
+            }
+            {
+                canPause || canResume || canCancel || canRetry || canPlay || canOpenLocation || canRemove || canDeleteMedia ?
                     <div className={styles['record-actions']}>
                         {
                             canOpenLocation ?
@@ -303,7 +357,12 @@ const DownloadRecordCard = ({
                         {
                             canRemove ?
                                 <div className={styles['record-action-note']}>
-                                    {t('CUSTOM_DOWNLOAD_REMOVE_NOTE', { defaultValue: 'The downloaded file will stay on disk.' })}
+                                    {record?.partialPath && hasSharedPartialOwner ?
+                                        t('CUSTOM_DOWNLOAD_REMOVE_SHARED_NOTE', {
+                                            defaultValue: 'Remove this duplicate record first. Its shared partial file stays protected for the remaining record.'
+                                        })
+                                        :
+                                        t('CUSTOM_DOWNLOAD_REMOVE_NOTE', { defaultValue: 'Remove record keeps any downloaded or partial file data on disk.' })}
                                 </div>
                                 :
                                 null
@@ -353,7 +412,7 @@ const DownloadRecordCard = ({
                                 <Button
                                     className={styles['remove-button']}
                                     title={t('CUSTOM_DOWNLOAD_REMOVE_TITLE', {
-                                        defaultValue: 'Remove {{title}} from this list; the downloaded file will stay on disk',
+                                        defaultValue: 'Remove {{title}} from this list; any local file data will stay on disk',
                                         title: labels.title
                                     })}
                                     aria-disabled={actionInProgress}
@@ -369,6 +428,26 @@ const DownloadRecordCard = ({
                                 :
                                 null
                         }
+                        {
+                            canDeleteMedia ?
+                                <Button
+                                    className={styles['delete-media-button']}
+                                    title={isPartialMedia ?
+                                        t('CUSTOM_DOWNLOAD_DELETE_PARTIAL_TITLE', { defaultValue: 'Permanently delete partial data for {{title}}', title: labels.title })
+                                        : t('CUSTOM_DOWNLOAD_DELETE_FILE_TITLE', { defaultValue: 'Permanently delete {{title}} from disk', title: labels.title })}
+                                    aria-disabled={actionInProgress}
+                                    disabled={actionInProgress}
+                                    tabIndex={actionInProgress ? -1 : 0}
+                                    onClick={() => !actionInProgress && setConfirmingMediaDelete(true)}
+                                >
+                                    {action === 'deleteMedia' ?
+                                        t('CUSTOM_DOWNLOAD_DELETING', { defaultValue: 'Deleting...' })
+                                        : isPartialMedia ?
+                                            t('CUSTOM_DOWNLOAD_DELETE_PARTIAL', { defaultValue: 'Delete partial data' })
+                                            : t('CUSTOM_DOWNLOAD_DELETE_DOWNLOAD', { defaultValue: 'Delete download' })}
+                                </Button>
+                                : null
+                        }
                     </div>
                     :
                     null
@@ -380,7 +459,7 @@ const DownloadRecordCard = ({
 DownloadRecordCard.propTypes = {
     record: PropTypes.object.isRequired,
     variant: PropTypes.oneOf(['compact', 'library']),
-    action: PropTypes.oneOf(['queue', 'pause', 'resume', 'cancel', 'retry', 'play', 'location', 'remove']),
+    action: PropTypes.oneOf(['queue', 'pause', 'resume', 'cancel', 'retry', 'play', 'location', 'remove', 'deleteMedia']),
     actionError: PropTypes.string,
     onPause: PropTypes.func,
     onResume: PropTypes.func,
@@ -388,7 +467,8 @@ DownloadRecordCard.propTypes = {
     onRetry: PropTypes.func,
     onPlay: PropTypes.func,
     onOpenLocation: PropTypes.func,
-    onRemove: PropTypes.func
+    onRemove: PropTypes.func,
+    onDeleteMedia: PropTypes.func
 };
 
 module.exports = DownloadRecordCard;

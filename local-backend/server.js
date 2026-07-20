@@ -13,6 +13,16 @@ const {
 const { isDownloadRetryable, prepareDownloadRetry } = require('./downloadRetry');
 const { isDownloadResumable, prepareDownloadResume } = require('./downloadResume');
 const {
+    isDownloadMediaDeletable,
+    getDownloadDeletionPlan,
+    getDownloadDestinationPathKeys,
+    getSharedDownloadDestinationRecords,
+    getSharedDownloadArtifactRecords,
+    getSharedDownloadPartialOwnerRecords,
+    hasExistingDownloadArtifacts,
+    deleteDownloadArtifacts
+} = require('./downloadDeletion');
+const {
     DownloadScheduler,
     UNLIMITED_CONCURRENT_DOWNLOADS,
     isValidMaxConcurrentDownloads,
@@ -69,6 +79,8 @@ const BLOCKED_SOURCE_READINESS = new Set(['requires_caching', 'unavailable']);
 
 const app = express();
 const downloads = new Map();
+const downloadMutationIds = new Set();
+const deletingArtifactPathKeys = new Set();
 const recordStore = new DownloadRecordStore({
     onError: (error) => console.error('Could not persist download records:', error)
 });
@@ -237,6 +249,8 @@ const createDownloadRecord = (payload) => {
         resumeSupported: null,
         sourceEtag: null,
         sourceLastModified: null,
+        localFileIdentity: null,
+        partialFileIdentity: null,
         attemptCount: 1,
         lastAttemptAt: now
     };
@@ -308,6 +322,43 @@ const getDownloadRecordOrSend404 = (id, response) => {
     }
 
     return record;
+};
+
+const withExclusiveDownloadMutation = (handler) => async (request, response, next) => {
+    const recordId = request.params.id;
+    if (downloadMutationIds.has(recordId)) {
+        response.status(409).json({
+            ok: false,
+            errorCode: 'DOWNLOAD_OPERATION_IN_PROGRESS',
+            error: 'Another operation is already changing this download. Wait for it to finish and try again.'
+        });
+        return;
+    }
+
+    const record = downloads.get(recordId);
+    if (record) {
+        try {
+            if (getDownloadDestinationPathKeys(record).some((pathKey) => deletingArtifactPathKeys.has(pathKey))) {
+                response.status(409).json({
+                    ok: false,
+                    errorCode: 'DOWNLOAD_DESTINATION_DELETING',
+                    error: 'Another operation is deleting this download destination. Wait for it to finish and try again.'
+                });
+                return;
+            }
+        } catch {
+            // The route-specific path validation will return the more precise error.
+        }
+    }
+
+    downloadMutationIds.add(recordId);
+    try {
+        await handler(request, response);
+    } catch (error) {
+        next(error);
+    } finally {
+        downloadMutationIds.delete(recordId);
+    }
 };
 
 const runScheduledDownload = async (recordId, options) => {
@@ -439,13 +490,22 @@ const createQueueMetadata = () => {
 };
 
 const getDownloadRecordResponse = (record, queueMetadata = createQueueMetadata()) => {
-    if (!record || record.status !== 'queued') {
+    if (!record) {
         return record;
+    }
+
+    const decoratedRecord = {
+        ...record,
+        sharedDestinationCount: getSharedDownloadDestinationRecords(record, downloads.values()).length,
+        sharedPartialOwnerCount: getSharedDownloadPartialOwnerRecords(record, downloads.values()).length
+    };
+    if (record.status !== 'queued') {
+        return decoratedRecord;
     }
 
     const queuePosition = queueMetadata.positions.get(record.id);
     return {
-        ...record,
+        ...decoratedRecord,
         queuePosition: Number.isSafeInteger(queuePosition) ? queuePosition : null,
         queueLength: queueMetadata.queueLength
     };
@@ -1039,6 +1099,44 @@ app.post('/downloads', async (request, response) => {
     }
 
     const record = createDownloadRecord(payload);
+    let destinationPathKeys;
+    try {
+        destinationPathKeys = getDownloadDestinationPathKeys(record);
+    } catch (error) {
+        response.status(400).json({
+            ok: false,
+            errorCode: error?.code || 'DOWNLOAD_DESTINATION_INVALID',
+            error: error?.message || 'Could not safely derive the download destination'
+        });
+        return;
+    }
+    if (destinationPathKeys.some((pathKey) => deletingArtifactPathKeys.has(pathKey))) {
+        response.status(409).json({
+            ok: false,
+            errorCode: 'DOWNLOAD_DESTINATION_DELETING',
+            error: 'A previous download with this destination is currently being deleted. Wait for deletion to finish and try again.'
+        });
+        return;
+    }
+    const destinationConflict = Array.from(downloads.values()).find((existingRecord) => {
+        if (!existingRecord || existingRecord.status === 'deleted') {
+            return false;
+        }
+        try {
+            return getDownloadDestinationPathKeys(existingRecord).some((pathKey) => destinationPathKeys.includes(pathKey));
+        } catch {
+            return false;
+        }
+    });
+    if (destinationConflict) {
+        response.status(409).json({
+            ok: false,
+            errorCode: 'DOWNLOAD_DESTINATION_CONFLICT',
+            error: 'Another download record already owns this local destination. Remove or resolve that record before downloading another source.',
+            conflictingDownloadId: destinationConflict.id
+        });
+        return;
+    }
     downloads.set(record.id, record);
     try {
         await persistDownloadRecordsNow();
@@ -1085,7 +1183,7 @@ app.get('/downloads/:id', (request, response) => {
     response.json(getDownloadRecordResponse(record));
 });
 
-app.patch('/downloads/:id/queue', async (request, response) => {
+app.patch('/downloads/:id/queue', withExclusiveDownloadMutation(async (request, response) => {
     const record = getDownloadRecordOrSend404(request.params.id, response);
     if (!record) {
         return;
@@ -1143,9 +1241,9 @@ app.patch('/downloads/:id/queue', async (request, response) => {
     }
 
     response.json(getDownloadRecordResponse(downloads.get(record.id) || record));
-});
+}));
 
-app.post('/downloads/:id/pause', async (request, response) => {
+app.post('/downloads/:id/pause', withExclusiveDownloadMutation(async (request, response) => {
     const record = getDownloadRecordOrSend404(request.params.id, response);
     if (!record) {
         return;
@@ -1195,9 +1293,9 @@ app.post('/downloads/:id/pause', async (request, response) => {
     }
 
     response.json(downloads.get(record.id) || record);
-});
+}));
 
-app.post('/downloads/:id/resume', async (request, response) => {
+app.post('/downloads/:id/resume', withExclusiveDownloadMutation(async (request, response) => {
     const record = getDownloadRecordOrSend404(request.params.id, response);
     if (!record) {
         return;
@@ -1226,7 +1324,9 @@ app.post('/downloads/:id/resume', async (request, response) => {
             'DOWNLOAD_NOT_RESUMABLE',
             'DOWNLOAD_PARTIAL_FILE_MISSING',
             'DOWNLOAD_PARTIAL_FILE_INVALID',
-            'DOWNLOAD_PARTIAL_FILE_TOO_LARGE'
+            'DOWNLOAD_PARTIAL_FILE_TOO_LARGE',
+            'DOWNLOAD_PARTIAL_IDENTITY_UNRECORDED',
+            'DOWNLOAD_PARTIAL_IDENTITY_MISMATCH'
         ]);
         response.status(conflictCodes.has(error?.code) ? 409 : 500).json({
             ok: false,
@@ -1252,9 +1352,9 @@ app.post('/downloads/:id/resume', async (request, response) => {
 
     enqueueDownload(resumePreparation.record, { resumeOffset: resumePreparation.resumeOffset });
     response.status(202).json(getDownloadRecordResponse(downloads.get(record.id) || resumePreparation.record));
-});
+}));
 
-app.post('/downloads/:id/retry', async (request, response) => {
+app.post('/downloads/:id/retry', withExclusiveDownloadMutation(async (request, response) => {
     const record = getDownloadRecordOrSend404(request.params.id, response);
     if (!record) {
         return;
@@ -1272,6 +1372,27 @@ app.post('/downloads/:id/retry', async (request, response) => {
         response.status(409).json({
             ok: false,
             error: 'This download no longer has a usable HTTP or HTTPS source URL'
+        });
+        return;
+    }
+
+    let sharedRecords;
+    try {
+        sharedRecords = getSharedDownloadArtifactRecords(record, downloads.values());
+    } catch (error) {
+        response.status(500).json({
+            ok: false,
+            errorCode: error?.code || 'DOWNLOAD_RETRY_PATH_VALIDATION_FAILED',
+            error: error?.message || 'Could not safely validate the retry destination'
+        });
+        return;
+    }
+    if (sharedRecords.length > 0) {
+        response.status(409).json({
+            ok: false,
+            errorCode: 'DOWNLOAD_MEDIA_SHARED_RECORDS',
+            error: 'Another download record uses this local destination. Remove the duplicate record before retrying.',
+            sharedRecordIds: sharedRecords.map((sharedRecord) => sharedRecord.id)
         });
         return;
     }
@@ -1305,9 +1426,9 @@ app.post('/downloads/:id/retry', async (request, response) => {
 
     enqueueDownload(retriedRecord);
     response.status(202).json(getDownloadRecordResponse(downloads.get(record.id) || retriedRecord));
-});
+}));
 
-app.post('/downloads/:id/cancel', async (request, response) => {
+app.post('/downloads/:id/cancel', withExclusiveDownloadMutation(async (request, response) => {
     const record = getDownloadRecordOrSend404(request.params.id, response);
     if (!record) {
         return;
@@ -1373,31 +1494,41 @@ app.post('/downloads/:id/cancel', async (request, response) => {
     }
 
     response.json(record);
-});
+}));
 
-app.delete('/downloads/:id', async (request, response) => {
+app.delete('/downloads/:id', withExclusiveDownloadMutation(async (request, response) => {
     const record = getDownloadRecordOrSend404(request.params.id, response);
     if (!record) {
         return;
     }
 
-    const wasQueued = downloadScheduler.isQueued(record.id);
-    if (wasQueued) {
-        downloadScheduler.remove(record.id);
-    } else if (isDownloadActive(record.id)) {
-        await cancelDownload(record.id);
+    if (downloadScheduler.isQueued(record.id) || isDownloadActive(record.id) || ['queued', 'downloading', 'paused'].includes(record.status)) {
+        response.status(409).json({
+            ok: false,
+            errorCode: 'DOWNLOAD_RECORD_ACTIVE',
+            error: record.status === 'paused' ?
+                'Delete the partial download data or cancel it before removing its record.'
+                :
+                'Pause or cancel this download before removing its record.'
+        });
+        return;
+    }
+    const sharedPartialOwnerRecords = getSharedDownloadPartialOwnerRecords(record, downloads.values());
+    if (record.partialPath && sharedPartialOwnerRecords.length === 0) {
+        response.status(409).json({
+            ok: false,
+            errorCode: 'DOWNLOAD_PARTIAL_DATA_REQUIRES_DELETE',
+            error: 'This record owns partial download data. Use Delete partial data so it is not orphaned.'
+        });
+        return;
     }
 
-    const latestRecord = downloads.get(record.id) || record;
     downloads.delete(record.id);
 
     try {
         await persistDownloadRecordsNow();
     } catch (error) {
-        downloads.set(latestRecord.id, latestRecord);
-        if (wasQueued) {
-            enqueueDownload(latestRecord);
-        }
+        downloads.set(record.id, record);
         console.error('Could not persist removed download record:', error);
         response.status(500).json({
             ok: false,
@@ -1408,10 +1539,140 @@ app.delete('/downloads/:id', async (request, response) => {
 
     response.json({
         ok: true,
-        id: latestRecord.id,
-        status: 'deleted'
+        id: record.id,
+        status: 'deleted',
+        remainingSharedRecordIds: sharedPartialOwnerRecords.map((sharedRecord) => sharedRecord.id)
     });
-});
+}));
+
+app.delete('/downloads/:id/media', withExclusiveDownloadMutation(async (request, response) => {
+    const record = getDownloadRecordOrSend404(request.params.id, response);
+    if (!record) {
+        return;
+    }
+    if (downloadScheduler.isQueued(record.id) || isDownloadActive(record.id) || !isDownloadMediaDeletable(record)) {
+        response.status(409).json({
+            ok: false,
+            errorCode: 'DOWNLOAD_MEDIA_NOT_DELETABLE',
+            error: 'Pause or cancel an active download before deleting its local data.'
+        });
+        return;
+    }
+
+    let deletionPathKeys;
+    try {
+        getDownloadDeletionPlan(record);
+        deletionPathKeys = getDownloadDestinationPathKeys(record);
+    } catch (error) {
+        console.error(`Could not validate local data paths for download ${record.id}:`, error);
+        response.status(500).json({
+            ok: false,
+            errorCode: error?.code || 'DOWNLOAD_DELETE_PATH_VALIDATION_FAILED',
+            error: error?.message || 'Could not safely validate the local download paths'
+        });
+        return;
+    }
+    if (deletionPathKeys.some((pathKey) => deletingArtifactPathKeys.has(pathKey))) {
+        response.status(409).json({
+            ok: false,
+            errorCode: 'DOWNLOAD_DESTINATION_DELETING',
+            error: 'Another download using this destination is currently being deleted. Wait for it to finish and try again.'
+        });
+        return;
+    }
+    deletionPathKeys.forEach((pathKey) => deletingArtifactPathKeys.add(pathKey));
+
+    try {
+        let artifactsExist;
+        try {
+            artifactsExist = await hasExistingDownloadArtifacts(record);
+        } catch (error) {
+            console.error(`Could not inspect local data for download ${record.id}:`, error);
+            response.status(500).json({
+                ok: false,
+                errorCode: error?.code || 'DOWNLOAD_ARTIFACT_INSPECTION_FAILED',
+                error: error?.message || 'Could not safely inspect the local download data'
+            });
+            return;
+        }
+
+        if (artifactsExist) {
+            const sharedRecords = getSharedDownloadArtifactRecords(record, downloads.values());
+            if (sharedRecords.length > 0) {
+                response.status(409).json({
+                    ok: false,
+                    errorCode: 'DOWNLOAD_MEDIA_SHARED_RECORDS',
+                    error: `This local file is referenced by ${sharedRecords.length + 1} download records. Remove the duplicate records first, then delete the remaining download.`,
+                    sharedRecordIds: sharedRecords.map((sharedRecord) => sharedRecord.id)
+                });
+                return;
+            }
+        }
+
+        let deletion;
+        try {
+            deletion = await deleteDownloadArtifacts(record);
+        } catch (error) {
+            console.error(`Could not delete local data for download ${record.id}:`, error);
+            const conflictCodes = new Set([
+                'DOWNLOAD_MEDIA_NOT_DELETABLE',
+                'DOWNLOAD_RECORDED_PATH_MISMATCH',
+                'DOWNLOAD_FINAL_PATH_UNRECORDED',
+                'DOWNLOAD_DELETE_ARTIFACT_INVALID',
+                'DOWNLOAD_DELETE_PATH_UNSAFE',
+                'DOWNLOAD_FILE_IDENTITY_UNRECORDED',
+                'DOWNLOAD_FILE_IDENTITY_MISMATCH',
+                'DOWNLOAD_DELETE_ARTIFACT_CHANGED'
+            ]);
+            response.status(conflictCodes.has(error?.code) ? 409 : 500).json({
+                ok: false,
+                errorCode: error?.code || 'DOWNLOAD_MEDIA_DELETE_FAILED',
+                error: error?.message || 'Could not delete the local download data'
+            });
+            return;
+        }
+
+        downloads.delete(record.id);
+        try {
+            await persistDownloadRecordsNow();
+        } catch (error) {
+            const recoveryRecord = {
+                ...record,
+                status: 'failed',
+                errorCode: 'DOWNLOAD_MEDIA_DELETED_RECORD_REMOVE_FAILED',
+                error: 'The local media was deleted, but its saved record could not be removed. Try Delete download again.',
+                updatedAt: getNowIso()
+            };
+            downloads.set(record.id, recoveryRecord);
+            scheduleDownloadRecordsPersistence();
+            console.error('Local media was deleted but its download record could not be removed:', error);
+            response.status(500).json({
+                ok: false,
+                errorCode: 'DOWNLOAD_MEDIA_DELETED_RECORD_REMOVE_FAILED',
+                error: recoveryRecord.error,
+                deletedFiles: deletion.deletedFiles,
+                bytesFreed: deletion.bytesFreed
+            });
+            return;
+        }
+
+        if (deletion.directoryCleanupWarning) {
+            console.warn(`${deletion.directoryCleanupWarning} Download: ${record.id}`);
+        }
+
+        response.json({
+            ok: true,
+            id: record.id,
+            status: 'deleted',
+            deletedFiles: deletion.deletedFiles,
+            bytesFreed: deletion.bytesFreed,
+            removedDirectories: deletion.removedDirectories,
+            directoryCleanupWarning: deletion.directoryCleanupWarning
+        });
+    } finally {
+        deletionPathKeys.forEach((pathKey) => deletingArtifactPathKeys.delete(pathKey));
+    }
+}));
 
 app.post('/downloads/:id/open-location', async (request, response) => {
     const record = getDownloadRecordOrSend404(request.params.id, response);

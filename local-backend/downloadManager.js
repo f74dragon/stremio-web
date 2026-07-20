@@ -5,6 +5,7 @@ const {
     deriveLocalPath,
     ensureParentDirectory,
     derivePartialPath,
+    getRegularFileIdentity,
     finalizePartialDownload
 } = require('./fileUtils');
 
@@ -308,8 +309,11 @@ const requestDownload = (sourceUrl, partialPath, control, redirectCount, resumeO
             control.sourceEtag = sourceEtag;
             control.sourceLastModified = sourceLastModified;
 
-            const fileStream = fs.createWriteStream(partialPath, { flags: resumeOffset > 0 ? 'a' : 'w' });
+            const fileStream = fs.createWriteStream(partialPath, { flags: resumeOffset > 0 ? 'a' : 'wx' });
             control.fileStream = fileStream;
+            fileStream.once('open', () => {
+                control.ownsPartialFile = true;
+            });
 
             const emitProgress = (force = false) => {
                 const now = Date.now();
@@ -412,6 +416,7 @@ const startDownload = (record, onUpdate, { resumeOffset = 0 } = {}) => {
         resumeSupported: record.resumeSupported ?? null,
         sourceEtag: record.sourceEtag ?? null,
         sourceLastModified: record.sourceLastModified ?? null,
+        ownsPartialFile: resumeOffset > 0,
         completionPromise: null
     };
 
@@ -426,9 +431,6 @@ const startDownload = (record, onUpdate, { resumeOffset = 0 } = {}) => {
 
         try {
             await ensureParentDirectory(partialPath);
-            if (currentOffset === 0) {
-                await fs.promises.rm(partialPath, { force: true });
-            }
 
             while (true) {
                 if (control.stopReason) {
@@ -483,7 +485,7 @@ const startDownload = (record, onUpdate, { resumeOffset = 0 } = {}) => {
                     );
                 }
 
-                await finalizePartialDownload(partialPath, localPath, outcome.bytesDownloaded);
+                const localFileIdentity = await finalizePartialDownload(partialPath, localPath, outcome.bytesDownloaded);
                 emitUpdate({
                     status: 'completed',
                     ...buildProgressUpdate({
@@ -495,6 +497,8 @@ const startDownload = (record, onUpdate, { resumeOffset = 0 } = {}) => {
                         partialPath: null,
                         forceCompleted: true
                     }),
+                    localFileIdentity,
+                    partialFileIdentity: null,
                     resumeSupported: outcome.resumeSupported,
                     sourceEtag: outcome.sourceEtag,
                     sourceLastModified: outcome.sourceLastModified,
@@ -505,6 +509,14 @@ const startDownload = (record, onUpdate, { resumeOffset = 0 } = {}) => {
                 return;
             }
         } catch (error) {
+            let partialFileIdentity = null;
+            if (control.ownsPartialFile) {
+                try {
+                    partialFileIdentity = await getRegularFileIdentity(partialPath, { allowMissing: true });
+                } catch {
+                    // Preserve the primary transfer error. Destructive actions will refuse an unverifiable artifact.
+                }
+            }
             const bytesDownloaded = Number.isFinite(control.bytesDownloaded) ? control.bytesDownloaded : resumeOffset;
             const bytesTotal = Number.isFinite(control.bytesTotal) ? control.bytesTotal : null;
             const progressUpdate = buildProgressUpdate({
@@ -525,6 +537,8 @@ const startDownload = (record, onUpdate, { resumeOffset = 0 } = {}) => {
                     resumeSupported: control.resumeSupported,
                     sourceEtag: control.sourceEtag,
                     sourceLastModified: control.sourceLastModified,
+                    localFileIdentity: null,
+                    partialFileIdentity,
                     completedAt: null,
                     error: null,
                     errorCode: null
@@ -541,6 +555,8 @@ const startDownload = (record, onUpdate, { resumeOffset = 0 } = {}) => {
                 resumeSupported: normalizedError.code === 'DOWNLOAD_RESUME_UNSUPPORTED' ? false : control.resumeSupported,
                 sourceEtag: control.sourceEtag,
                 sourceLastModified: control.sourceLastModified,
+                localFileIdentity: null,
+                partialFileIdentity,
                 completedAt: null,
                 error: normalizedError.message,
                 errorCode: normalizedError.code

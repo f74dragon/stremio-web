@@ -3,7 +3,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { deriveLocalPath, derivePartialPath, ensureParentDirectory } = require('../local-backend/fileUtils');
+const { deriveLocalPath, derivePartialPath, ensureParentDirectory, createFileIdentity } = require('../local-backend/fileUtils');
 const {
     isDownloadRetryable,
     prepareDownloadRetry
@@ -59,9 +59,10 @@ describe('downloadRetry', () => {
         };
         const derivedPath = deriveLocalPath(record);
         const partialPath = derivePartialPath(derivedPath);
+        record.partialPath = partialPath;
         await ensureParentDirectory(partialPath);
-        fs.writeFileSync(derivedPath, 'stale final bytes');
         fs.writeFileSync(partialPath, 'partial bytes');
+        record.partialFileIdentity = createFileIdentity(fs.lstatSync(partialPath));
 
         const retriedRecord = await prepareDownloadRetry(record, '2026-07-16T12:00:00.000Z');
 
@@ -86,10 +87,37 @@ describe('downloadRetry', () => {
             resumeSupported: null,
             sourceEtag: null,
             sourceLastModified: null,
+            localFileIdentity: null,
+            partialFileIdentity: null,
             attemptCount: 3,
             lastAttemptAt: '2026-07-16T12:00:00.000Z'
         });
         expect(retriedRecord.poster).toBe(record.poster);
+    });
+
+    test('refuses to retry over an existing final file and preserves partial data', async () => {
+        const record = {
+            id: 'dl_retry_occupied',
+            status: 'failed',
+            type: 'movie',
+            parentTitle: 'Occupied Movie',
+            sourceUrl: 'https://example.com/video.mkv',
+            bytesDownloaded: 7
+        };
+        const localPath = deriveLocalPath(record);
+        const partialPath = derivePartialPath(localPath);
+        record.localPath = localPath;
+        record.partialPath = partialPath;
+        await ensureParentDirectory(partialPath);
+        fs.writeFileSync(localPath, 'existing final');
+        fs.writeFileSync(partialPath, 'partial');
+        record.partialFileIdentity = createFileIdentity(fs.lstatSync(partialPath));
+
+        await expect(prepareDownloadRetry(record)).rejects.toMatchObject({
+            code: 'DOWNLOAD_DESTINATION_EXISTS'
+        });
+        expect(fs.readFileSync(localPath, 'utf8')).toBe('existing final');
+        expect(fs.readFileSync(partialPath, 'utf8')).toBe('partial');
     });
 
     test('treats a legacy record without attempt metadata as its second attempt', async () => {

@@ -1,10 +1,8 @@
 const fs = require('fs');
 const { deriveLocalPath, derivePartialPath } = require('./fileUtils');
+const { deleteDownloadArtifacts } = require('./downloadDeletion');
 
 const RETRYABLE_DOWNLOAD_STATUSES = new Set(['failed', 'canceled']);
-const TRANSIENT_FILE_LOCK_CODES = new Set(['EBUSY', 'EACCES', 'EPERM']);
-const CLEANUP_ATTEMPTS = 4;
-const CLEANUP_RETRY_DELAY_MS = 50;
 
 class DownloadRetryError extends Error {
     constructor(code, message, cause = null) {
@@ -22,22 +20,6 @@ const getNextAttemptCount = (record) => {
     return Number.isInteger(attemptCount) && attemptCount > 0 ? attemptCount + 1 : 2;
 };
 
-const removePartialFile = async (localPath) => {
-    for (let attempt = 1; attempt <= CLEANUP_ATTEMPTS; attempt += 1) {
-        try {
-            await fs.promises.rm(localPath, { force: true });
-            return;
-        } catch (error) {
-            const shouldRetry = TRANSIENT_FILE_LOCK_CODES.has(error?.code) && attempt < CLEANUP_ATTEMPTS;
-            if (!shouldRetry) {
-                throw error;
-            }
-
-            await new Promise((resolve) => setTimeout(resolve, CLEANUP_RETRY_DELAY_MS * attempt));
-        }
-    }
-};
-
 const prepareDownloadRetry = async (record, now = new Date().toISOString()) => {
     if (!record || typeof record !== 'object' || !record.id) {
         throw new DownloadRetryError('DOWNLOAD_RETRY_RECORD_INVALID', 'The download record is invalid.');
@@ -50,8 +32,26 @@ const prepareDownloadRetry = async (record, now = new Date().toISOString()) => {
     const localPath = deriveLocalPath(record);
     const partialPath = derivePartialPath(localPath);
     try {
-        await removePartialFile(partialPath);
-        await removePartialFile(localPath);
+        await fs.promises.lstat(localPath);
+        throw new DownloadRetryError(
+            'DOWNLOAD_DESTINATION_EXISTS',
+            `The final download destination already exists and will not be overwritten: ${localPath}`
+        );
+    } catch (error) {
+        if (error instanceof DownloadRetryError) {
+            throw error;
+        }
+        if (error?.code !== 'ENOENT') {
+            throw new DownloadRetryError(
+                'DOWNLOAD_RETRY_DESTINATION_CHECK_FAILED',
+                `Could not safely inspect the final download destination before retrying: ${localPath}`,
+                error
+            );
+        }
+    }
+
+    try {
+        await deleteDownloadArtifacts(record);
     } catch (error) {
         throw new DownloadRetryError(
             'DOWNLOAD_RETRY_CLEANUP_FAILED',
@@ -79,6 +79,8 @@ const prepareDownloadRetry = async (record, now = new Date().toISOString()) => {
         resumeSupported: null,
         sourceEtag: null,
         sourceLastModified: null,
+        localFileIdentity: null,
+        partialFileIdentity: null,
         attemptCount: getNextAttemptCount(record),
         lastAttemptAt: now
     };

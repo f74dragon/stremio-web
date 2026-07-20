@@ -33,7 +33,8 @@ const Downloads = () => {
         retry,
         play,
         openLocation,
-        remove
+        remove,
+        removeMedia
     } = useDownloadRecords();
     const groups = React.useMemo(() => groupDownloadRecords(items), [items]);
     const mediaGroups = React.useMemo(() => groupDownloadRecordsByMedia(items), [items]);
@@ -99,6 +100,7 @@ const Downloads = () => {
                                 onPlay={play}
                                 onOpenLocation={openLocation}
                                 onRemove={remove}
+                                onDeleteMedia={removeMedia}
                             />
                         </React.Fragment>
                         :

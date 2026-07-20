@@ -99,17 +99,64 @@ const ensureParentDirectory = async (filePath) => {
 
 const derivePartialPath = (localPath) => `${localPath}.part`;
 
+const createFileIdentity = (stats) => ({
+    dev: stats.dev,
+    ino: stats.ino,
+    size: stats.size,
+    mtimeMs: stats.mtimeMs,
+    birthtimeMs: stats.birthtimeMs
+});
+
+const isSameFileIdentity = (expected, actual) => {
+    return Boolean(expected && actual) &&
+        expected.dev === actual.dev &&
+        expected.ino === actual.ino &&
+        expected.size === actual.size &&
+        expected.mtimeMs === actual.mtimeMs &&
+        expected.birthtimeMs === actual.birthtimeMs;
+};
+
+const getRegularFileIdentity = async (filePath, { allowMissing = false } = {}) => {
+    let stats;
+    try {
+        stats = await fs.promises.lstat(filePath);
+    } catch (error) {
+        if (allowMissing && error?.code === 'ENOENT') {
+            return null;
+        }
+        throw error;
+    }
+    if (!stats.isFile() || stats.isSymbolicLink()) {
+        const error = new Error(`The download artifact is not a regular file: ${filePath}`);
+        error.code = 'DOWNLOAD_ARTIFACT_INVALID';
+        throw error;
+    }
+    return createFileIdentity(stats);
+};
+
 const finalizePartialDownload = async (partialPath, localPath, expectedBytes) => {
-    const partialStats = await fs.promises.stat(partialPath);
-    if (!partialStats.isFile()) {
-        throw new Error(`The completed download is not a regular file: ${partialPath}`);
+    const partialStats = await fs.promises.lstat(partialPath);
+    if (!partialStats.isFile() || partialStats.isSymbolicLink()) {
+        const error = new Error(`The completed download is not a regular file: ${partialPath}`);
+        error.code = 'DOWNLOAD_ARTIFACT_INVALID';
+        throw error;
     }
     if (Number.isSafeInteger(expectedBytes) && partialStats.size !== expectedBytes) {
         throw new Error(`The completed download contains ${partialStats.size} of ${expectedBytes} expected bytes`);
     }
 
-    await fs.promises.rm(localPath, { force: true });
+    try {
+        await fs.promises.lstat(localPath);
+        const error = new Error(`The final download destination already exists and will not be overwritten: ${localPath}`);
+        error.code = 'DOWNLOAD_DESTINATION_EXISTS';
+        throw error;
+    } catch (error) {
+        if (error?.code !== 'ENOENT') {
+            throw error;
+        }
+    }
     await fs.promises.rename(partialPath, localPath);
+    return getRegularFileIdentity(localPath);
 };
 
 module.exports = {
@@ -119,5 +166,8 @@ module.exports = {
     deriveLocalPath,
     ensureParentDirectory,
     derivePartialPath,
+    createFileIdentity,
+    isSameFileIdentity,
+    getRegularFileIdentity,
     finalizePartialDownload
 };

@@ -5,6 +5,7 @@ const http = require('http');
 const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
+const { derivePartialPath, createFileIdentity } = require('../local-backend/fileUtils');
 
 jest.setTimeout(20000);
 
@@ -114,6 +115,46 @@ describe('download lifecycle API integration', () => {
             const health = await requestJson(backendPort, '/health');
             return health.statusCode === 200;
         });
+    };
+
+    const seedDownloadRecords = async (records) => {
+        await stopChildProcess(backendProcess);
+        backendProcess = null;
+        const dataDirectory = path.join(tempDirectory, 'data');
+        fs.mkdirSync(dataDirectory, { recursive: true });
+        fs.writeFileSync(path.join(dataDirectory, 'download-records.json'), `${JSON.stringify({
+            version: 1,
+            updatedAt: new Date().toISOString(),
+            records
+        }, null, 2)}\n`);
+        await startBackend();
+    };
+
+    const createSharedCanceledRecords = (partialFileIdentity = null) => {
+        const localPath = path.join(tempDirectory, 'downloads', 'Shared Canceled Movie', 'Shared Canceled Movie.mp4');
+        const partialPath = derivePartialPath(localPath);
+        const now = new Date().toISOString();
+        return [1, 2, 3].map((number) => ({
+            id: `shared-canceled-${number}`,
+            status: 'canceled',
+            type: 'movie',
+            metaId: 'tt-shared-canceled',
+            parentTitle: 'Shared Canceled Movie',
+            videoTitle: 'Shared Canceled Movie',
+            streamName: `Source ${number}`,
+            sourceUrl: `https://source-${number}.example/media.mp4`,
+            localPath,
+            partialPath,
+            partialFileIdentity,
+            bytesDownloaded: partialFileIdentity?.size || 0,
+            bytesTotal: null,
+            progress: 0,
+            speedBytesPerSecond: 0,
+            etaSeconds: null,
+            createdAt: now,
+            updatedAt: now,
+            completedAt: null
+        }));
     };
 
     beforeEach(async () => {
@@ -317,6 +358,155 @@ describe('download lifecycle API integration', () => {
             error: null
         });
         expect(fs.readFileSync(completedRecord.localPath, 'utf8')).toBe('retry integration media');
+    });
+
+    test('deletes completed media from disk together with its saved record', async () => {
+        sourceShouldFail = false;
+        const createdResponse = await requestJson(backendPort, '/downloads', {
+            method: 'POST',
+            body: {
+                metaId: 'tt-delete-media-test',
+                type: 'movie',
+                parentTitle: 'Delete Media Integration Movie',
+                downloadUrl: `http://127.0.0.1:${sourcePort}/delete-media.mp4`
+            }
+        });
+        expect(createdResponse.statusCode).toBe(201);
+
+        const completedRecord = await waitFor(async () => {
+            const response = await requestJson(backendPort, `/downloads/${createdResponse.body.id}`);
+            return response.body?.status === 'completed' ? response.body : null;
+        });
+        expect(fs.existsSync(completedRecord.localPath)).toBe(true);
+
+        await stopChildProcess(backendProcess);
+        backendProcess = null;
+        await startBackend();
+        const restoredRecord = await requestJson(backendPort, `/downloads/${completedRecord.id}`);
+        expect(restoredRecord).toMatchObject({
+            statusCode: 200,
+            body: {
+                status: 'completed',
+                localFileIdentity: expect.objectContaining({ size: sourceMedia.length })
+            }
+        });
+
+        const deleteResponse = await requestJson(backendPort, `/downloads/${completedRecord.id}/media`, {
+            method: 'DELETE'
+        });
+
+        expect(deleteResponse).toMatchObject({
+            statusCode: 200,
+            body: {
+                ok: true,
+                id: completedRecord.id,
+                status: 'deleted',
+                bytesFreed: sourceMedia.length
+            }
+        });
+        expect(deleteResponse.body.deletedFiles).toContain(completedRecord.localPath);
+        expect(fs.existsSync(completedRecord.localPath)).toBe(false);
+        expect(fs.existsSync(path.dirname(completedRecord.localPath))).toBe(false);
+        expect(fs.existsSync(path.join(tempDirectory, 'downloads'))).toBe(true);
+
+        const missingRecord = await requestJson(backendPort, `/downloads/${completedRecord.id}`);
+        expect(missingRecord.statusCode).toBe(404);
+    });
+
+    test('deletes a verified paused partial without touching the download root', async () => {
+        sourceShouldFail = false;
+        sourceMedia = Buffer.alloc(256 * 1024, 0x42);
+        sourceChunkSize = 4096;
+        sourceChunkDelayMs = 10;
+        const createdResponse = await requestJson(backendPort, '/downloads', {
+            method: 'POST',
+            body: {
+                metaId: 'tt-delete-partial-test',
+                type: 'movie',
+                parentTitle: 'Delete Partial Integration Movie',
+                downloadUrl: `http://127.0.0.1:${sourcePort}/delete-partial.mp4`
+            }
+        });
+        await waitFor(async () => {
+            const response = await requestJson(backendPort, `/downloads/${createdResponse.body.id}`);
+            return response.body?.status === 'downloading' && response.body.bytesDownloaded > 0;
+        });
+
+        const pauseResponse = await requestJson(backendPort, `/downloads/${createdResponse.body.id}/pause`, { method: 'POST' });
+        expect(pauseResponse).toMatchObject({
+            statusCode: 200,
+            body: {
+                status: 'paused',
+                partialFileIdentity: expect.objectContaining({ size: expect.any(Number) })
+            }
+        });
+        expect(fs.existsSync(pauseResponse.body.partialPath)).toBe(true);
+
+        const deleteResponse = await requestJson(backendPort, `/downloads/${createdResponse.body.id}/media`, {
+            method: 'DELETE'
+        });
+        expect(deleteResponse.statusCode).toBe(200);
+        expect(fs.existsSync(pauseResponse.body.partialPath)).toBe(false);
+        expect(fs.existsSync(path.join(tempDirectory, 'downloads'))).toBe(true);
+    });
+
+    test('never overwrites or claims preexisting final and partial files', async () => {
+        sourceShouldFail = false;
+
+        const partialPayload = {
+            metaId: 'tt-preexisting-partial',
+            type: 'movie',
+            parentTitle: 'Preexisting Partial Movie',
+            downloadUrl: `http://127.0.0.1:${sourcePort}/preexisting-partial.mp4`
+        };
+        const partialLocalPath = path.join(tempDirectory, 'downloads', 'Preexisting Partial Movie', 'Preexisting Partial Movie.mp4');
+        const preexistingPartialPath = derivePartialPath(partialLocalPath);
+        fs.mkdirSync(path.dirname(preexistingPartialPath), { recursive: true });
+        fs.writeFileSync(preexistingPartialPath, 'unrelated partial data');
+
+        const partialResponse = await requestJson(backendPort, '/downloads', { method: 'POST', body: partialPayload });
+        const failedPartialRecord = await waitFor(async () => {
+            const response = await requestJson(backendPort, `/downloads/${partialResponse.body.id}`);
+            return response.body?.status === 'failed' ? response.body : null;
+        });
+        expect(failedPartialRecord.errorCode).toBe('EEXIST');
+        expect(failedPartialRecord.partialFileIdentity).toBe(null);
+        expect(fs.readFileSync(preexistingPartialPath, 'utf8')).toBe('unrelated partial data');
+
+        const unsafePartialDelete = await requestJson(backendPort, `/downloads/${failedPartialRecord.id}/media`, {
+            method: 'DELETE'
+        });
+        expect(unsafePartialDelete).toMatchObject({
+            statusCode: 409,
+            body: { errorCode: 'DOWNLOAD_FILE_IDENTITY_UNRECORDED' }
+        });
+        expect(fs.readFileSync(preexistingPartialPath, 'utf8')).toBe('unrelated partial data');
+
+        const finalPayload = {
+            metaId: 'tt-preexisting-final',
+            type: 'movie',
+            parentTitle: 'Preexisting Final Movie',
+            downloadUrl: `http://127.0.0.1:${sourcePort}/preexisting-final.mp4`
+        };
+        const preexistingFinalPath = path.join(tempDirectory, 'downloads', 'Preexisting Final Movie', 'Preexisting Final Movie.mp4');
+        fs.mkdirSync(path.dirname(preexistingFinalPath), { recursive: true });
+        fs.writeFileSync(preexistingFinalPath, 'unrelated final data');
+
+        const finalResponse = await requestJson(backendPort, '/downloads', { method: 'POST', body: finalPayload });
+        const failedFinalRecord = await waitFor(async () => {
+            const response = await requestJson(backendPort, `/downloads/${finalResponse.body.id}`);
+            return response.body?.status === 'failed' ? response.body : null;
+        });
+        expect(failedFinalRecord.errorCode).toBe('DOWNLOAD_DESTINATION_EXISTS');
+        expect(failedFinalRecord.partialFileIdentity).toEqual(expect.objectContaining({ size: sourceMedia.length }));
+        expect(fs.readFileSync(preexistingFinalPath, 'utf8')).toBe('unrelated final data');
+
+        const safePartialDelete = await requestJson(backendPort, `/downloads/${failedFinalRecord.id}/media`, {
+            method: 'DELETE'
+        });
+        expect(safePartialDelete.statusCode).toBe(200);
+        expect(fs.readFileSync(preexistingFinalPath, 'utf8')).toBe('unrelated final data');
+        expect(fs.existsSync(derivePartialPath(preexistingFinalPath))).toBe(false);
     });
 
     test('pauses to a partial file and resumes with a validated byte range', async () => {
@@ -640,6 +830,88 @@ describe('download lifecycle API integration', () => {
             '/restart-waiting.mp4',
             '/restart-second.mp4'
         ]);
+    });
+
+    test('clears missing shared artifacts and safely resolves duplicate records around a real partial file', async () => {
+        await seedDownloadRecords(createSharedCanceledRecords());
+
+        const initialList = await requestJson(backendPort, '/downloads');
+        expect(initialList.statusCode).toBe(200);
+        expect(initialList.body.items).toHaveLength(3);
+        expect(initialList.body.items.map((record) => record.sharedDestinationCount)).toEqual([2, 2, 2]);
+
+        for (const record of initialList.body.items) {
+            const deletion = await requestJson(backendPort, `/downloads/${record.id}/media`, { method: 'DELETE' });
+            expect(deletion).toMatchObject({
+                statusCode: 200,
+                body: {
+                    ok: true,
+                    id: record.id,
+                    status: 'deleted',
+                    deletedFiles: []
+                }
+            });
+        }
+        expect((await requestJson(backendPort, '/downloads')).body.items).toEqual([]);
+
+        const partialPath = derivePartialPath(path.join(
+            tempDirectory,
+            'downloads',
+            'Shared Canceled Movie',
+            'Shared Canceled Movie.mp4'
+        ));
+        fs.mkdirSync(path.dirname(partialPath), { recursive: true });
+        fs.writeFileSync(partialPath, 'real shared partial bytes');
+        const identity = createFileIdentity(fs.lstatSync(partialPath));
+        await seedDownloadRecords(createSharedCanceledRecords(identity));
+
+        const blockedDeletion = await requestJson(backendPort, '/downloads/shared-canceled-1/media', { method: 'DELETE' });
+        expect(blockedDeletion).toMatchObject({
+            statusCode: 409,
+            body: {
+                errorCode: 'DOWNLOAD_MEDIA_SHARED_RECORDS',
+                sharedRecordIds: ['shared-canceled-2', 'shared-canceled-3']
+            }
+        });
+        expect(fs.readFileSync(partialPath, 'utf8')).toBe('real shared partial bytes');
+
+        const firstDuplicateRemoval = await requestJson(backendPort, '/downloads/shared-canceled-1', { method: 'DELETE' });
+        expect(firstDuplicateRemoval).toMatchObject({
+            statusCode: 200,
+            body: {
+                status: 'deleted',
+                remainingSharedRecordIds: ['shared-canceled-2', 'shared-canceled-3']
+            }
+        });
+        const secondDuplicateRemoval = await requestJson(backendPort, '/downloads/shared-canceled-2', { method: 'DELETE' });
+        expect(secondDuplicateRemoval).toMatchObject({
+            statusCode: 200,
+            body: {
+                status: 'deleted',
+                remainingSharedRecordIds: ['shared-canceled-3']
+            }
+        });
+
+        const lastRecord = await requestJson(backendPort, '/downloads/shared-canceled-3');
+        expect(lastRecord.body.sharedDestinationCount).toBe(0);
+        const unsafeLastRecordRemoval = await requestJson(backendPort, '/downloads/shared-canceled-3', { method: 'DELETE' });
+        expect(unsafeLastRecordRemoval).toMatchObject({
+            statusCode: 409,
+            body: { errorCode: 'DOWNLOAD_PARTIAL_DATA_REQUIRES_DELETE' }
+        });
+        expect(fs.existsSync(partialPath)).toBe(true);
+
+        const finalDeletion = await requestJson(backendPort, '/downloads/shared-canceled-3/media', { method: 'DELETE' });
+        expect(finalDeletion).toMatchObject({
+            statusCode: 200,
+            body: {
+                status: 'deleted',
+                deletedFiles: [partialPath],
+                bytesFreed: Buffer.byteLength('real shared partial bytes')
+            }
+        });
+        expect(fs.existsSync(partialPath)).toBe(false);
+        expect((await requestJson(backendPort, '/downloads')).body.items).toEqual([]);
     });
 
     test('updates concurrency at runtime and preserves the in-app setting across restart', async () => {

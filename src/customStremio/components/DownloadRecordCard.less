@@ -213,6 +213,35 @@
     background-color: rgba(255, 255, 255, 0.06);
 }
 
+.delete-confirmation {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    padding: 0.75rem;
+    border: 1px solid rgba(255, 101, 117, 0.32);
+    border-radius: calc(var(--border-radius) * 0.75);
+    color: var(--primary-foreground-color);
+    background: rgba(95, 26, 38, 0.3);
+
+    > strong {
+        font-size: 0.88rem;
+    }
+
+    > span {
+        font-size: 0.78rem;
+        line-height: 1.45;
+        opacity: 0.78;
+    }
+}
+
+.delete-confirmation-actions {
+    display: flex;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.25rem;
+}
+
 .record-actions {
     display: flex;
     align-items: center;
@@ -235,7 +264,10 @@
 .cancel-button,
 .retry-download-button,
 .location-button,
-.remove-button {
+.remove-button,
+.delete-media-button,
+.keep-button,
+.confirm-delete-button {
     flex: none;
     padding: 0.38rem 0.78rem;
     border: 1px solid rgba(255, 255, 255, 0.14);
@@ -292,6 +324,19 @@
 
 .remove-button {
     color: var(--secondary-accent-color);
+}
+
+.delete-media-button,
+.confirm-delete-button {
+    border-color: rgba(255, 101, 117, 0.48);
+    color: #ffd7dc;
+    background-color: rgba(164, 39, 58, 0.28);
+
+    &:hover,
+    &:focus {
+        border-color: rgba(255, 126, 140, 0.82);
+        background-color: rgba(190, 45, 66, 0.46);
+    }
 }
 
 @media only screen and (max-width: 600px) {

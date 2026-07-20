@@ -56,7 +56,8 @@ const DownloadMediaDetails = ({
     onRetry,
     onPlay,
     onOpenLocation,
-    onRemove
+    onRemove,
+    onDeleteMedia
 }) => {
     const { t } = useTranslation();
     const isMovie = group.type === 'movie';
@@ -252,6 +253,7 @@ const DownloadMediaDetails = ({
                                     onPlay={onPlay}
                                     onOpenLocation={onOpenLocation}
                                     onRemove={onRemove}
+                                    onDeleteMedia={onDeleteMedia}
                                 />
                             </div>
                         );
@@ -293,7 +295,8 @@ DownloadMediaDetails.propTypes = {
     onRetry: PropTypes.func,
     onPlay: PropTypes.func,
     onOpenLocation: PropTypes.func,
-    onRemove: PropTypes.func
+    onRemove: PropTypes.func,
+    onDeleteMedia: PropTypes.func
 };
 
 module.exports = DownloadMediaDetails;

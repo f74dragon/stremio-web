@@ -55,13 +55,13 @@ Notes:
 
 - `1. Project tracking document`: Completed
 - `2. Locate stream/title data flow`: Completed
-- `3. Preferred addon stream sorting/filtering`: In progress (`Milestone 3A` implemented)
-- `4. Add placeholder Download / Play Download buttons`: In progress (`Milestone 4A` implemented)
-- `5. Create local backend prototype`: In progress (`Milestone 5B` backend skeleton created)
-- `7. Add title-specific downloads panel`: In progress (`Milestone 7A` implemented)
-- `6. Implement real download manager`: In progress (`Milestones 6A-6K.4` real downloads, persistence, retry/resume, FIFO scheduling, queue controls, concurrency settings, hybrid provider availability, provider-aware download safety, and resolver HEAD fallback implemented)
+- `3. Preferred addon stream sorting/filtering`: Completed for the planned scope (`Milestones 3A-3A.1`; preferred ordering and persistent original Stremio addon-filter state implemented)
+- `4. Add placeholder Download / Play Download buttons`: Completed and superseded by the real record-aware Download and Play controls
+- `5. Create local backend prototype`: Completed and superseded by the persistent local download backend
+- `6. Implement real download manager`: In progress (`Milestones 6A-6L` real downloads, persistence, retry/resume, FIFO scheduling, queue controls, concurrency settings, hybrid provider availability, provider-aware download safety, resolver HEAD fallback, and safe local-media deletion implemented)
+- `7. Add title-specific downloads panel`: Completed for the planned panel scope (`Milestones 7A-7B`; later shared file-management actions remain tracked under the download manager)
 - `8. Add global downloads page`: In progress (`Milestones 8A-8C.2` implemented)
-- `9. Add MPC-HC launch support`: In progress (`Milestones 9A-9C` panel playback, stream-row playback, and persistent in-app player selection implemented)
+- `9. Add MPC-HC launch support`: Completed for the planned scope (`Milestones 9A-9C`; panel playback, stream-row playback, and persistent in-app player selection implemented)
 - `10. Add watched/unwatched integration`: Not started
 - `11. Package as Windows app`: Not started
 
@@ -78,7 +78,39 @@ Notes:
 
 ## Next Recommended Step
 
-Restart the local backend, then manually validate Milestone 6K.4 on a Real-Debrid episode row that previously returned **Could not safely check**. Confirm the row visibly advances from provider checking to resolver-link checking, a valid link becomes **Ready to download**, known placeholder/451 links remain blocked, and the Real-Debrid account returns to its pre-check torrent list. After that checkpoint, design automatic provider/source switching only if the app should choose another cached quality instead of requiring the user to select it.
+Implement **Milestone 6M: bulk selection and safe batch deletion** as the next focused pass. Add an explicit selection mode to the Downloads library with per-title and Select all controls; movie details should select individual source records, while series details should support individual episodes, whole seasons, Select all in season, and Select all episodes. Show one confirmation summary before deletion and report partial failures without hiding records that were not safely removed.
+
+Do not combine multi-episode downloading, watched progress, filesystem discovery, automatic provider/source switching, or Windows packaging into the bulk-delete pass.
+
+## Remaining Tracked Work
+
+- Multi-episode/season batch download planning, explicit source selection, and queue submission. Do not silently choose among multiple qualities or providers without a documented selection rule.
+- Bulk deletion selection is planned for the next pass: title selection and Select all on the library, per-source selection for movies, and episode/season hierarchy controls for series.
+- Watched/unwatched and playback-progress integration for real **Continue Watching**, resume position, next-episode behavior, and show-card progress.
+- Filesystem discovery for media that exists without a current record, plus metadata/artwork backfill for legacy persisted records.
+- Availability-history management UI, including an explicit clear-history action; current cached history remains intentionally retained by default.
+- Optional automatic provider/source switching, only if the UX should select another verified source instead of asking the user.
+- Explicit send-to-debrid behavior remains separate from cache checking and ordinary Stremio-link downloads.
+- Windows application packaging after the local backend, download lifecycle, and playback integration are stable.
+
+The milestone findings below are chronological implementation records. Older sections may describe a feature as deferred or unavailable at that historical point even when a later milestone subsequently implemented it; the **Current Status**, **Next Recommended Step**, and **Remaining Tracked Work** sections above are authoritative for present planning.
+
+## Milestone 6L Findings: Safe Local-Media Deletion
+
+- The download manager now separates non-destructive **Remove record** from a confirmed destructive action. Completed records show **Delete download**; paused, failed, and canceled records show **Delete partial data** so retained bytes are visible and intentional.
+- Pause continues to preserve `.part` data for Resume. Completed records may delete only their verified final file; paused, failed, and canceled records may delete only their verified recorded `.part` file. An unrelated final file at the same derived path is never selected by an incomplete record.
+- `DELETE /downloads/:id/media` accepts only a stored id. Every candidate must be explicitly claimed by that record, match a fresh derivation from trusted metadata, remain inside the configured root after real-path resolution, and be a regular non-symbolic-link file.
+- Final and partial file identities are captured when the backend creates/finalizes them and persisted with the record. Deletion and Resume refuse existing legacy, replaced, or otherwise unverifiable files; missing artifacts can still have their stale records cleared safely.
+- Newly started transfers create `.part` files exclusively instead of truncating existing paths, finalization refuses to overwrite an existing destination, and Retry removes only an identity-verified partial after confirming the final destination is free.
+- Deletion is blocked when another persisted record resolves to the same existing final/partial path. This protects multiple source records for the same movie or episode from silently invalidating one another. If the artifact is already missing, every stale record can be cleared without entering a shared-path deadlock.
+- Lifecycle operations are serialized per record, and destination deletion locks block new same-path creation until the destructive operation and record persistence finish.
+- Media deletion happens before record removal. Windows locks and filesystem errors retain the record for retry, while a missing artifact is treated as already removed. Persistence failure after successful file deletion restores an actionable failed record instead of hiding the exceptional state.
+- Empty season/title directories are cleaned conservatively from the leaf upward, never recursively and never including the configured root. Nonempty folders and unrelated files remain untouched; empty-directory cleanup failure is a nonfatal warning.
+- Record-only deletion rejects queued, downloading, and paused records, plus failed/canceled records that would orphan their sole partial-file claim. When multiple records claim the exact same partial path and matching persisted identity, duplicate records can be removed one at a time while the final owner retains the destructive delete action.
+- API responses expose derived shared-destination and safe shared-partial-owner counts, allowing the UI to offer the duplicate escape only when ownership can remain with another verified record.
+- Adversarial coverage includes unclaimed same-name files, path tampering, junction escape, identity replacement both before and during deletion, OS removal failure, existing destinations, existing `.part` files, three-record shared paths with and without a real artifact, restart persistence, completed media, and paused partial deletion.
+- Bulk title/source/episode/season selection remains intentionally deferred to Milestone 6M; this pass establishes the single-record safety primitive that batch deletion will call.
+- Validation after the deletion safety and duplicate-deadlock patch: all 243 Jest tests pass across 29 suites, frontend ESLint passes, the translation-string scan passes, backend syntax checks and `git diff --check` pass, and the production build completes with only the repository's existing bundle-size warnings.
 
 ## Milestone 6K.4 Findings: HEAD Resolver Fallback
 

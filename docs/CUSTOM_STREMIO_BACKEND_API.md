@@ -58,6 +58,8 @@ The backend will generate and maintain these backend-only fields later:
 - `status`
 - `localPath`
 - `partialPath`
+- `localFileIdentity`
+- `partialFileIdentity`
 - `bytesDownloaded`
 - `bytesTotal`
 - `progress`
@@ -423,7 +425,9 @@ Response shape:
       "metaId": "tt1234567",
       "status": "queued",
       "queuePosition": 1,
-      "queueLength": 3
+      "queueLength": 3,
+      "sharedDestinationCount": 0,
+      "sharedPartialOwnerCount": 0
     }
   ]
 }
@@ -435,6 +439,11 @@ Queue metadata behavior:
 - The fields are derived from the live scheduler for API responses and are not persisted in `download-records.json`.
 - Positions update automatically after dispatch, pause, cancel, retry, resume, deletion, concurrency changes, and restart recovery.
 - A record can briefly report `status: "queued"` with `queuePosition: null` while it is moving from the waiting queue into active startup. Frontends should present this as Starting rather than a numbered position.
+
+Deletion metadata behavior:
+- `sharedDestinationCount` is the number of other saved records that derive to the same final or partial destination.
+- `sharedPartialOwnerCount` is stricter: it counts only other records that explicitly claim the same partial path with the same persisted file identity. The UI uses this field to offer safe duplicate-record removal without orphaning real partial bytes.
+- Both fields are derived for API responses and are not persisted.
 
 ### 4. `GET /downloads/:id`
 
@@ -536,13 +545,13 @@ Response shape:
 Behavior notes:
 - If the download is actively running, the backend aborts the active transfer and updates the record to `canceled`.
 - If the record is waiting, it is removed from the scheduler and never opens a source request.
-- Partial `.part` files remain on disk until the record is resumed, retried, or removed manually. Retry removes the derived artifacts before starting again.
+- Partial `.part` files remain on disk until the record is resumed, safely retried, or explicitly removed with `DELETE /downloads/:id/media`. Retry removes only a verified, record-owned partial and never removes an existing final file.
 - The canceled state is persisted across backend restarts.
 
 ### 9. `DELETE /downloads/:id`
 
 Purpose:
-- Delete a download record and, depending on later backend policy, optionally remove the local file.
+- Remove only the saved download record while deliberately leaving local media data on disk.
 
 Request body:
 - none
@@ -560,6 +569,49 @@ Response shape:
 Behavior notes:
 - The record is removed from persistent metadata.
 - The downloaded or partial media file remains on disk.
+- Queued, downloading, and paused records are rejected. Cancel active work first, or use the media-deletion endpoint for a paused partial download.
+- Failed or canceled records that solely claim partial data are also rejected so their `.part` files cannot become unusable orphans. Use **Delete partial data** instead.
+- A duplicate failed/canceled record may be removed only when another saved record explicitly claims the exact same partial path and matching persisted file identity. Responsibility remains with that other record; the final owner must use **Delete partial data**.
+
+### 9.1 `DELETE /downloads/:id/media`
+
+Purpose:
+- Permanently delete a completed media file or the retained local data for a paused, failed, or canceled download, then remove its saved record.
+
+Request body:
+- none; the backend accepts only the stored download id and never accepts a caller-supplied filesystem path.
+
+Response shape:
+
+```json
+{
+  "ok": true,
+  "id": "dl_0001",
+  "status": "deleted",
+  "deletedFiles": ["C:\\Downloads\\Stremio Downloads\\Movie\\Movie.mkv"],
+  "bytesFreed": 734003200,
+  "removedDirectories": ["C:\\Downloads\\Stremio Downloads\\Movie"],
+  "directoryCleanupWarning": null
+}
+```
+
+Safety and behavior:
+- Queued and active downloads are rejected. The user must Pause or Cancel them before destructive deletion.
+- The backend deletes the completed final file only for `completed` records. For paused, failed, and canceled records it deletes only a recorded `.part` artifact; an unrelated final file at the same derived destination is never removed.
+- Every candidate path must be explicitly recorded on the download, must exactly match a fresh derivation from trusted record metadata, and must remain inside the configured download root.
+- Existing artifacts are validated as regular, non-symbolic-link files. Their persisted device/inode/size/time identity must match the identity captured when the backend created or finalized the file.
+- A file whose identity is missing or changed is never deleted automatically. This includes legacy records created before identity tracking and files manually replaced after download; **Remove record** or manual filesystem inspection remains available.
+- Real-path validation rejects nested symbolic-link or Windows junction escapes even when the textual path appears to be under the download root.
+- The backend refuses deletion when another saved record resolves to the same artifact path and the artifact exists, preventing one record from silently breaking another.
+- If all artifacts claimed by the record are already missing, the endpoint treats them as already deleted and clears the stale record even when other stale records derive to the same destination. This prevents a missing-file duplicate deadlock without removing anything from disk.
+- Per-record mutation locks prevent Pause, Resume, Retry, Cancel, record removal, and media deletion from racing one another. Destination locks also prevent a new same-path download from starting during deletion.
+- File deletion is attempted before record deletion. A filesystem or Windows file-lock failure keeps the record and returns an actionable error.
+- Missing files are treated as already removed, so a stale record can still be cleared safely.
+- Only empty parent directories are removed, stopping at the configured download root. Unrelated media and nonempty season/title directories remain untouched.
+- Failure to remove an empty directory is returned as `directoryCleanupWarning`; it does not undo successful file and record deletion.
+- The Downloads UI exposes this as a separate confirmed **Delete download** or **Delete partial data** action. **Remove record** remains intentionally non-destructive.
+
+Identity fields are backend-owned safety metadata. They are persisted with the record and must never be supplied or trusted from a new-download request.
 
 ### 10. `POST /downloads/:id/open-location`
 

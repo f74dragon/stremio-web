@@ -7,6 +7,7 @@ const {
     cancelDownload,
     retryDownload,
     deleteDownload,
+    deleteDownloadMedia,
     playDownload,
     openDownloadLocation
 } = require('./localBackendClient');
@@ -246,6 +247,27 @@ const useDownloadRecords = ({ metaId, enabled = true, pollInterval = DEFAULT_POL
         }
     }, [clearActionError, load, setAction, updateItems]);
 
+    const removeMedia = React.useCallback(async (recordId) => {
+        if (!recordId || actionsRef.current[recordId]) {
+            return;
+        }
+
+        clearActionError(recordId);
+        setAction(recordId, 'deleteMedia');
+        try {
+            await deleteDownloadMedia(recordId);
+            updateItems((currentItems) => currentItems.filter((record) => record?.id !== recordId));
+            await load({ silent: true });
+        } catch (requestError) {
+            setActionErrors((currentErrors) => ({
+                ...currentErrors,
+                [recordId]: requestError?.backendError || 'Could not delete this download from disk. Close any player using the file and try again.'
+            }));
+        } finally {
+            setAction(recordId, null);
+        }
+    }, [clearActionError, load, setAction, updateItems]);
+
     const retry = React.useCallback(async (recordId) => {
         if (!recordId || actionsRef.current[recordId]) {
             return;
@@ -354,7 +376,8 @@ const useDownloadRecords = ({ metaId, enabled = true, pollInterval = DEFAULT_POL
         retry,
         play,
         openLocation,
-        remove
+        remove,
+        removeMedia
     };
 };
 

@@ -258,6 +258,10 @@ const deleteDownload = async (id) => requestJson(`/downloads/${requireDownloadId
     method: 'DELETE'
 });
 
+const deleteDownloadMedia = async (id) => requestJson(`/downloads/${requireDownloadId(id, 'deleteDownloadMedia')}/media`, {
+    method: 'DELETE'
+});
+
 const playDownload = async (id) => requestJson('/play', {
     method: 'POST',
     body: {
@@ -296,6 +300,7 @@ module.exports = {
     retryDownload,
     cancelDownload,
     deleteDownload,
+    deleteDownloadMedia,
     playDownload,
     openDownloadLocation
 };

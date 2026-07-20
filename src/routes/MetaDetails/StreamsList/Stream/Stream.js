@@ -574,7 +574,7 @@ Stream.propTypes = {
     }),
     downloadPayload: PropTypes.object,
     downloadRecord: PropTypes.object,
-    downloadAction: PropTypes.oneOf(['cancel', 'play', 'remove']),
+    downloadAction: PropTypes.oneOf(['cancel', 'play', 'remove', 'deleteMedia']),
     downloadActionError: PropTypes.string,
     sourceReadiness: PropTypes.oneOf(Object.values(SOURCE_READINESS)),
     availabilityVerifiedAt: PropTypes.string,

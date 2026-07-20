@@ -3,7 +3,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { deriveLocalPath, derivePartialPath, ensureParentDirectory } = require('../local-backend/fileUtils');
+const { deriveLocalPath, derivePartialPath, ensureParentDirectory, createFileIdentity } = require('../local-backend/fileUtils');
 const { isDownloadResumable, prepareDownloadResume } = require('../local-backend/downloadResume');
 
 describe('downloadResume', () => {
@@ -47,6 +47,7 @@ describe('downloadResume', () => {
         const partialPath = derivePartialPath(localPath);
         await ensureParentDirectory(partialPath);
         fs.writeFileSync(partialPath, Buffer.alloc(80));
+        record.partialFileIdentity = createFileIdentity(fs.lstatSync(partialPath));
 
         const result = await prepareDownloadResume(record, '2026-07-16T15:00:00.000Z');
 
@@ -109,9 +110,30 @@ describe('downloadResume', () => {
         const partialPath = derivePartialPath(deriveLocalPath(record));
         await ensureParentDirectory(partialPath);
         fs.writeFileSync(partialPath, Buffer.alloc(120));
+        record.partialFileIdentity = createFileIdentity(fs.lstatSync(partialPath));
 
         await expect(prepareDownloadResume(record)).rejects.toMatchObject({
             code: 'DOWNLOAD_PARTIAL_FILE_TOO_LARGE'
         });
+    });
+
+    test('rejects an existing legacy partial file without recorded identity', async () => {
+        const record = {
+            id: 'dl_legacy_partial',
+            status: 'paused',
+            type: 'movie',
+            parentTitle: 'Legacy Partial',
+            sourceUrl: 'https://example.com/movie.mp4',
+            bytesDownloaded: 20,
+            bytesTotal: 100
+        };
+        const partialPath = derivePartialPath(deriveLocalPath(record));
+        await ensureParentDirectory(partialPath);
+        fs.writeFileSync(partialPath, Buffer.alloc(20));
+
+        await expect(prepareDownloadResume(record)).rejects.toMatchObject({
+            code: 'DOWNLOAD_PARTIAL_IDENTITY_UNRECORDED'
+        });
+        expect(fs.statSync(partialPath).size).toBe(20);
     });
 });

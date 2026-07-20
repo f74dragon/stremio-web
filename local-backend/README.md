@@ -171,7 +171,7 @@ Restart behavior:
 - `POST /downloads` returns immediately with a queued record. The FIFO scheduler starts it when a concurrency slot is available.
 - Records update in memory and are persisted as the download moves through `queued`, `downloading`, `paused`, `completed`, `failed`, or `canceled`.
 - New downloads, retries, and resumes use the same queue. Retry and Resume enter at the back with a refreshed `queuedAt` timestamp.
-- `GET /downloads` and `GET /downloads/:id` decorate waiting records with live one-based `queuePosition` and `queueLength` values. These derived fields are never persisted.
+- `GET /downloads` and `GET /downloads/:id` decorate waiting records with live one-based `queuePosition` and `queueLength` values. They also derive `sharedDestinationCount` and the stricter `sharedPartialOwnerCount` used for safe duplicate cleanup. These response-only fields are never persisted.
 - `PATCH /downloads/:id/queue` with `{ "position": 1 }` moves a waiting record and persists the resulting order across backend restarts. Active and non-queued records cannot be reordered.
 - Finishing, failing, pausing, or canceling an active transfer releases its scheduler slot for the next waiting job.
 - Duplicate prevention still applies before a new download starts.
@@ -186,8 +186,21 @@ Restart behavior:
 - If a server ignores the Range request, the record becomes `failed` without appending a full response to the partial file. Use Retry to restart safely from byte zero.
 - `POST /downloads/:id/retry` resets an inactive `failed` or `canceled` record and starts it again from byte zero.
 - Retry reuses the same record id, preserves its media metadata, increments `attemptCount`, and persists `queued` before restarting the background transfer.
-- Retry derives the destination from stored record metadata and removes both its derived final file and `.part` file first; callers cannot supply a filesystem path.
-- Partial files may remain after pause, cancel, or failure until the record is resumed, retried, or removed manually.
+- Retry derives the destination from stored record metadata, removes only a verified record-owned `.part` file, and never removes or overwrites an existing final file; callers cannot supply a filesystem path.
+- Partial files may remain after pause, cancel, or failure until the record is resumed, retried, or explicitly deleted from the Downloads UI.
+
+## Remove Record / Delete Local Media
+
+- `DELETE /downloads/:id` removes inactive persistent metadata only and deliberately leaves final data on disk. It rejects queued, downloading, and paused records, plus failed/canceled records that would become the last abandoned claim on partial data. A duplicate partial record is removable only when another record claims the same path and persisted identity.
+- `DELETE /downloads/:id/media` is the destructive action for `paused`, `completed`, `failed`, and `canceled` records. Completed records may delete only their verified final file; other states may delete only their verified `.part` file.
+- The destructive endpoint accepts only a download id. A candidate must have been recorded on that download, match the freshly derived path, remain inside the configured root after real-path resolution, be a regular non-symbolic-link file, and retain the same persisted file identity.
+- Legacy or replaced files without a matching identity are refused rather than guessed. If such a file is already missing, the stale record can still be cleared safely.
+- Deletion is blocked when another saved record resolves to the same local path and the artifact exists. Remove identity-matched duplicate records first so shared media cannot be deleted accidentally. If the artifact is already missing, stale records can be deleted directly and do not deadlock one another.
+- Per-record and destination locks prevent deletion from racing Resume, Retry, Cancel, or creation of a new same-path download.
+- Only empty title/season directories are cleaned up; the download root, unrelated files, and nonempty folders are retained.
+- Windows file-lock or filesystem failures leave the record available for another attempt. A missing artifact is treated as already deleted.
+- Pause intentionally keeps `.part` bytes for Resume. Use **Delete partial data** when those bytes should be permanently discarded instead.
+- New transfers use exclusive `.part` creation and finalization refuses an existing destination, so unrelated same-named files are never truncated or overwritten.
 
 ## PowerShell Test: Health
 

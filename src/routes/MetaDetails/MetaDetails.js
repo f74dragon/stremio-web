@@ -89,7 +89,8 @@ const MetaDetails = ({ urlParams, queryParams }) => {
         cancel: handleCancelDownload,
         retry: handleRetryDownload,
         play: handlePlayDownload,
-        remove: handleRemoveDownloadRecord
+        remove: handleRemoveDownloadRecord,
+        removeMedia: handleDeleteDownloadMedia
     } = useDownloadRecords({
         metaId: titleDownloadsMetaId,
         enabled: streamPath !== null && Boolean(titleDownloadsMetaId)
@@ -334,6 +335,7 @@ const MetaDetails = ({ urlParams, queryParams }) => {
                                                             onRetry={handleRetryDownload}
                                                             onPlay={handlePlayDownload}
                                                             onRemove={handleRemoveDownloadRecord}
+                                                            onDeleteMedia={handleDeleteDownloadMedia}
                                                         />
                                                     )
                                                     :

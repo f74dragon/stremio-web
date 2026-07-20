@@ -14,7 +14,8 @@ const {
     probeRealDebridAvailability,
     getRealDebridAvailabilityHistory,
     selectPlayerExecutable,
-    moveDownloadInQueue
+    moveDownloadInQueue,
+    deleteDownloadMedia
 } = require('../src/customStremio/localBackendClient');
 
 const createJsonResponse = (body, { ok = true, status = 200 } = {}) => ({
@@ -97,6 +98,17 @@ describe('localBackendClient settings', () => {
             method: 'PATCH',
             body: JSON.stringify({ position: 1 }),
             headers: { 'Content-Type': 'application/json' }
+        });
+    });
+
+    test('deletes local media and its download record through the explicit route', async () => {
+        const responseBody = { ok: true, id: 'download-id', status: 'deleted', bytesFreed: 1024 };
+        global.fetch.mockResolvedValue(createJsonResponse(responseBody));
+
+        await expect(deleteDownloadMedia('download-id')).resolves.toEqual(responseBody);
+        expect(global.fetch).toHaveBeenCalledWith(`${LOCAL_BACKEND_BASE_URL}/downloads/download-id/media`, {
+            method: 'DELETE',
+            headers: {}
         });
     });
 
