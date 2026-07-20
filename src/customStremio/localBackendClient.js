@@ -215,6 +215,13 @@ const listDownloads = async (metaId) => {
     return requestJson(path);
 };
 
+const listDownloadHistory = async (limit) => {
+    if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1)) {
+        throw new Error('listDownloadHistory limit must be a positive integer');
+    }
+    return requestJson(limit === undefined ? '/downloads/history' : `/downloads/history?limit=${limit}`);
+};
+
 const requireDownloadIdValue = (id, functionName) => {
     if (id === undefined || id === null || `${id}`.trim().length === 0) {
         throw new Error(`${functionName} requires a download id`);
@@ -293,6 +300,7 @@ module.exports = {
     getAllDebridAvailabilityHistory,
     createDownload,
     listDownloads,
+    listDownloadHistory,
     getDownload,
     moveDownloadInQueue,
     pauseDownload,

@@ -58,7 +58,7 @@ Notes:
 - `3. Preferred addon stream sorting/filtering`: Completed for the planned scope (`Milestones 3A-3A.1`; preferred ordering and persistent original Stremio addon-filter state implemented)
 - `4. Add placeholder Download / Play Download buttons`: Completed and superseded by the real record-aware Download and Play controls
 - `5. Create local backend prototype`: Completed and superseded by the persistent local download backend
-- `6. Implement real download manager`: In progress (`Milestones 6A-6M` real downloads, persistence, retry/resume, FIFO scheduling, queue controls, concurrency settings, hybrid provider availability, provider-aware download safety, resolver HEAD fallback, safe local-media deletion, and bulk selection/deletion implemented)
+- `6. Implement real download manager`: In progress (`Milestones 6A-6N.1` real downloads, persistence, retry/resume, FIFO scheduling, queue controls, concurrency settings, hybrid provider availability, provider-aware download safety, resolver HEAD fallback, safe local-media deletion, bulk selection/deletion, and permanent history persistence implemented)
 - `7. Add title-specific downloads panel`: Completed for the planned panel scope (`Milestones 7A-7B`; later shared file-management actions remain tracked under the download manager)
 - `8. Add global downloads page`: In progress (`Milestones 8A-8C.2` implemented)
 - `9. Add MPC-HC launch support`: Completed for the planned scope (`Milestones 9A-9C`; panel playback, stream-row playback, and persistent in-app player selection implemented)
@@ -78,14 +78,14 @@ Notes:
 
 ## Next Recommended Step
 
-Implement **Milestone 6N: permanent local download history** as the next focused pass. Create a separate append-only history store for download attempts and lifecycle outcomes so deleting active records or local media never erases the historical event. Define privacy-conscious retained fields and migration/backfill behavior before adding the browsing UI.
+Implement **Milestone 6N.2: permanent download history UI** as the next focused pass. Add a polished, poster-based History view backed by the read-only local history API, with useful date/outcome filters and title or episode details. Keep history visually and technically separate from active downloads and provider cache history.
 
-Do not combine multi-episode downloading, watched progress, filesystem discovery, automatic provider/source switching, or Windows packaging into the history pass.
+Do not add permanent-history deletion, multi-episode downloading, watched progress, filesystem discovery, automatic provider/source switching, or Windows packaging to the History UI pass.
 
 ## Remaining Tracked Work
 
 - Multi-episode/season batch download planning, explicit source selection, and queue submission. Do not silently choose among multiple qualities or providers without a documented selection rule.
-- Permanent local download history: keep a separate append-only history of every past download and its final outcome. Removing an active-library record or deleting its local media must never erase the history entry. History should retain useful title/episode, source/addon, size, timestamps, outcome, and deletion-event metadata without retaining sensitive credentials or unnecessary expiring download URLs. This is separate from active download records, filesystem discovery, provider cache history, and future watch history.
+- Permanent download history browsing UI: present the completed 6N.1 event history as poster-based titles with outcome/date filtering and detailed lifecycle events, separate from active download records, provider cache history, and future watch history.
 - Watched/unwatched and playback-progress integration for real **Continue Watching**, resume position, next-episode behavior, and show-card progress.
 - Filesystem discovery for media that exists without a current record, plus metadata/artwork backfill for legacy persisted records.
 - Availability-history management UI, including an explicit clear-history action; current cached history remains intentionally retained by default.
@@ -94,6 +94,18 @@ Do not combine multi-episode downloading, watched progress, filesystem discovery
 - Windows application packaging after the local backend, download lifecycle, and playback integration are stable.
 
 The milestone findings below are chronological implementation records. Older sections may describe a feature as deferred or unavailable at that historical point even when a later milestone subsequently implemented it; the **Current Status**, **Next Recommended Step**, and **Remaining Tracked Work** sections above are authoritative for present planning.
+
+## Milestone 6N.1 Findings: Permanent Download History Foundation
+
+- Download lifecycle history now lives in a separate append-only newline-delimited store at `%LOCALAPPDATA%\Custom Stremio\download-history.ndjson`. Removing active records or deleting local media never removes earlier history events.
+- Events cover creation, transfer start, pause, resume, retry, completion, failure, cancellation, interrupted-backend recovery, record removal, and local-media deletion. Destructive routes must first persist a `record_removal_requested` or `media_deletion_requested` event and refuse deletion if that durable write fails.
+- Each event stores an immutable privacy-safe snapshot containing title/episode identity, sanitized artwork, addon/provider/source display labels, basename-only file identity, byte totals, timestamps, attempt count, status, and error code.
+- The allowlist deliberately excludes source/download/stream URLs, full local paths, behavior hints, API credentials, tokens, response validators, free-form backend errors, and other unnecessary expiring or sensitive values. Artwork query strings, fragments, and embedded credentials are stripped.
+- The NDJSON reader isolates malformed, unsupported, or crash-truncated lines instead of losing valid history around them. Future events start on a fresh line, and the read API reports the number of ignored entries for later repair visibility.
+- Existing active records receive one idempotent `record_backfilled` event on the first upgraded startup. New records use the same durable record-seen key, preventing duplicate backfill on later restarts.
+- `GET /downloads/history` is read-only, returns newest events first, accepts an optional bounded `limit`, and is exposed through `listDownloadHistory()` for the future frontend pass. There is intentionally no clear/delete-history API.
+- The 6N.1 pass establishes persistence and lifecycle evidence only; the poster-based browsing and filtering experience remains scoped to Milestone 6N.2.
+- Validation: all 258 Jest tests pass across 31 suites, full frontend and focused backend ESLint pass, backend syntax checks and `git diff --check` pass, and the production build completes with only the repository's existing bundle-size warnings.
 
 ## Milestone 6M Findings: Bulk Selection and Safe Batch Deletion
 

@@ -203,6 +203,15 @@ Restart behavior:
 - Pause intentionally keeps `.part` bytes for Resume. Use **Delete partial data** when those bytes should be permanently discarded instead.
 - New transfers use exclusive `.part` creation and finalization refuses an existing destination, so unrelated same-named files are never truncated or overwritten.
 
+## Permanent Download History
+
+- Lifecycle events are appended to `%LOCALAPPDATA%\Custom Stremio\download-history.ndjson`, or the directory selected by `CUSTOM_STREMIO_DATA_DIR`.
+- `GET /downloads/history` returns newest events first and accepts an optional positive `limit` capped at `1000`.
+- History survives active-record removal, local-media deletion, and backend restarts. Existing records are backfilled once after upgrading.
+- Destructive record/media deletion is refused if its permanent pre-deletion history event cannot be written.
+- Only allowlisted display metadata is retained. Source/download URLs, full local paths, credentials, tokens, response validators, and free-form errors are excluded.
+- Corrupt or truncated individual lines are reported and ignored without discarding surrounding valid events. There is intentionally no history deletion endpoint.
+
 ## PowerShell Test: Health
 
 ```powershell

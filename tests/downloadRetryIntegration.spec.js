@@ -411,6 +411,73 @@ describe('download lifecycle API integration', () => {
 
         const missingRecord = await requestJson(backendPort, `/downloads/${completedRecord.id}`);
         expect(missingRecord.statusCode).toBe(404);
+
+        const historyResponse = await requestJson(backendPort, '/downloads/history?limit=50');
+        expect(historyResponse.statusCode).toBe(200);
+        const downloadEvents = historyResponse.body.items.filter(({ downloadId }) => downloadId === completedRecord.id);
+        expect(downloadEvents.map(({ eventType }) => eventType)).toEqual(expect.arrayContaining([
+            'download_created',
+            'download_started',
+            'download_completed',
+            'media_deletion_requested',
+            'media_deleted'
+        ]));
+        expect(downloadEvents.find(({ eventType }) => eventType === 'media_deleted')).toMatchObject({
+            record: {
+                media: { title: 'Delete Media Integration Movie' },
+                result: { status: 'completed' }
+            },
+            details: {
+                bytesFreed: sourceMedia.length,
+                deletedFileCount: 1
+            }
+        });
+        expect(JSON.stringify(downloadEvents)).not.toContain('/delete-media.mp4');
+
+        await stopChildProcess(backendProcess);
+        backendProcess = null;
+        await startBackend();
+        const restoredHistory = await requestJson(backendPort, '/downloads/history?limit=50');
+        expect(restoredHistory.statusCode).toBe(200);
+        expect(restoredHistory.body.items.filter(({ downloadId }) => downloadId === completedRecord.id)).toEqual(downloadEvents);
+    });
+
+    test('refuses destructive deletion when permanent history cannot be written', async () => {
+        sourceShouldFail = false;
+        const createdResponse = await requestJson(backendPort, '/downloads', {
+            method: 'POST',
+            body: {
+                metaId: 'tt-history-write-safety',
+                type: 'movie',
+                parentTitle: 'History Write Safety Movie',
+                downloadUrl: `http://127.0.0.1:${sourcePort}/history-write-safety.mp4`
+            }
+        });
+        const completedRecord = await waitFor(async () => {
+            const response = await requestJson(backendPort, `/downloads/${createdResponse.body.id}`);
+            return response.body?.status === 'completed' ? response.body : null;
+        });
+        await requestJson(backendPort, '/downloads/history');
+
+        const historyPath = path.join(tempDirectory, 'data', 'download-history.ndjson');
+        fs.rmSync(historyPath, { force: true });
+        fs.mkdirSync(historyPath);
+        const deleteResponse = await requestJson(backendPort, `/downloads/${completedRecord.id}/media`, {
+            method: 'DELETE'
+        });
+
+        expect(deleteResponse).toMatchObject({
+            statusCode: 500,
+            body: {
+                ok: false,
+                errorCode: 'DOWNLOAD_HISTORY_WRITE_FAILED'
+            }
+        });
+        expect(fs.existsSync(completedRecord.localPath)).toBe(true);
+        await expect(requestJson(backendPort, `/downloads/${completedRecord.id}`)).resolves.toMatchObject({
+            statusCode: 200,
+            body: { status: 'completed' }
+        });
     });
 
     test('deletes a verified paused partial without touching the download root', async () => {

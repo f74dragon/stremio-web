@@ -50,6 +50,7 @@ const {
 const { selectPlayerExecutable } = require('./playerExecutableSelector');
 const { openDownloadLocation } = require('./fileExplorerLauncher');
 const { DownloadRecordStore, recoverInterruptedDownloadRecords } = require('./downloadRecordStore');
+const { STATUS_EVENT_TYPES, DownloadHistoryStore } = require('./downloadHistoryStore');
 
 const HOST = '127.0.0.1';
 const PORT = Number(process.env.PORT) || 5577;
@@ -83,6 +84,9 @@ const downloadMutationIds = new Set();
 const deletingArtifactPathKeys = new Set();
 const recordStore = new DownloadRecordStore({
     onError: (error) => console.error('Could not persist download records:', error)
+});
+const historyStore = new DownloadHistoryStore({
+    onWarning: (message) => console.warn(message)
 });
 const downloadScheduler = new DownloadScheduler({
     maxConcurrentDownloads: getConfiguredMaxConcurrentDownloads(),
@@ -264,6 +268,35 @@ const scheduleDownloadRecordsPersistence = () => {
 
 const persistDownloadRecordsNow = () => recordStore.flush(getPersistableDownloadRecords());
 
+const appendDownloadHistory = (eventType, record, details = {}, options = {}) => historyStore.append({
+    eventType,
+    eventKey: options.eventKey,
+    downloadId: record.id,
+    occurredAt: options.occurredAt,
+    record,
+    details
+});
+
+const appendDownloadHistorySafely = async (eventType, record, details = {}, options = {}) => {
+    try {
+        return await appendDownloadHistory(eventType, record, details, options);
+    } catch (error) {
+        console.error(`Could not append ${eventType} history for download ${record?.id || 'unknown'}:`, error);
+        return null;
+    }
+};
+
+const scheduleDownloadHistoryTransition = (previousRecord, nextRecord) => {
+    const eventType = previousRecord?.status !== nextRecord?.status ? STATUS_EVENT_TYPES[nextRecord?.status] : null;
+    if (!eventType) {
+        return;
+    }
+    appendDownloadHistorySafely(eventType, nextRecord, {
+        previousStatus: previousRecord.status,
+        status: nextRecord.status
+    });
+};
+
 const getPayloadVideoId = (payload) => {
     return typeof payload?.videoId === 'string' && payload.videoId.length > 0 ? payload.videoId : null;
 };
@@ -298,6 +331,7 @@ const updateDownloadRecord = (record, updates) => {
     };
 
     downloads.set(record.id, nextRecord);
+    scheduleDownloadHistoryTransition(record, nextRecord);
     scheduleDownloadRecordsPersistence();
     return nextRecord;
 };
@@ -469,9 +503,14 @@ const runScheduledDownload = async (recordId, options) => {
             });
         }
     } finally {
-        await persistDownloadRecordsNow().catch((error) => {
-            console.error('Could not persist final download state:', error);
-        });
+        await Promise.all([
+            persistDownloadRecordsNow().catch((error) => {
+                console.error('Could not persist final download state:', error);
+            }),
+            historyStore.flush().catch((error) => {
+                console.error('Could not flush final download history:', error);
+            })
+        ]);
     }
 };
 
@@ -1083,8 +1122,8 @@ app.post('/downloads', async (request, response) => {
                 getBlockedSourceMessage(provider, effectiveBlockedReadiness)
                 : placeholder?.status === 'unavailable' ?
                     'This debrid source was rejected or removed by the provider. Choose another cached source.'
-                :
-                'This debrid source is not ready. Choose a verified cached source or try again later.'
+                    :
+                    'This debrid source is not ready. Choose a verified cached source or try again later.'
         });
         return;
     }
@@ -1150,6 +1189,11 @@ app.post('/downloads', async (request, response) => {
         return;
     }
 
+    await appendDownloadHistorySafely('download_created', record, { status: record.status }, {
+        eventKey: `record-seen:${record.id}`,
+        occurredAt: record.createdAt
+    });
+
     enqueueDownload(record);
     response.status(201).json({
         ...getDownloadRecordResponse(downloads.get(record.id) || record),
@@ -1172,6 +1216,27 @@ app.get('/downloads', (request, response) => {
     });
 
     response.json({ items: getDownloadRecordsResponse(items) });
+});
+
+app.get('/downloads/history', async (request, response) => {
+    const requestedLimit = request.query.limit === undefined ? undefined : Number(request.query.limit);
+    if (requestedLimit !== undefined && (!Number.isSafeInteger(requestedLimit) || requestedLimit < 1)) {
+        response.status(400).json({
+            ok: false,
+            error: 'limit must be a positive integer'
+        });
+        return;
+    }
+
+    try {
+        response.json(await historyStore.list({ limit: requestedLimit }));
+    } catch (error) {
+        console.error('Could not read download history:', error);
+        response.status(500).json({
+            ok: false,
+            error: 'Could not read the local download history'
+        });
+    }
 });
 
 app.get('/downloads/:id', (request, response) => {
@@ -1350,6 +1415,12 @@ app.post('/downloads/:id/resume', withExclusiveDownloadMutation(async (request, 
         return;
     }
 
+    await appendDownloadHistorySafely('download_resumed', resumePreparation.record, {
+        previousStatus: record.status,
+        status: resumePreparation.record.status,
+        resumeOffset: resumePreparation.resumeOffset
+    });
+
     enqueueDownload(resumePreparation.record, { resumeOffset: resumePreparation.resumeOffset });
     response.status(202).json(getDownloadRecordResponse(downloads.get(record.id) || resumePreparation.record));
 }));
@@ -1423,6 +1494,11 @@ app.post('/downloads/:id/retry', withExclusiveDownloadMutation(async (request, r
         });
         return;
     }
+
+    await appendDownloadHistorySafely('download_retried', retriedRecord, {
+        previousStatus: record.status,
+        status: retriedRecord.status
+    });
 
     enqueueDownload(retriedRecord);
     response.status(202).json(getDownloadRecordResponse(downloads.get(record.id) || retriedRecord));
@@ -1523,6 +1599,21 @@ app.delete('/downloads/:id', withExclusiveDownloadMutation(async (request, respo
         return;
     }
 
+    try {
+        await appendDownloadHistory('record_removal_requested', record, {
+            previousStatus: record.status,
+            remainingSharedRecordCount: sharedPartialOwnerRecords.length
+        });
+    } catch (error) {
+        console.error(`Could not preserve removal history for download ${record.id}:`, error);
+        response.status(500).json({
+            ok: false,
+            errorCode: 'DOWNLOAD_HISTORY_WRITE_FAILED',
+            error: 'The saved record was not removed because its permanent history could not be written.'
+        });
+        return;
+    }
+
     downloads.delete(record.id);
 
     try {
@@ -1536,6 +1627,11 @@ app.delete('/downloads/:id', withExclusiveDownloadMutation(async (request, respo
         });
         return;
     }
+
+    await appendDownloadHistorySafely('record_removed', record, {
+        previousStatus: record.status,
+        remainingSharedRecordCount: sharedPartialOwnerRecords.length
+    });
 
     response.json({
         ok: true,
@@ -1609,6 +1705,20 @@ app.delete('/downloads/:id/media', withExclusiveDownloadMutation(async (request,
             }
         }
 
+        try {
+            await appendDownloadHistory('media_deletion_requested', record, {
+                previousStatus: record.status
+            });
+        } catch (error) {
+            console.error(`Could not preserve media deletion history for download ${record.id}:`, error);
+            response.status(500).json({
+                ok: false,
+                errorCode: 'DOWNLOAD_HISTORY_WRITE_FAILED',
+                error: 'The local data was not deleted because its permanent history could not be written.'
+            });
+            return;
+        }
+
         let deletion;
         try {
             deletion = await deleteDownloadArtifacts(record);
@@ -1655,6 +1765,12 @@ app.delete('/downloads/:id/media', withExclusiveDownloadMutation(async (request,
             });
             return;
         }
+
+        await appendDownloadHistorySafely('media_deleted', record, {
+            previousStatus: record.status,
+            bytesFreed: deletion.bytesFreed,
+            deletedFileCount: deletion.deletedFiles.length
+        });
 
         if (deletion.directoryCleanupWarning) {
             console.warn(`${deletion.directoryCleanupWarning} Download: ${record.id}`);
@@ -1764,7 +1880,10 @@ const shutdown = async (signal) => {
     }
 
     try {
-        await persistDownloadRecordsNow();
+        await Promise.all([
+            persistDownloadRecordsNow(),
+            historyStore.flush()
+        ]);
         process.exit(0);
     } catch (error) {
         console.error('Could not persist download records during shutdown:', error);
@@ -1814,6 +1933,15 @@ const startServer = async () => {
 
     const storedRecords = await recordStore.load();
     const recovery = recoverInterruptedDownloadRecords(storedRecords);
+    await historyStore.initialize();
+    const backfilledHistoryCount = await historyStore.backfill(recovery.records);
+    for (const interruptedRecord of storedRecords.filter((record) => record.status === 'downloading')) {
+        const recoveredRecord = recovery.records.find((record) => record.id === interruptedRecord.id) || interruptedRecord;
+        await appendDownloadHistorySafely('download_interrupted', recoveredRecord, {
+            previousStatus: interruptedRecord.status,
+            status: recoveredRecord.status
+        });
+    }
     recovery.records.forEach((record) => downloads.set(record.id, record));
 
     const queuedRecords = sortQueuedDownloadRecords(recovery.records.filter((record) => record.status === 'queued'));
@@ -1857,10 +1985,14 @@ const startServer = async () => {
     if (restoredQueuedCount > 0) {
         console.log(`Restored ${restoredQueuedCount} queued download record(s).`);
     }
+    if (backfilledHistoryCount > 0) {
+        console.log(`Backfilled permanent history for ${backfilledHistoryCount} existing download record(s).`);
+    }
 
     httpServer = app.listen(PORT, HOST, () => {
         console.log(`${SERVICE_NAME} listening on http://${HOST}:${PORT}`);
         console.log(`Download records: ${recordStore.filePath}`);
+        console.log(`Download history: ${historyStore.filePath}`);
         console.log(`Backend settings: ${settingsStore.filePath}`);
         console.log(`Maximum concurrent downloads: ${downloadScheduler.maxConcurrentDownloads}`);
     });

@@ -14,6 +14,7 @@ const {
     probeRealDebridAvailability,
     getRealDebridAvailabilityHistory,
     selectPlayerExecutable,
+    listDownloadHistory,
     moveDownloadInQueue,
     deleteDownloadMedia
 } = require('../src/customStremio/localBackendClient');
@@ -99,6 +100,17 @@ describe('localBackendClient settings', () => {
             body: JSON.stringify({ position: 1 }),
             headers: { 'Content-Type': 'application/json' }
         });
+    });
+
+    test('reads permanent download history with an optional limit', async () => {
+        const responseBody = { version: 1, total: 2, items: [] };
+        global.fetch.mockResolvedValue(createJsonResponse(responseBody));
+
+        await expect(listDownloadHistory(50)).resolves.toEqual(responseBody);
+        expect(global.fetch).toHaveBeenCalledWith(`${LOCAL_BACKEND_BASE_URL}/downloads/history?limit=50`, {
+            headers: {}
+        });
+        await expect(listDownloadHistory(0)).rejects.toThrow('listDownloadHistory limit must be a positive integer');
     });
 
     test('deletes local media and its download record through the explicit route', async () => {

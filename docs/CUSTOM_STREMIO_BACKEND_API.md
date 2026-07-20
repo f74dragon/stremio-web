@@ -445,6 +445,62 @@ Deletion metadata behavior:
 - `sharedPartialOwnerCount` is stricter: it counts only other records that explicitly claim the same partial path with the same persisted file identity. The UI uses this field to offer safe duplicate-record removal without orphaning real partial bytes.
 - Both fields are derived for API responses and are not persisted.
 
+### 3A. `GET /downloads/history`
+
+Purpose:
+- Read permanent local download lifecycle history without changing it.
+- Returns newest events first, including events for records and media that no longer exist in the active Downloads library.
+
+Optional query:
+- `limit`: positive integer; defaults to `200` and is capped at `1000`.
+
+Response shape:
+
+```json
+{
+  "version": 1,
+  "total": 5,
+  "invalidEntryCount": 0,
+  "items": [
+    {
+      "schemaVersion": 1,
+      "eventId": "history_...",
+      "eventType": "media_deleted",
+      "downloadId": "dl_0001",
+      "occurredAt": "2026-07-20T12:00:00.000Z",
+      "record": {
+        "media": {
+          "metaId": "tt1234567",
+          "type": "movie",
+          "title": "Example Movie",
+          "poster": "https://images.example/poster.jpg"
+        },
+        "source": {
+          "addonName": "Torrentio",
+          "provider": "realdebrid",
+          "streamName": "1080p",
+          "fileName": "Example Movie.mkv"
+        },
+        "result": {
+          "status": "completed",
+          "bytesTotal": 1048576,
+          "attemptCount": 1
+        }
+      },
+      "details": {
+        "bytesFreed": 1048576,
+        "deletedFileCount": 1
+      }
+    }
+  ]
+}
+```
+
+Behavior notes:
+- History is append-only and has no delete or clear route.
+- Invalid or truncated history lines are isolated; valid surrounding events remain available and `invalidEntryCount` reports ignored lines.
+- The response never includes source/download URLs, complete local paths, API credentials, tokens, response validators, or free-form backend error messages.
+
 ### 4. `GET /downloads/:id`
 
 Purpose:
@@ -702,6 +758,17 @@ Notes:
 - Restored `downloading` records become `paused` with an interruption note and can be resumed explicitly.
 - `deleted` records are omitted from storage.
 - Invalid or unsupported metadata documents stop backend startup rather than being silently overwritten.
+
+## Permanent Download History Storage
+
+- Default Windows path: `%LOCALAPPDATA%\Custom Stremio\download-history.ndjson`
+- `CUSTOM_STREMIO_DATA_DIR` overrides the containing metadata directory.
+- Each line is one immutable versioned JSON event. Appends are serialized, and a crash-truncated line does not invalidate earlier or later valid events.
+- Events retain sanitized title/episode, artwork, addon/provider label, basename-only filename, bytes, timestamps, attempts, outcomes, and deletion metadata.
+- Source/download URLs, complete local paths, API keys, tokens, response validators, behavior hints, and free-form errors are never written.
+- Existing saved records are backfilled once using an idempotent record key. New records carry that key from creation, so restarts do not duplicate backfill.
+- Record and media deletion persist a pre-deletion history event before destructive work. If that write fails, deletion is refused with `DOWNLOAD_HISTORY_WRITE_FAILED`.
+- The store is independent from active records and provider availability history. No clear/delete operation exists in this milestone.
 
 ## Persistent AllDebrid Availability History
 
