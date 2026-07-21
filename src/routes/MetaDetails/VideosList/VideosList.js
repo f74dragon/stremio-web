@@ -248,7 +248,7 @@ const VideosList = ({
                             {batchDownloadSession ?
                                 <div className={styles['batch-resume-bar']}>
                                     <div>
-                                        <strong>{t('CUSTOM_BATCH_IN_PROGRESS', { defaultValue: 'Batch source review in progress' })}</strong>
+                                        <strong>{t('CUSTOM_BATCH_IN_PROGRESS', { defaultValue: 'Automatic source selection in progress' })}</strong>
                                         <span>{t('CUSTOM_BATCH_PROGRESS', {
                                             defaultValue: '{{selected}} of {{total}} episodes have sources',
                                             selected: Object.keys(batchDownloadSession.assignments || {}).length,
@@ -273,7 +273,7 @@ const VideosList = ({
                                         : <React.Fragment>
                                             <div className={styles['batch-selection-summary']}>
                                                 <strong>{t('CUSTOM_BATCH_SELECTED_COUNT', { defaultValue: '{{count}} selected', count: selectedBatchVideoIds.size })}</strong>
-                                                <span>{t('CUSTOM_BATCH_SELECTION_HELP', { defaultValue: 'Choose episodes across seasons, then review their sources.' })}</span>
+                                                <span>{t('CUSTOM_BATCH_SELECTION_HELP', { defaultValue: 'Choose episodes; the app will verify and select the best safe source for each.' })}</span>
                                             </div>
                                             <Button className={styles['batch-secondary-action']} disabled={eligibleSeasonVideoIds.length === 0} onClick={toggleBatchSeason}>
                                                 {allSeasonSelected ? t('CUSTOM_BATCH_CLEAR_SEASON', { defaultValue: 'Clear season' }) : t('CUSTOM_BATCH_SELECT_SEASON', { defaultValue: 'Select season' })}
@@ -290,7 +290,7 @@ const VideosList = ({
                                                 {t('CUSTOM_BATCH_CANCEL', { defaultValue: 'Cancel' })}
                                             </Button>
                                             <Button className={styles['batch-primary-action']} disabled={selectedBatchVideoIds.size === 0} onClick={startBatchReview}>
-                                                {t('CUSTOM_BATCH_REVIEW_SOURCES', { defaultValue: 'Review sources' })}
+                                                {t('CUSTOM_BATCH_REVIEW_SOURCES', { defaultValue: 'Find best sources' })}
                                             </Button>
                                         </React.Fragment>}
                                 </div>}

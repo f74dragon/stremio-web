@@ -16,6 +16,38 @@ const normalizeInfoHash = (value) => {
     return /^[a-f0-9]{40}$/.test(hash) ? hash : null;
 };
 
+const STREAM_SIZE_UNITS = Object.freeze({
+    b: 1,
+    byte: 1,
+    bytes: 1,
+    kb: 1024,
+    kib: 1024,
+    mb: 1024 ** 2,
+    mib: 1024 ** 2,
+    gb: 1024 ** 3,
+    gib: 1024 ** 3,
+    tb: 1024 ** 4,
+    tib: 1024 ** 4
+});
+
+const parseStreamVideoSize = (stream) => {
+    const hintedSize = Number(stream?.behaviorHints?.videoSize);
+    if (Number.isFinite(hintedSize) && hintedSize > 0) {
+        return Math.round(hintedSize);
+    }
+
+    const sourceText = [stream?.name, stream?.title, stream?.description, stream?.behaviorHints?.filename]
+        .filter((value) => typeof value === 'string' && value.trim())
+        .join(' ');
+    const matches = Array.from(sourceText.matchAll(/(?:^|[^\d.])(\d+(?:[.,]\d+)?)\s*(TiB|TB|GiB|GB|MiB|MB|KiB|KB|bytes?|B)\b/gi));
+    const parsedSizes = matches.map((match) => {
+        const value = Number(match[1].replace(',', '.'));
+        const multiplier = STREAM_SIZE_UNITS[match[2].toLowerCase()];
+        return Number.isFinite(value) && multiplier ? Math.round(value * multiplier) : 0;
+    });
+    return parsedSizes.length > 0 ? Math.max(...parsedSizes) : null;
+};
+
 const buildDownloadPayload = (input) => {
     const metaId = input?.metaId ?? null;
     const type = input?.type ?? null;
@@ -61,7 +93,7 @@ const buildDownloadPayload = (input) => {
         fileIdx: Number.isSafeInteger(stream?.fileIdx) ? stream.fileIdx : null,
         behaviorHints: {
             filename: stream?.behaviorHints?.filename ?? null,
-            videoSize: Number.isFinite(stream?.behaviorHints?.videoSize) ? stream.behaviorHints.videoSize : null
+            videoSize: parseStreamVideoSize(stream)
         },
         streamUrl: stream?.url ?? null,
         externalUrl: stream?.externalUrl ?? null,
@@ -73,5 +105,6 @@ const buildDownloadPayload = (input) => {
 
 module.exports = {
     normalizeInfoHash,
+    parseStreamVideoSize,
     buildDownloadPayload
 };

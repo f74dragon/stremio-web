@@ -48,6 +48,11 @@ const {
     SAFE_BATCH_READINESS,
     selectRecommendedBatchSource,
     hasHigherPriorityUnverifiedBatchSource,
+    sortBatchAutoVerificationCandidates,
+    selectNextBatchAutoVerificationCandidate,
+    getBatchSourceKey,
+    getBatchSourceQualityLabel,
+    getBatchVerificationAttempts,
     getBatchDownloadAssignments
 } = require('stremio/customStremio/batchDownloadSelection');
 
@@ -101,10 +106,9 @@ const StreamsList = ({
     onDownloadCreated,
     onPlayDownload,
     batchDownloadSession,
-    batchQueueState,
     onSelectBatchDownloadSource,
-    onChangeBatchDownloadSource,
-    onQueueBatchDownloads,
+    onRecordBatchVerificationAttempt,
+    onBatchAutomationStatusChange,
     onCancelBatchDownload,
     ...props
 }) => {
@@ -113,6 +117,7 @@ const StreamsList = ({
     const platform = usePlatform();
     const profile = useProfile();
     const streamsContainerRef = React.useRef(null);
+    const autoBatchActionRef = React.useRef(null);
     const downloadStatusHideTimeoutRef = React.useRef(null);
     const downloadStatusClearTimeoutRef = React.useRef(null);
     const [selectedAddon, setSelectedAddon] = React.useState(() => {
@@ -126,14 +131,18 @@ const StreamsList = ({
     const [pendingDownloadKeys, setPendingDownloadKeys] = React.useState({});
     const [availabilityByHash, setAvailabilityByHash] = React.useState({});
     const [allDebridConnected, setAllDebridConnected] = React.useState(false);
+    const [backendSettingsLoaded, setBackendSettingsLoaded] = React.useState(false);
+    const [allDebridHistoryLoaded, setAllDebridHistoryLoaded] = React.useState(false);
     const [availabilityChecking, setAvailabilityChecking] = React.useState(false);
     const [availabilityProgress, setAvailabilityProgress] = React.useState(null);
     const [availabilityError, setAvailabilityError] = React.useState(null);
     const [realDebridAvailabilityByKey, setRealDebridAvailabilityByKey] = React.useState({});
     const [realDebridConnected, setRealDebridConnected] = React.useState(false);
+    const [realDebridHistoryLoaded, setRealDebridHistoryLoaded] = React.useState(false);
     const [realDebridChecking, setRealDebridChecking] = React.useState(false);
     const [realDebridProgress, setRealDebridProgress] = React.useState(null);
     const [realDebridError, setRealDebridError] = React.useState(null);
+    const [autoBatchStatus, setAutoBatchStatus] = React.useState(null);
     const [preferredAddon, setPreferredAddon] = React.useState(() => {
         try {
             if (typeof window === 'undefined' || !window.localStorage) {
@@ -316,6 +325,7 @@ const StreamsList = ({
 
     React.useEffect(() => {
         let canceled = false;
+        setBackendSettingsLoaded(false);
         getBackendSettings()
             .then((settings) => {
                 if (canceled) {
@@ -333,6 +343,11 @@ const StreamsList = ({
                 const message = error?.backendError || error?.message || 'Local download backend is offline.';
                 setAvailabilityError(message);
                 setRealDebridError(message);
+            })
+            .finally(() => {
+                if (!canceled) {
+                    setBackendSettingsLoaded(true);
+                }
             });
         return () => {
             canceled = true;
@@ -341,6 +356,7 @@ const StreamsList = ({
 
     React.useEffect(() => {
         let canceled = false;
+        setAllDebridHistoryLoaded(false);
         getAllDebridAvailabilityHistory(filteredInfoHashes)
             .then((result) => {
                 if (canceled) {
@@ -353,6 +369,11 @@ const StreamsList = ({
                 if (!canceled) {
                     setAvailabilityError(error?.backendError || error?.message || 'Could not load AllDebrid availability history.');
                 }
+            })
+            .finally(() => {
+                if (!canceled) {
+                    setAllDebridHistoryLoaded(true);
+                }
             });
         return () => {
             canceled = true;
@@ -361,6 +382,7 @@ const StreamsList = ({
 
     React.useEffect(() => {
         let canceled = false;
+        setRealDebridHistoryLoaded(false);
         getRealDebridAvailabilityHistory(filteredRealDebridSources)
             .then((result) => {
                 if (canceled) {
@@ -372,6 +394,11 @@ const StreamsList = ({
             .catch((error) => {
                 if (!canceled) {
                     setRealDebridError(error?.backendError || error?.message || 'Could not load Real-Debrid availability history.');
+                }
+            })
+            .finally(() => {
+                if (!canceled) {
+                    setRealDebridHistoryLoaded(true);
                 }
             });
         return () => {
@@ -571,6 +598,8 @@ const StreamsList = ({
                 SOURCE_READINESS.REQUIRES_CACHING
                 : SOURCE_READINESS.UNAVAILABLE
             : getStreamReadiness(stream);
+        const infoHash = provider === DEBRID_PROVIDER.ALLDEBRID ? getStreamInfoHash(stream) : null;
+        const realDebridDescriptor = provider === DEBRID_PROVIDER.REALDEBRID ? getRealDebridSourceDescriptor(stream) : null;
 
         return {
             stream,
@@ -585,18 +614,31 @@ const StreamsList = ({
             description: stream.description,
             size: baseDownloadPayload.behaviorHints?.videoSize || 0,
             verifiable: provider === DEBRID_PROVIDER.ALLDEBRID ?
-                allDebridConnected && Boolean(getStreamInfoHash(stream))
+                allDebridConnected && Boolean(infoHash)
                 : provider === DEBRID_PROVIDER.REALDEBRID ?
-                    realDebridConnected && Boolean(getRealDebridSourceDescriptor(stream))
-                    : false
+                    realDebridConnected && Boolean(realDebridDescriptor)
+                    : false,
+            verificationTarget: provider === DEBRID_PROVIDER.ALLDEBRID ? infoHash : realDebridDescriptor
         };
     }, [allDebridConnected, background, downloadRecords, getStreamAvailability, getStreamReadiness, getStreamRealDebridAvailability, mediaMetadata, metaId, parentTitle, poster, realDebridConnected, type, video]);
     const currentBatchEpisode = React.useMemo(() => batchDownloadSession?.episodes?.find(({ id }) => id === video?.id) || null,
         [batchDownloadSession, video?.id]);
     const isBatchSourceSelection = batchDownloadSession?.status === 'collecting' && Boolean(currentBatchEpisode) &&
         !batchDownloadSession.assignments?.[video?.id];
+    const isAutomaticBatchSelection = isBatchSourceSelection && batchDownloadSession?.automaticSelection !== false &&
+        !(batchDownloadSession?.manualSelectionEpisodeIds || []).includes(video?.id);
     const batchCandidates = React.useMemo(() => isBatchSourceSelection ? orderedFilteredStreams.map(getStreamDownloadModel) : [],
         [getStreamDownloadModel, isBatchSourceSelection, orderedFilteredStreams]);
+    const batchVerificationAttempts = React.useMemo(() => getBatchVerificationAttempts(batchDownloadSession, video?.id),
+        [batchDownloadSession, video?.id]);
+    const automaticBatchCandidates = React.useMemo(() => sortBatchAutoVerificationCandidates(batchCandidates, {
+        providerPolicy: batchDownloadSession?.providerPolicy
+    }), [batchCandidates, batchDownloadSession?.providerPolicy]);
+    const nextAutomaticBatchCandidate = React.useMemo(() => selectNextBatchAutoVerificationCandidate(
+        automaticBatchCandidates,
+        batchVerificationAttempts,
+        { providerPolicy: batchDownloadSession?.providerPolicy }
+    ), [automaticBatchCandidates, batchDownloadSession?.providerPolicy, batchVerificationAttempts]);
     const verifiedBatchRecommendation = React.useMemo(() => selectRecommendedBatchSource(batchCandidates, {
         providerPolicy: batchDownloadSession?.providerPolicy
     }), [batchCandidates, batchDownloadSession?.providerPolicy]);
@@ -605,9 +647,118 @@ const StreamsList = ({
         verifiedBatchRecommendation,
         { providerPolicy: batchDownloadSession?.providerPolicy }
     ), [batchCandidates, batchDownloadSession?.providerPolicy, verifiedBatchRecommendation]);
-    const recommendedBatchSource = hasHigherPriorityUnverifiedSource ? null : verifiedBatchRecommendation;
+    const recommendedBatchSource = isAutomaticBatchSelection && hasHigherPriorityUnverifiedSource ? null : verifiedBatchRecommendation;
     const batchAssignments = React.useMemo(() => getBatchDownloadAssignments(batchDownloadSession), [batchDownloadSession]);
-    const pendingBatchAssignments = React.useMemo(() => batchAssignments.filter(({ assignment }) => !assignment.submitted), [batchAssignments]);
+    const automaticBatchDataReady = backendSettingsLoaded && allDebridHistoryLoaded && realDebridHistoryLoaded;
+    const automaticBatchBlocked = isAutomaticBatchSelection && nextAutomaticBatchCandidate?.readiness === SOURCE_READINESS.UNKNOWN &&
+        !nextAutomaticBatchCandidate.verifiable;
+    const automaticCandidateCanRun = nextAutomaticBatchCandidate && (
+        SAFE_BATCH_READINESS.has(nextAutomaticBatchCandidate.readiness) || nextAutomaticBatchCandidate.verifiable
+    );
+    const automaticSourceDetails = React.useMemo(() => autoBatchStatus || (nextAutomaticBatchCandidate ? {
+        sourceName: nextAutomaticBatchCandidate.name || nextAutomaticBatchCandidate.addonName || 'Source candidate',
+        provider: getBatchProviderLabel(nextAutomaticBatchCandidate.provider),
+        addonName: nextAutomaticBatchCandidate.addonName || 'Unknown addon',
+        quality: getBatchSourceQualityLabel(nextAutomaticBatchCandidate),
+        size: formatBatchSourceSize(nextAutomaticBatchCandidate.size)
+    } : null), [autoBatchStatus, nextAutomaticBatchCandidate]);
+
+    React.useEffect(() => {
+        if (typeof onBatchAutomationStatusChange !== 'function') {
+            return;
+        }
+        if (!isBatchSourceSelection) {
+            onBatchAutomationStatusChange(null);
+            return;
+        }
+        if (!isAutomaticBatchSelection) {
+            onBatchAutomationStatusChange({ stage: 'manual' });
+            return;
+        }
+        if (!automaticBatchDataReady) {
+            onBatchAutomationStatusChange({ stage: 'preparing' });
+            return;
+        }
+        if (autoBatchStatus) {
+            onBatchAutomationStatusChange(autoBatchStatus);
+            return;
+        }
+        if (automaticBatchBlocked || !automaticCandidateCanRun) {
+            onBatchAutomationStatusChange({ stage: 'blocked', ...(automaticSourceDetails || {}) });
+            return;
+        }
+        onBatchAutomationStatusChange({ stage: 'ranking', ...(automaticSourceDetails || {}) });
+    }, [autoBatchStatus, automaticBatchBlocked, automaticBatchDataReady, automaticCandidateCanRun,
+        automaticSourceDetails, isAutomaticBatchSelection, isBatchSourceSelection, onBatchAutomationStatusChange]);
+    const verifyBatchSourceCandidate = React.useCallback((candidate) => {
+        if (candidate?.provider === DEBRID_PROVIDER.ALLDEBRID && candidate.verificationTarget) {
+            return onCheckAvailability([candidate.verificationTarget]);
+        }
+        if (candidate?.provider === DEBRID_PROVIDER.REALDEBRID && candidate.verificationTarget) {
+            return onCheckRealDebridAvailability([candidate.verificationTarget]);
+        }
+        return Promise.resolve();
+    }, [onCheckAvailability, onCheckRealDebridAvailability]);
+
+    React.useEffect(() => {
+        autoBatchActionRef.current = null;
+        setAutoBatchStatus(null);
+    }, [video?.id]);
+
+    React.useEffect(() => {
+        if (!isAutomaticBatchSelection ||
+            !automaticBatchDataReady || availabilityChecking || realDebridChecking ||
+            autoBatchActionRef.current !== null || !nextAutomaticBatchCandidate) {
+            return;
+        }
+
+        const candidate = nextAutomaticBatchCandidate;
+        const sourceKey = getBatchSourceKey(candidate);
+        const actionId = `${video?.id || 'episode'}:${sourceKey}`;
+        const sourceName = candidate.name || candidate.addonName || 'source';
+        const sourceDetails = {
+            provider: getBatchProviderLabel(candidate.provider),
+            quality: getBatchSourceQualityLabel(candidate),
+            size: formatBatchSourceSize(candidate.size),
+            addonName: candidate.addonName || 'Unknown addon'
+        };
+        const attemptedCandidateCount = automaticBatchCandidates.filter((item) =>
+            batchVerificationAttempts.has(getBatchSourceKey(item))
+        ).length;
+        const candidateNumber = Math.min(attemptedCandidateCount + 1, automaticBatchCandidates.length);
+
+        autoBatchActionRef.current = actionId;
+        if (SAFE_BATCH_READINESS.has(candidate.readiness)) {
+            setAutoBatchStatus({ stage: 'selecting', sourceName, candidateNumber, total: automaticBatchCandidates.length, ...sourceDetails });
+            onSelectBatchDownloadSource(candidate);
+            return;
+        }
+
+        if (candidate.readiness !== SOURCE_READINESS.UNKNOWN || !candidate.verifiable) {
+            autoBatchActionRef.current = null;
+            return;
+        }
+
+        setAutoBatchStatus({
+            stage: 'checking',
+            sourceName,
+            provider: getBatchProviderLabel(candidate.provider),
+            candidateNumber,
+            total: automaticBatchCandidates.length,
+            ...sourceDetails
+        });
+        if (typeof onRecordBatchVerificationAttempt === 'function') {
+            onRecordBatchVerificationAttempt(candidate);
+        }
+        Promise.resolve(verifyBatchSourceCandidate(candidate)).finally(() => {
+            if (autoBatchActionRef.current === actionId) {
+                autoBatchActionRef.current = null;
+                setAutoBatchStatus(null);
+            }
+        });
+    }, [automaticBatchCandidates, automaticBatchDataReady, availabilityChecking, batchVerificationAttempts,
+        isAutomaticBatchSelection, nextAutomaticBatchCandidate, onRecordBatchVerificationAttempt,
+        onSelectBatchDownloadSource, realDebridChecking, verifyBatchSourceCandidate, video?.id]);
     const selectableOptions = React.useMemo(() => {
         return {
             options: [
@@ -835,27 +986,41 @@ const StreamsList = ({
                     null
             }
             {
-                batchQueueState?.complete ?
-                    <div className={classnames(styles['batch-download-panel'], styles['batch-download-panel-success'])} role={'status'}>
-                        <Icon className={styles['batch-download-panel-icon']} name={'checkmark'} />
-                        <span>{`${batchQueueState.total} episode${batchQueueState.total === 1 ? '' : 's'} added to the download queue.`}</span>
-                    </div>
-                    : null
-            }
-            {
                 isBatchSourceSelection ?
                     <section className={styles['batch-download-panel']} aria-label={'Batch download source selection'}>
                         <div className={styles['batch-download-panel-copy']}>
-                            <strong>{`Choose a source for S${currentBatchEpisode.season}E${currentBatchEpisode.episode} ${currentBatchEpisode.title}`}</strong>
-                            <span>{`${batchAssignments.length + 1} of ${batchDownloadSession.episodes.length} · Recommended order: 4K DV/HDR, 4K, 1080p, 720p; larger files first.`}</span>
+                            <strong>{`${isAutomaticBatchSelection ? 'Finding the best source for' : 'Choose a source for'} S${currentBatchEpisode.season}E${currentBatchEpisode.episode} ${currentBatchEpisode.title}`}</strong>
+                            <span>{`${batchAssignments.length + 1} of ${batchDownloadSession.episodes.length} · 4K DV/HDR, 4K, 1080p, 720p; larger files first.`}</span>
                         </div>
+                        {
+                            isAutomaticBatchSelection && (!automaticBatchDataReady || autoBatchStatus) ?
+                                <div className={styles['batch-download-auto-status']} role={'status'} aria-live={'polite'}>
+                                    <span className={styles['batch-download-auto-indicator']} />
+                                    <div>
+                                        <strong>{!automaticBatchDataReady ?
+                                            t('CUSTOM_BATCH_LOADING_PROVIDER_DATA', { defaultValue: 'Loading provider history…' })
+                                            : autoBatchStatus.stage === 'selecting' ?
+                                                t('CUSTOM_BATCH_SELECTING_SOURCE', { defaultValue: 'Best safe source found' })
+                                                : t('CUSTOM_BATCH_CHECKING_SOURCE', { defaultValue: 'Checking source availability' })}</strong>
+                                        {autoBatchStatus ?
+                                            <span>{`${autoBatchStatus.candidateNumber} of ${autoBatchStatus.total} · ${autoBatchStatus.provider ? `${autoBatchStatus.provider} · ` : ''}${autoBatchStatus.sourceName}`}</span>
+                                            : null}
+                                    </div>
+                                </div>
+                                : null
+                        }
                         {
                             recommendedBatchSource ?
                                 <div className={styles['batch-download-recommendation']}>
                                     <div>
                                         <span className={styles['batch-download-eyebrow']}>{t('CUSTOM_BATCH_RECOMMENDED_SOURCE', { defaultValue: 'Recommended verified source' })}</span>
                                         <strong>{recommendedBatchSource.name || recommendedBatchSource.addonName || 'Selected source'}</strong>
-                                        <span>{`${getBatchProviderLabel(recommendedBatchSource.provider)} · ${recommendedBatchSource.addonName || 'Unknown addon'} · ${formatBatchSourceSize(recommendedBatchSource.size)}`}</span>
+                                        <span>{`${getBatchProviderLabel(recommendedBatchSource.provider)} · ${recommendedBatchSource.addonName || 'Unknown addon'}`}</span>
+                                        <span className={styles['batch-download-source-file']}>{recommendedBatchSource.payload?.behaviorHints?.filename || recommendedBatchSource.payload?.fileName || recommendedBatchSource.name}</span>
+                                        <div className={styles['batch-download-source-facts']}>
+                                            <span>{getBatchSourceQualityLabel(recommendedBatchSource)}</span>
+                                            <span>{formatBatchSourceSize(recommendedBatchSource.size)}</span>
+                                        </div>
                                     </div>
                                     <Button className={styles['batch-download-primary']} onClick={() => onSelectBatchDownloadSource(recommendedBatchSource)}>
                                         <Icon className={styles['batch-download-button-icon']} name={'checkmark'} />
@@ -864,60 +1029,14 @@ const StreamsList = ({
                                 </div>
                                 :
                                 <span className={styles['batch-download-warning']}>
-                                    {hasHigherPriorityUnverifiedSource ?
-                                        t('CUSTOM_BATCH_VERIFY_HIGHER_PRIORITY', { defaultValue: 'A higher-quality source still needs verification. Use its Verify first button before accepting a lower-quality cached source.' })
-                                        : t('CUSTOM_BATCH_NO_VERIFIED_SOURCE', { defaultValue: 'No verified source matches this batch. Run the relevant availability check, change the addon filter, or cancel the batch.' })}
+                                    {automaticBatchBlocked ?
+                                        t('CUSTOM_BATCH_AUTO_CHECK_BLOCKED', { defaultValue: 'The highest-ranked source cannot be verified automatically. Connect its debrid provider or choose a source manually.' })
+                                        : hasHigherPriorityUnverifiedSource ?
+                                            t('CUSTOM_BATCH_VERIFY_HIGHER_PRIORITY', { defaultValue: 'A higher-quality source could not be verified automatically. You can verify or choose a source manually.' })
+                                            : t('CUSTOM_BATCH_NO_VERIFIED_SOURCE', { defaultValue: 'No verified source matches this batch. Run the relevant availability check, change the addon filter, or cancel the batch.' })}
                                 </span>
                         }
                         <Button className={styles['batch-download-secondary']} onClick={onCancelBatchDownload}>{t('CUSTOM_BATCH_CANCEL', { defaultValue: 'Cancel batch' })}</Button>
-                    </section>
-                    : null
-            }
-            {
-                batchDownloadSession?.status === 'review' ?
-                    <section className={styles['batch-download-panel']} aria-label={'Review batch downloads'}>
-                        <div className={styles['batch-download-panel-copy']}>
-                            <strong>{t('CUSTOM_BATCH_REVIEW_EPISODE_SOURCES', { defaultValue: 'Review episode sources' })}</strong>
-                            <span>{t('CUSTOM_BATCH_REVIEW_HELP', { defaultValue: 'Each episode will be queued with the verified source shown below.' })}</span>
-                        </div>
-                        <div className={styles['batch-download-review-list']}>
-                            {batchAssignments.map(({ episode, assignment }) => (
-                                <div className={styles['batch-download-review-row']} key={episode.id}>
-                                    <div>
-                                        <strong>{`S${episode.season}E${episode.episode} ${episode.title}`}</strong>
-                                        <span>{`${getBatchProviderLabel(assignment.provider)} · ${assignment.addonName || 'Unknown addon'} · ${assignment.sourceName} · ${formatBatchSourceSize(assignment.size)}`}</span>
-                                    </div>
-                                    <Button
-                                        className={styles['batch-download-secondary']}
-                                        disabled={batchQueueState?.queueing || assignment.submitted}
-                                        onClick={() => onChangeBatchDownloadSource(episode.id)}
-                                    >
-                                        {assignment.submitted ?
-                                            t('CUSTOM_BATCH_ALREADY_QUEUED', { defaultValue: 'Queued' })
-                                            : t('CUSTOM_BATCH_CHANGE_SOURCE', { defaultValue: 'Change' })}
-                                    </Button>
-                                </div>
-                            ))}
-                        </div>
-                        {batchQueueState?.errors?.length ?
-                            <div className={styles['batch-download-warning']} role={'alert'}>
-                                {batchQueueState.errors.map(({ episode, message }) => <span key={episode.id}>{`S${episode.season}E${episode.episode}: ${message}`}</span>)}
-                            </div>
-                            : null}
-                        <div className={styles['batch-download-actions']}>
-                            <Button
-                                className={styles['batch-download-primary']}
-                                disabled={batchQueueState?.queueing || pendingBatchAssignments.length === 0}
-                                aria-busy={batchQueueState?.queueing}
-                                onClick={onQueueBatchDownloads}
-                            >
-                                <Icon className={styles['batch-download-button-icon']} name={'download'} />
-                                <span>{batchQueueState?.queueing ?
-                                    `Adding ${batchQueueState.completed}/${batchQueueState.total}...`
-                                    : `${batchQueueState?.errors?.length ? 'Retry' : 'Queue'} ${pendingBatchAssignments.length} episode${pendingBatchAssignments.length === 1 ? '' : 's'}`}</span>
-                            </Button>
-                            <Button className={styles['batch-download-secondary']} disabled={batchQueueState?.queueing} onClick={onCancelBatchDownload}>{t('CUSTOM_BATCH_CANCEL', { defaultValue: 'Cancel batch' })}</Button>
-                        </div>
                     </section>
                     : null
             }
@@ -1216,10 +1335,9 @@ StreamsList.propTypes = {
     onDownloadCreated: PropTypes.func,
     onPlayDownload: PropTypes.func,
     batchDownloadSession: PropTypes.object,
-    batchQueueState: PropTypes.object,
     onSelectBatchDownloadSource: PropTypes.func,
-    onChangeBatchDownloadSource: PropTypes.func,
-    onQueueBatchDownloads: PropTypes.func,
+    onRecordBatchVerificationAttempt: PropTypes.func,
+    onBatchAutomationStatusChange: PropTypes.func,
     onCancelBatchDownload: PropTypes.func
 };
 

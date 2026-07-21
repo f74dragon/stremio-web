@@ -15,6 +15,7 @@ const {
     assignBatchDownloadSource,
     removeBatchDownloadAssignment,
     markBatchDownloadAssignmentSubmitted,
+    markBatchVerificationAttempt,
     getNextUnassignedBatchEpisode,
     getBatchDownloadAssignments,
     readBatchDownloadSession,
@@ -24,6 +25,7 @@ const { VerticalNavBar, HorizontalNavBar, DelayedRenderer, Image, MetaPreview, M
 const StreamsList = require('./StreamsList');
 const VideosList = require('./VideosList');
 const TitleDownloadsPanel = require('stremio/customStremio/components/TitleDownloadsPanel');
+const BatchDownloadWorkspace = require('stremio/customStremio/components/BatchDownloadWorkspace');
 const useMetaDetails = require('./useMetaDetails');
 const useSeason = require('./useSeason');
 const useMetaExtensionTabs = require('./useMetaExtensionTabs');
@@ -95,6 +97,7 @@ const MetaDetails = ({ urlParams, queryParams }) => {
         }
     });
     const [batchQueueState, setBatchQueueState] = React.useState(null);
+    const [batchAutomationStatus, setBatchAutomationStatus] = React.useState(null);
     const updateBatchDownloadSession = React.useCallback((session) => {
         setBatchDownloadSession(session);
         try {
@@ -130,7 +133,51 @@ const MetaDetails = ({ urlParams, queryParams }) => {
             setBatchDownloadSession(null);
         }
         setBatchQueueState(null);
+        setBatchAutomationStatus(null);
     }, [urlParams.id]);
+    React.useEffect(() => {
+        if (!batchQueueState?.complete) {
+            return undefined;
+        }
+        const timeoutId = setTimeout(() => setBatchQueueState(null), 5000);
+        return () => clearTimeout(timeoutId);
+    }, [batchQueueState?.complete]);
+    const loadBatchEpisode = React.useCallback((videoId) => {
+        core.transport.dispatch({
+            action: 'Load',
+            args: {
+                model: 'MetaDetails',
+                args: {
+                    metaPath: {
+                        resource: 'meta',
+                        type: urlParams.type,
+                        id: urlParams.id,
+                        extra: []
+                    },
+                    streamPath: typeof videoId === 'string' && videoId ? {
+                        resource: 'stream',
+                        type: urlParams.type,
+                        id: videoId,
+                        extra: []
+                    } : null,
+                    guessStream: true
+                }
+            }
+        }, 'meta_details');
+    }, [core, urlParams.id, urlParams.type]);
+    const currentBatchEpisode = React.useMemo(() => getNextUnassignedBatchEpisode(batchDownloadSession), [batchDownloadSession]);
+    const currentBatchEpisodeIsManual = Boolean(currentBatchEpisode &&
+        (batchDownloadSession?.manualSelectionEpisodeIds || []).includes(currentBatchEpisode.id));
+
+    React.useEffect(() => {
+        if (batchDownloadSession?.status !== 'collecting' || !currentBatchEpisode) {
+            return;
+        }
+        setBatchAutomationStatus({ stage: currentBatchEpisodeIsManual ? 'manual' : 'preparing' });
+        if (streamPath?.id !== currentBatchEpisode.id) {
+            loadBatchEpisode(currentBatchEpisode.id);
+        }
+    }, [batchDownloadSession?.status, currentBatchEpisode, currentBatchEpisodeIsManual, loadBatchEpisode, streamPath?.id]);
     const startBatchDownload = React.useCallback(({ episodes, providerPolicy }) => {
         const session = createBatchDownloadSession({
             metaId: titleDownloadsMetaId,
@@ -143,8 +190,9 @@ const MetaDetails = ({ urlParams, queryParams }) => {
         }
         updateBatchDownloadSession(session);
         setBatchQueueState(null);
-        window.location.replace(session.episodes[0].href);
-    }, [titleDownloadsMetaId, metaItemContent?.name, updateBatchDownloadSession]);
+        setBatchAutomationStatus({ stage: 'preparing' });
+        loadBatchEpisode(session.episodes[0].id);
+    }, [titleDownloadsMetaId, metaItemContent?.name, updateBatchDownloadSession, loadBatchEpisode]);
     const selectBatchDownloadSource = React.useCallback((candidate) => {
         if (!batchDownloadSession || !video?.id || !candidate?.payload || !SAFE_BATCH_READINESS.has(candidate.readiness)) {
             return;
@@ -153,9 +201,10 @@ const MetaDetails = ({ urlParams, queryParams }) => {
         updateBatchDownloadSession(nextSession);
         const nextEpisode = getNextUnassignedBatchEpisode(nextSession);
         if (nextEpisode) {
-            window.location.replace(nextEpisode.href);
+            setBatchAutomationStatus({ stage: 'preparing' });
+            loadBatchEpisode(nextEpisode.id);
         }
-    }, [batchDownloadSession, video?.id, updateBatchDownloadSession]);
+    }, [batchDownloadSession, video?.id, updateBatchDownloadSession, loadBatchEpisode]);
     const changeBatchDownloadSource = React.useCallback((videoId) => {
         if (!batchDownloadSession) {
             return;
@@ -165,16 +214,34 @@ const MetaDetails = ({ urlParams, queryParams }) => {
             return;
         }
         updateBatchDownloadSession(removeBatchDownloadAssignment(batchDownloadSession, videoId));
-        window.location.replace(episode.href);
-    }, [batchDownloadSession, updateBatchDownloadSession]);
+        setBatchAutomationStatus({ stage: 'manual' });
+        loadBatchEpisode(episode.id);
+    }, [batchDownloadSession, updateBatchDownloadSession, loadBatchEpisode]);
+    const chooseBatchSourceManually = React.useCallback(() => {
+        if (!batchDownloadSession || !currentBatchEpisode) {
+            return;
+        }
+        updateBatchDownloadSession({
+            ...batchDownloadSession,
+            manualSelectionEpisodeIds: Array.from(new Set([
+                ...(batchDownloadSession.manualSelectionEpisodeIds || []),
+                currentBatchEpisode.id
+            ]))
+        });
+        setBatchAutomationStatus({ stage: 'manual' });
+    }, [batchDownloadSession, currentBatchEpisode, updateBatchDownloadSession]);
+    const recordBatchVerificationAttempt = React.useCallback((candidate) => {
+        if (!batchDownloadSession || !video?.id) {
+            return;
+        }
+        updateBatchDownloadSession(markBatchVerificationAttempt(batchDownloadSession, video.id, candidate));
+    }, [batchDownloadSession, updateBatchDownloadSession, video?.id]);
     const cancelBatchDownload = React.useCallback(() => {
         updateBatchDownloadSession(null);
         setBatchQueueState(null);
-        const videosHref = video?.deepLinks?.metaDetailsVideos;
-        if (typeof videosHref === 'string') {
-            window.location.replace(videosHref + (typeof video.season === 'number' ? `?${new URLSearchParams({ season: video.season })}` : ''));
-        }
-    }, [updateBatchDownloadSession, video]);
+        setBatchAutomationStatus(null);
+        loadBatchEpisode(null);
+    }, [updateBatchDownloadSession, loadBatchEpisode]);
     const queueBatchDownloads = React.useCallback(async () => {
         const assignments = getBatchDownloadAssignments(batchDownloadSession)
             .filter(({ assignment }) => !assignment.submitted);
@@ -200,10 +267,12 @@ const MetaDetails = ({ urlParams, queryParams }) => {
         if (errors.length === 0 && allSubmitted) {
             updateBatchDownloadSession(null);
             setBatchQueueState({ queueing: false, completed: assignments.length, total: assignments.length, errors: [], complete: true });
+            setBatchAutomationStatus(null);
+            loadBatchEpisode(null);
         } else {
             setBatchQueueState({ queueing: false, completed: assignments.length, total: assignments.length, errors });
         }
-    }, [batchDownloadSession, batchQueueState?.queueing, handleDownloadCreated, updateBatchDownloadSession]);
+    }, [batchDownloadSession, batchQueueState?.queueing, handleDownloadCreated, updateBatchDownloadSession, loadBatchEpisode]);
     const addToLibrary = React.useCallback(() => {
         if (metaDetails.metaItem === null || metaDetails.metaItem.content.type !== 'Ready') {
             return;
@@ -482,10 +551,9 @@ const MetaDetails = ({ urlParams, queryParams }) => {
                                 onDownloadCreated={handleDownloadCreated}
                                 onPlayDownload={handlePlayDownload}
                                 batchDownloadSession={batchDownloadSession}
-                                batchQueueState={batchQueueState}
                                 onSelectBatchDownloadSource={selectBatchDownloadSource}
-                                onChangeBatchDownloadSource={changeBatchDownloadSource}
-                                onQueueBatchDownloads={queueBatchDownloads}
+                                onRecordBatchVerificationAttempt={recordBatchVerificationAttempt}
+                                onBatchAutomationStatusChange={setBatchAutomationStatus}
                                 onCancelBatchDownload={cancelBatchDownload}
                             />
                         </div>
@@ -517,6 +585,32 @@ const MetaDetails = ({ urlParams, queryParams }) => {
                             null
                 }
             </div>
+            {
+                batchDownloadSession && !currentBatchEpisodeIsManual ?
+                    <BatchDownloadWorkspace
+                        parentTitle={metaItemContent?.name || batchDownloadSession.parentTitle}
+                        poster={metaItemContent?.poster || null}
+                        session={batchDownloadSession}
+                        currentEpisode={currentBatchEpisode}
+                        automationStatus={batchAutomationStatus}
+                        queueState={batchQueueState}
+                        onChangeSource={changeBatchDownloadSource}
+                        onChooseManually={chooseBatchSourceManually}
+                        onQueue={queueBatchDownloads}
+                        onCancel={cancelBatchDownload}
+                    />
+                    : null
+            }
+            {
+                batchQueueState?.complete ?
+                    <div className={styles['batch-queue-success']} role={'status'}>
+                        {t('CUSTOM_BATCH_QUEUED_SUCCESS', {
+                            defaultValue: '{{count}} episodes added to the download queue.',
+                            count: batchQueueState.total
+                        })}
+                    </div>
+                    : null
+            }
             {
                 metaExtension !== null ?
                     <ModalDialog

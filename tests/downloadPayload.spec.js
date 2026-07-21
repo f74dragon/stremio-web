@@ -1,6 +1,6 @@
 /* global describe, test, expect */
 
-const { buildDownloadPayload } = require('../src/customStremio/downloadPayload');
+const { buildDownloadPayload, parseStreamVideoSize } = require('../src/customStremio/downloadPayload');
 
 describe('downloadPayload', () => {
     test('includes title and episode artwork in a download request', () => {
@@ -90,6 +90,14 @@ describe('downloadPayload', () => {
             metaLinks: [],
             videoThumbnail: null
         });
+    });
+
+    test('recovers file size from addon source text when behavior hints omit it', () => {
+        const expectedBytes = Math.round(7.43 * (1024 ** 3));
+        expect(parseStreamVideoSize({ description: '1080p WEB-DL · 💾 7.43 GB · 18 seeders' })).toBe(expectedBytes);
+        expect(buildDownloadPayload({
+            stream: { name: 'Torrentio 1080p', title: 'Size: 7.43 GiB' }
+        }).behaviorHints.videoSize).toBe(expectedBytes);
     });
 
     test('rejects malformed torrent hashes without affecting the Stremio download URL', () => {

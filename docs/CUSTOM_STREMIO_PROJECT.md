@@ -58,7 +58,7 @@ Notes:
 - `3. Preferred addon stream sorting/filtering`: Completed for the planned scope (`Milestones 3A-3A.1`; preferred ordering and persistent original Stremio addon-filter state implemented)
 - `4. Add placeholder Download / Play Download buttons`: Completed and superseded by the real record-aware Download and Play controls
 - `5. Create local backend prototype`: Completed and superseded by the persistent local download backend
-- `6. Implement real download manager`: In progress (`Milestones 6A-6O.1` real downloads, persistence, retry/resume, FIFO scheduling, queue controls, concurrency settings, hybrid provider availability, provider-aware download safety, resolver HEAD fallback, safe local-media deletion, bulk selection/deletion, permanent history persistence/browsing, library search/sorting, and guided multi-episode batch downloads implemented)
+- `6. Implement real download manager`: In progress (`Milestones 6A-6O.2` real downloads, persistence, retry/resume, FIFO scheduling, queue controls, concurrency settings, hybrid provider availability, provider-aware download safety, resolver HEAD fallback, safe local-media deletion, bulk selection/deletion, permanent history persistence/browsing, library search/sorting, and automatic multi-episode source selection implemented)
 - `7. Add title-specific downloads panel`: Completed for the planned panel scope (`Milestones 7A-7B`; later shared file-management actions remain tracked under the download manager)
 - `8. Add global downloads page`: In progress (`Milestones 8A-8C.2` implemented)
 - `9. Add MPC-HC launch support`: Completed for the planned scope (`Milestones 9A-9C`; panel playback, stream-row playback, and persistent in-app player selection implemented)
@@ -78,20 +78,31 @@ Notes:
 
 ## Next Recommended Step
 
-Test **Milestone 6O.1 guided multi-episode batch downloads** across more than one season and both debrid-provider policies. Once confirmed, plan Milestone 10 watched/progress integration as the next major feature so show cards can offer accurate Continue Watching and resume behavior.
+Begin watched/unwatched and playback-progress integration as the next major feature area. First map the existing Stremio watched state and local-player launch lifecycle, then define a small persistence contract for resume position before changing playback behavior.
 
 ## Remaining Tracked Work
 
-- Optional batch-download follow-up: background source discovery or automatic provider switching. The implemented 6O.1 flow intentionally visits each episode's real stream page and requires a verified, reviewable source instead of silently resolving or switching providers.
 - Archive-wide Download History pagination/indexing: current History search and sorting cover the newest 1,000 lifecycle events returned by the bounded read API. Add cursor pagination or backend archive aggregation before describing search as covering an arbitrarily large permanent history. Date-range controls can join that scaling pass.
 - Watched/unwatched and playback-progress integration for real **Continue Watching**, resume position, next-episode behavior, and show-card progress.
 - Filesystem discovery for media that exists without a current record, plus metadata/artwork backfill for legacy persisted records.
 - Availability-history management UI, including an explicit clear-history action; current cached history remains intentionally retained by default.
-- Optional automatic provider/source switching, only if the UX should select another verified source instead of asking the user.
 - Explicit send-to-debrid behavior remains separate from cache checking and ordinary Stremio-link downloads.
 - Windows application packaging after the local backend, download lifecycle, and playback integration are stable.
 
 The milestone findings below are chronological implementation records. Older sections may describe a feature as deferred or unavailable at that historical point even when a later milestone subsequently implemented it; the **Current Status**, **Next Recommended Step**, and **Remaining Tracked Work** sections above are authoritative for present planning.
+
+## Milestone 6O.2 Findings: Automatic Ranked Source Verification
+
+- Starting a show batch now automatically evaluates each episode's visible candidates in the recorded order: **4K Dolby Vision / HDR10 / HDR**, **4K**, **1080p**, **720p**, then lower resolutions, with larger files first inside a quality tier.
+- The workflow waits for current backend connection settings and both providers' retained availability histories before acting. An already safe highest-ranked source is selected immediately; otherwise only the best remaining unknown source is checked through its identified AllDebrid or Real-Debrid provider.
+- A negative or unresolved check advances to the next ranked candidate. Verification attempts are stored in the title-scoped batch session so reloads and internal episode resolution do not repeatedly check the same unresolved source.
+- Live status identifies the episode, candidate number, provider, and source currently being checked. If the highest remaining candidate cannot be verified safely, automation pauses and leaves the existing per-row verification and manual source controls available.
+- Automatic work now uses a title-level, full-window workspace while the existing MetaDetails model resolves each episode internally. The browser URL does not change and source pages remain hidden during automation, eliminating the visible page jumps and per-episode progress-panel flicker.
+- The same persistent workspace moves from progress into a full review view grouped by season, with episode/source facts, compact **Change** actions, a scrollable review body, and a stable queue footer. The ordinary source list is exposed only when automation needs a manual choice or the user elects to change an assignment.
+- Source file size prefers the addon's numeric `behaviorHints.videoSize` and now falls back to parsing standard B/KB/MB/GB/TB values from the addon's stream name, title, description, or filename. Recommendations and final review present quality and size as explicit badges and show the selected filename separately.
+- Automatic selection ends in the dedicated workspace review screen. Nothing is submitted to the persistent FIFO download queue until the user confirms, and provider checks retain their existing cleanup and no-silent-peer-download safety behavior.
+- Choosing **Change** from final review marks that episode as a manual override, preventing automation from immediately reselecting the same source while the user compares alternatives.
+- Focused helper coverage verifies ordered automatic candidates, known-negative exclusion, attempted-source fallback, assignment state, session persistence, quality labels, and addon-text size recovery. Live browser smoke testing confirmed that internal episode resolution keeps the title URL stable, the progress workspace remains mounted without runtime errors, the safe no-provider case pauses clearly, and **Review sources** exposes the manual picker without submitting a download. All 274 Jest tests pass across 33 suites, full frontend ESLint and `git diff --check` pass, and the production build completes with only the repository's existing bundle-size warnings.
 
 ## Milestone 6O.1 Findings: Guided Multi-Episode Batch Downloads
 

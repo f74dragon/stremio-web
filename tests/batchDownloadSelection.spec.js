@@ -3,11 +3,18 @@
 const {
     BATCH_PROVIDER_POLICY,
     getBatchSourceQualityRank,
+    getBatchSourceQualityLabel,
     sortBatchSourceCandidates,
     hasHigherPriorityUnverifiedBatchSource,
+    sortBatchAutoVerificationCandidates,
+    selectNextBatchAutoVerificationCandidate,
     createBatchDownloadSession,
     assignBatchDownloadSource,
+    removeBatchDownloadAssignment,
     markBatchDownloadAssignmentSubmitted,
+    markBatchVerificationAttempt,
+    getBatchVerificationAttempts,
+    getBatchSourceKey,
     getNextUnassignedBatchEpisode,
     getBatchDownloadAssignments,
     readBatchDownloadSession,
@@ -33,6 +40,7 @@ describe('batch download selection', () => {
         ];
         expect(sortBatchSourceCandidates(sources).map(({ name }) => name)).toEqual(['2160p HDR10', '4K', '1080p', '720p']);
         expect(getBatchSourceQualityRank(candidate({ name: '4K Dolby Vision' }))).toBe(0);
+        expect(getBatchSourceQualityLabel(candidate({ name: '2160p DV HDR10+' }))).toBe('4K Dolby Vision / HDR10+');
     });
 
     test('prefers the larger file only within the same quality tier', () => {
@@ -61,6 +69,18 @@ describe('batch download selection', () => {
         expect(hasHigherPriorityUnverifiedBatchSource([cached1080p, uncached4k], cached1080p)).toBe(false);
     });
 
+    test('automatic verification ranks safe and unknown provider sources while excluding known negatives', () => {
+        const cached1080p = candidate({ name: '1080p cached', size: 300 });
+        const unknown4k = candidate({ name: '4K unchecked', size: 200, readiness: SOURCE_READINESS.UNKNOWN });
+        const uncachedHdr = candidate({ name: '4K HDR not cached', size: 400, readiness: SOURCE_READINESS.REQUIRES_CACHING });
+        expect(sortBatchAutoVerificationCandidates([cached1080p, unknown4k, uncachedHdr]).map(({ name }) => name))
+            .toEqual(['4K unchecked', '1080p cached']);
+        expect(selectNextBatchAutoVerificationCandidate(
+            [cached1080p, unknown4k, uncachedHdr],
+            new Set([getBatchSourceKey(unknown4k)])
+        )).toBe(cached1080p);
+    });
+
     test('tracks assignments in episode order and enters review when complete', () => {
         let session = createBatchDownloadSession({
             metaId: 'show',
@@ -77,9 +97,15 @@ describe('batch download selection', () => {
         session = assignBatchDownloadSource(session, 'show:1:2', candidate({ name: 'Episode two 4K', size: 200 }));
         expect(session.status).toBe('review');
         expect(getBatchDownloadAssignments(session).map(({ episode }) => episode.id)).toEqual(['show:1:1', 'show:1:2']);
+        session = removeBatchDownloadAssignment(session, 'show:1:2');
+        expect(session.status).toBe('collecting');
+        expect(session.manualSelectionEpisodeIds).toContain('show:1:2');
+        session = assignBatchDownloadSource(session, 'show:1:2', candidate({ name: 'Episode two alternate 4K', size: 220 }));
         session = markBatchDownloadAssignmentSubmitted(session, 'show:1:1', { id: 'record-1' });
         expect(session.assignments['show:1:1']).toMatchObject({ submitted: true, recordId: 'record-1' });
         expect(session.assignments['show:1:2'].submitted).toBeUndefined();
+        session = markBatchVerificationAttempt(session, 'show:1:2', candidate({ name: 'Episode two alternate 4K', size: 220 }));
+        expect(getBatchVerificationAttempts(session, 'show:1:2').has(getBatchSourceKey(candidate({ name: 'Episode two alternate 4K', size: 220 })))).toBe(true);
     });
 
     test('persists only the session for the requested title', () => {

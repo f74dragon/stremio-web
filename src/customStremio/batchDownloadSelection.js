@@ -18,11 +18,33 @@ const normalizeText = (value) => typeof value === 'string' ? value.trim() : '';
 const getBatchSourceText = (candidate) => [
     candidate?.name,
     candidate?.description,
+    candidate?.stream?.title,
     candidate?.payload?.streamName,
     candidate?.payload?.streamDescription,
     candidate?.payload?.fileName,
     candidate?.payload?.behaviorHints?.filename
 ].map(normalizeText).filter(Boolean).join(' ');
+
+const getBatchSourceQualityLabel = (candidate) => {
+    const text = getBatchSourceText(candidate);
+    const is4k = /(?:\b2160[pi]?\b|\b4k\b|\buhd\b)/i.test(text);
+    const hasDolbyVision = /(?:\bdolby[ ._-]*vision\b|\bdovi\b|\bdv\b)/i.test(text);
+    const hasHdr10Plus = /\bhdr10(?:\+|[ ._-]*plus)/i.test(text);
+    const hasHdr10 = /\bhdr10\b/i.test(text);
+    const hasHdr = /\bhdr\b/i.test(text);
+    if (is4k) {
+        const formats = [
+            hasDolbyVision ? 'Dolby Vision' : null,
+            hasHdr10Plus ? 'HDR10+' : hasHdr10 ? 'HDR10' : hasHdr ? 'HDR' : null
+        ].filter(Boolean);
+        return formats.length > 0 ? `4K ${formats.join(' / ')}` : '4K';
+    }
+    const resolution = Array.from(text.matchAll(/\b(2160|1440|1080|720|576|540|480|360|240)[pi]?\b/ig))
+        .map((match) => Number(match[1]))
+        .filter((value) => Number.isFinite(value) && value >= 240 && value <= 2160)
+        .sort((left, right) => right - left)[0];
+    return resolution ? `${resolution}p` : 'Quality unknown';
+};
 
 const getBatchSourceQualityRank = (candidate) => {
     const text = getBatchSourceText(candidate);
@@ -56,6 +78,20 @@ const getBatchSourceSize = (candidate) => {
     return size || 0;
 };
 
+const getBatchSourceKey = (candidate) => {
+    const payload = candidate?.payload || {};
+    return [
+        candidate?.provider || payload.debridProvider || DEBRID_PROVIDER.UNKNOWN,
+        payload.infoHash,
+        payload.fileIdx,
+        payload.behaviorHints?.filename,
+        payload.behaviorHints?.videoSize,
+        payload.downloadUrl,
+        payload.streamUrl,
+        candidate?.name
+    ].map((value) => normalizeText(value === null || value === undefined ? '' : String(value))).join('|');
+};
+
 const isCandidateAllowedByProvider = (candidate, providerPolicy) => providerPolicy === BATCH_PROVIDER_POLICY.EITHER ||
     candidate?.provider === providerPolicy;
 
@@ -71,8 +107,24 @@ const sortBatchSourceCandidates = (candidates, { providerPolicy = BATCH_PROVIDER
 const selectRecommendedBatchSource = (candidates, options) => sortBatchSourceCandidates(candidates, options)[0] || null;
 const hasHigherPriorityUnverifiedBatchSource = (candidates, recommended, { providerPolicy = BATCH_PROVIDER_POLICY.EITHER } = {}) =>
     Boolean(recommended) && (candidates || []).some((candidate) => candidate?.readiness === SOURCE_READINESS.UNKNOWN &&
-        candidate?.verifiable !== false && isCandidateAllowedByProvider(candidate, providerPolicy) &&
+        [DEBRID_PROVIDER.ALLDEBRID, DEBRID_PROVIDER.REALDEBRID].includes(candidate?.provider) &&
+        isCandidateAllowedByProvider(candidate, providerPolicy) &&
         compareBatchSourcePriority(candidate, recommended) < 0);
+const sortBatchAutoVerificationCandidates = (candidates, { providerPolicy = BATCH_PROVIDER_POLICY.EITHER } = {}) => (candidates || [])
+    .map((candidate, index) => ({ candidate, index }))
+    .filter(({ candidate }) => isCandidateAllowedByProvider(candidate, providerPolicy) && (
+        SAFE_BATCH_READINESS.has(candidate?.readiness) ||
+        candidate?.readiness === SOURCE_READINESS.UNKNOWN &&
+        [DEBRID_PROVIDER.ALLDEBRID, DEBRID_PROVIDER.REALDEBRID].includes(candidate?.provider)
+    ))
+    .sort((left, right) => compareBatchSourcePriority(left.candidate, right.candidate) || left.index - right.index)
+    .map(({ candidate }) => candidate);
+const selectNextBatchAutoVerificationCandidate = (candidates, attemptedSourceKeys, options) => {
+    const attempts = attemptedSourceKeys instanceof Set ? attemptedSourceKeys : new Set(attemptedSourceKeys || []);
+    return sortBatchAutoVerificationCandidates(candidates, options).find((candidate) =>
+        SAFE_BATCH_READINESS.has(candidate?.readiness) || !attempts.has(getBatchSourceKey(candidate))
+    ) || null;
+};
 
 const createBatchDownloadSession = ({ metaId, parentTitle, episodes, providerPolicy = BATCH_PROVIDER_POLICY.EITHER }) => ({
     version: 1,
@@ -88,6 +140,9 @@ const createBatchDownloadSession = ({ metaId, parentTitle, episodes, providerPol
         href: normalizeText(episode.href)
     })),
     assignments: {},
+    automaticSelection: true,
+    manualSelectionEpisodeIds: [],
+    verificationAttempts: {},
     status: 'collecting'
 });
 
@@ -103,6 +158,7 @@ const assignBatchDownloadSource = (session, videoId, candidate) => {
             readiness: candidate.readiness || SOURCE_READINESS.UNKNOWN,
             addonName: candidate.addonName || candidate.payload.addonName || null,
             sourceName: candidate.name || candidate.payload.streamName || candidate.payload.fileName || 'Selected source',
+            qualityLabel: getBatchSourceQualityLabel(candidate),
             qualityRank: getBatchSourceQualityRank(candidate),
             size: getBatchSourceSize(candidate)
         }
@@ -117,6 +173,7 @@ const assignBatchDownloadSource = (session, videoId, candidate) => {
 const removeBatchDownloadAssignment = (session, videoId) => session ? {
     ...session,
     assignments: Object.fromEntries(Object.entries(session.assignments || {}).filter(([id]) => id !== videoId)),
+    manualSelectionEpisodeIds: Array.from(new Set([...(session.manualSelectionEpisodeIds || []), videoId])),
     status: 'collecting'
 } : session;
 
@@ -137,6 +194,24 @@ const markBatchDownloadAssignmentSubmitted = (session, videoId, record) => {
         }
     };
 };
+
+const markBatchVerificationAttempt = (session, videoId, candidate) => {
+    if (!session || !session.episodes.some((episode) => episode.id === videoId)) {
+        return session;
+    }
+    const sourceKey = getBatchSourceKey(candidate);
+    const attempts = new Set(session.verificationAttempts?.[videoId] || []);
+    attempts.add(sourceKey);
+    return {
+        ...session,
+        verificationAttempts: {
+            ...session.verificationAttempts,
+            [videoId]: Array.from(attempts)
+        }
+    };
+};
+
+const getBatchVerificationAttempts = (session, videoId) => new Set(session?.verificationAttempts?.[videoId] || []);
 
 const getNextUnassignedBatchEpisode = (session) => session?.episodes?.find((episode) => !session.assignments?.[episode.id]) || null;
 
@@ -180,15 +255,21 @@ module.exports = {
     SAFE_BATCH_READINESS,
     BATCH_DOWNLOAD_SESSION_STORAGE_KEY,
     getBatchSourceText,
+    getBatchSourceQualityLabel,
     getBatchSourceQualityRank,
     getBatchSourceSize,
+    getBatchSourceKey,
     sortBatchSourceCandidates,
     selectRecommendedBatchSource,
     hasHigherPriorityUnverifiedBatchSource,
+    sortBatchAutoVerificationCandidates,
+    selectNextBatchAutoVerificationCandidate,
     createBatchDownloadSession,
     assignBatchDownloadSource,
     removeBatchDownloadAssignment,
     markBatchDownloadAssignmentSubmitted,
+    markBatchVerificationAttempt,
+    getBatchVerificationAttempts,
     getNextUnassignedBatchEpisode,
     getBatchDownloadAssignments,
     readBatchDownloadSession,
