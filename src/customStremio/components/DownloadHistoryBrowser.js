@@ -10,8 +10,11 @@ const {
     getDownloadHistoryFilterCounts,
     groupHistoryAttemptsBySeason
 } = require('../downloadHistoryPresentation');
+const { getDownloadTitleHref } = require('../downloadRecordPresentation');
 const DownloadLibraryToolbar = require('./DownloadLibraryToolbar');
 const styles = require('./DownloadHistoryBrowser.less');
+
+const getHistoryTitleHref = (group) => ['movie', 'series'].includes(group?.type) ? getDownloadTitleHref(group) : null;
 
 const formatDate = (value) => {
     const timestamp = Date.parse(value);
@@ -154,7 +157,7 @@ HistoryAttempt.propTypes = {
     attempt: PropTypes.object.isRequired
 };
 
-const HistoryDetails = ({ group, onBack }) => {
+const HistoryDetails = ({ group, onBack, onNavigate }) => {
     const { t } = useTranslation();
     const isSeries = group.type === 'series';
     const seasons = React.useMemo(() => isSeries ? groupHistoryAttemptsBySeason(group.attempts) : [], [group.attempts, isSeries]);
@@ -168,6 +171,7 @@ const HistoryDetails = ({ group, onBack }) => {
     const countLabel = isSeries ?
         t('CUSTOM_HISTORY_EPISODE_COUNT', { defaultValue: group.episodeCount === 1 ? '{{count}} episode' : '{{count}} episodes', count: group.episodeCount })
         : t('CUSTOM_HISTORY_ATTEMPT_COUNT', { defaultValue: group.attemptCount === 1 ? '{{count}} attempt' : '{{count}} attempts', count: group.attemptCount });
+    const titleHref = getHistoryTitleHref(group);
 
     return (
         <section className={styles['details']}>
@@ -188,6 +192,17 @@ const HistoryDetails = ({ group, onBack }) => {
                         {group.latestAt ? <span>{t('CUSTOM_HISTORY_LAST_ACTIVITY', { defaultValue: 'Last activity {{date}}', date: formatDate(group.latestAt) })}</span> : null}
                     </div>
                     <p>{t('CUSTOM_HISTORY_READ_ONLY_NOTE', { defaultValue: 'This read-only timeline remains available even after local files and active download records are removed.' })}</p>
+                    {titleHref ?
+                        <Button
+                            className={styles['details-title-link']}
+                            href={titleHref}
+                            title={t('CUSTOM_HISTORY_OPEN_STREMIO_TITLE', { defaultValue: 'Open the Stremio title page for {{title}}', title: group.title })}
+                            onClick={() => onNavigate?.()}
+                        >
+                            <span>{t('CUSTOM_HISTORY_VIEW_TITLE_PAGE', { defaultValue: 'View title page' })}</span>
+                            <Icon name={'caret-right'} />
+                        </Button>
+                        : null}
                 </div>
             </div>
 
@@ -229,7 +244,8 @@ const HistoryDetails = ({ group, onBack }) => {
 
 HistoryDetails.propTypes = {
     group: PropTypes.object.isRequired,
-    onBack: PropTypes.func.isRequired
+    onBack: PropTypes.func.isRequired,
+    onNavigate: PropTypes.func
 };
 
 const DownloadHistoryBrowser = ({
@@ -279,10 +295,14 @@ const DownloadHistoryBrowser = ({
     }, [selectedGroup, selectedGroupKey]);
 
     if (selectedGroup) {
-        return <HistoryDetails group={selectedGroup} onBack={() => {
-            setSelectedGroupKey(null);
-            onNavigate?.();
-        }} />;
+        return <HistoryDetails
+            group={selectedGroup}
+            onBack={() => {
+                setSelectedGroupKey(null);
+                onNavigate?.();
+            }}
+            onNavigate={onNavigate}
+        />;
     }
 
     return (
@@ -351,12 +371,13 @@ const DownloadHistoryBrowser = ({
                                 : <div className={styles['history-grid']}>
                                     {filteredGroups.map((group) => {
                                         const isSeries = group.type === 'series';
+                                        const titleHref = getHistoryTitleHref(group);
                                         const itemCount = isSeries ?
                                             t('CUSTOM_HISTORY_EPISODE_COUNT', { defaultValue: group.episodeCount === 1 ? '{{count}} episode' : '{{count}} episodes', count: group.episodeCount })
                                             : t('CUSTOM_HISTORY_ATTEMPT_COUNT', { defaultValue: group.attemptCount === 1 ? '{{count}} attempt' : '{{count}} attempts', count: group.attemptCount });
                                         return (
                                             <article className={styles['history-card']} key={group.key}>
-                                                <button type={'button'} onClick={() => {
+                                                <button className={styles['history-card-button']} type={'button'} onClick={() => {
                                                     setSelectedGroupKey(group.key);
                                                     onNavigate?.();
                                                 }} aria-label={t('CUSTOM_HISTORY_OPEN_TITLE', { defaultValue: 'Open history for {{title}}', title: group.title })}>
@@ -366,11 +387,20 @@ const DownloadHistoryBrowser = ({
                                                         <div className={styles['poster-outcome']}><OutcomeBadge outcome={group.latestOutcome} /></div>
                                                         {group.currentCount > 0 ? <span className={styles['current-dot']} title={t('CUSTOM_HISTORY_CURRENT_TITLE', { defaultValue: 'This title still has a current download record' })} /> : null}
                                                     </div>
-                                                    <div className={styles['card-copy']}>
-                                                        <strong title={group.title}>{group.title}</strong>
-                                                        <span>{itemCount}{group.latestAt ? ` · ${formatDate(group.latestAt)}` : ''}</span>
-                                                    </div>
                                                 </button>
+                                                <div className={styles['card-copy']}>
+                                                    {titleHref ?
+                                                        <Button
+                                                            className={styles['card-title-link']}
+                                                            href={titleHref}
+                                                            title={t('CUSTOM_HISTORY_OPEN_STREMIO_TITLE', { defaultValue: 'Open the Stremio title page for {{title}}', title: group.title })}
+                                                            onClick={() => onNavigate?.()}
+                                                        >
+                                                            {group.title}
+                                                        </Button>
+                                                        : <strong title={group.title}>{group.title}</strong>}
+                                                    <span>{itemCount}{group.latestAt ? ` · ${formatDate(group.latestAt)}` : ''}</span>
+                                                </div>
                                             </article>
                                         );
                                     })}

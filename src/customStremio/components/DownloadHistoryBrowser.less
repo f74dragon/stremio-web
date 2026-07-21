@@ -150,29 +150,25 @@
     &:focus-within {
         z-index: 2;
     }
+}
 
-    > button {
-        display: block;
-        width: 100%;
-        padding: 0;
-        border: 0;
-        color: inherit;
-        cursor: pointer;
-        font: inherit;
-        text-align: left;
-        background: transparent;
+.history-card-button {
+    display: block;
+    width: 100%;
+    padding: 0;
+    border: 0;
+    color: inherit;
+    cursor: pointer;
+    font: inherit;
+    text-align: left;
+    background: transparent;
 
-        &:hover,
-        &:focus-visible {
-            .poster-frame {
-                border-color: rgba(215, 207, 255, 0.72);
-                box-shadow: 0 1.15rem 2.8rem rgba(0, 0, 0, 0.52), 0 0 1.8rem rgba(120, 93, 255, 0.32);
-                transform: scale(1.025);
-            }
-
-            .card-copy > strong {
-                color: white;
-            }
+    &:hover,
+    &:focus-visible {
+        .poster-frame {
+            border-color: rgba(215, 207, 255, 0.72);
+            box-shadow: 0 1.15rem 2.8rem rgba(0, 0, 0, 0.52), 0 0 1.8rem rgba(120, 93, 255, 0.32);
+            transform: scale(1.025);
         }
     }
 }
@@ -245,13 +241,25 @@
     min-width: 0;
     padding: 0.7rem 0.25rem 0;
 
-    > strong {
+    > strong,
+    > .card-title-link {
+        display: block;
+        width: 100%;
         overflow: hidden;
+        padding: 0;
+        color: inherit;
         font-size: 0.9rem;
         font-weight: 650;
+        line-height: 1.25;
+        text-align: left;
         text-overflow: ellipsis;
         white-space: nowrap;
         transition: color 150ms ease;
+    }
+
+    > .card-title-link:hover,
+    > .card-title-link:focus-visible {
+        color: var(--primary-accent-color);
     }
 
     > span {
@@ -437,6 +445,32 @@
         font-size: 0.82rem;
         line-height: 1.5;
         opacity: 0.62;
+    }
+}
+
+.details-title-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    width: fit-content;
+    margin-top: 1rem;
+    padding: 0.55rem 0.8rem;
+    border: 1px solid rgba(190, 176, 255, 0.28);
+    border-radius: 999px;
+    color: white;
+    font-size: 0.76rem;
+    font-weight: 600;
+    background: rgba(105, 81, 255, 0.14);
+
+    > svg {
+        width: 0.85rem;
+        height: 0.85rem;
+    }
+
+    &:hover,
+    &:focus-visible {
+        border-color: rgba(204, 194, 255, 0.58);
+        background: rgba(105, 81, 255, 0.26);
     }
 }
 

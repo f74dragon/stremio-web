@@ -110,6 +110,7 @@ The milestone findings below are chronological implementation records. Older sec
 
 - The Downloads route now has separate **Downloads** and **History** views. Active file management remains in Downloads; permanent lifecycle evidence is presented in a read-only History browser with no file, record, or history deletion controls.
 - History events are projected into poster-based movie and show cards. Outcome filters expose completed, needs-attention, and deleted titles only when those categories exist, while every card shows its latest activity date and current outcome.
+- History card titles and the focused History detail hero link back to the normal Stremio title page when the permanent event contains a valid media type and metadata ID. Legacy entries without that reference remain readable without showing a broken action.
 - Movie details show each source attempt directly. Show details group attempts into seasons and episodes, preserving retries and alternate-source attempts without flattening unrelated episodes into one long list.
 - Each attempt displays the sanitized source/provider label, size, attempt number, latest date, whether its active record still exists, and a chronological lifecycle timeline. Only successful media-deletion events display reclaimed disk space.
 - Initial loading, empty history, truncated-result, damaged-entry, offline, stale-data, and background-refresh states are handled without clearing already loaded history or disrupting the active Downloads view.
