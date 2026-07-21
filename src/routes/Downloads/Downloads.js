@@ -6,21 +6,35 @@ const { default: Icon } = require('@stremio/stremio-icons/react');
 const { Button, MainNavBars } = require('stremio/components');
 const useDownloadRecords = require('stremio/customStremio/useDownloadRecords');
 const useDownloadHistory = require('stremio/customStremio/useDownloadHistory');
-const { groupDownloadRecords, groupDownloadRecordsByMedia } = require('stremio/customStremio/downloadRecordPresentation');
-const { projectDownloadHistory } = require('stremio/customStremio/downloadHistoryPresentation');
+const useLibrarySortPreference = require('stremio/customStremio/useLibrarySortPreference');
+const {
+    DOWNLOAD_LIBRARY_SORTS,
+    groupDownloadRecords,
+    groupDownloadRecordsByMedia,
+    filterAndSortDownloadMediaGroups
+} = require('stremio/customStremio/downloadRecordPresentation');
+const { HISTORY_LIBRARY_SORTS, projectDownloadHistory } = require('stremio/customStremio/downloadHistoryPresentation');
 const DownloadMediaGroup = require('stremio/customStremio/components/DownloadMediaGroup');
 const DownloadMediaDetails = require('stremio/customStremio/components/DownloadMediaDetails');
 const DownloadActivityPanel = require('stremio/customStremio/components/DownloadActivityPanel');
 const DownloadManagerSettingsPanel = require('stremio/customStremio/components/DownloadManagerSettingsPanel');
 const DownloadHistoryBrowser = require('stremio/customStremio/components/DownloadHistoryBrowser');
+const DownloadLibraryToolbar = require('stremio/customStremio/components/DownloadLibraryToolbar');
 const { getSelectableDownloadIds, getSelectionState } = require('stremio/customStremio/downloadBatchDeletion');
 const styles = require('./styles.less');
+
+const DOWNLOAD_SORT_VALUES = Object.values(DOWNLOAD_LIBRARY_SORTS);
+const HISTORY_SORT_VALUES = Object.values(HISTORY_LIBRARY_SORTS);
 
 const Downloads = () => {
     const { t } = useTranslation();
     const contentRef = React.useRef(null);
     const libraryScrollPositionRef = React.useRef(0);
     const [activeView, setActiveView] = React.useState('downloads');
+    const [downloadSearch, setDownloadSearch] = React.useState('');
+    const [historySearch, setHistorySearch] = React.useState('');
+    const [downloadSort, setDownloadSort] = useLibrarySortPreference('customStremio.downloads.sort', DOWNLOAD_LIBRARY_SORTS.RECENT, DOWNLOAD_SORT_VALUES);
+    const [historySort, setHistorySort] = useLibrarySortPreference('customStremio.downloadHistory.sort', HISTORY_LIBRARY_SORTS.RECENT, HISTORY_SORT_VALUES);
     const [selectedMediaKey, setSelectedMediaKey] = React.useState(null);
     const [settingsOpen, setSettingsOpen] = React.useState(false);
     const [selectionMode, setSelectionMode] = React.useState(false);
@@ -60,15 +74,30 @@ const Downloads = () => {
     } = useDownloadHistory({ enabled: activeView === 'history' });
     const groups = React.useMemo(() => groupDownloadRecords(items), [items]);
     const mediaGroups = React.useMemo(() => groupDownloadRecordsByMedia(items), [items]);
+    const visibleMediaGroups = React.useMemo(() => filterAndSortDownloadMediaGroups(mediaGroups, {
+        query: downloadSearch,
+        sort: downloadSort
+    }), [downloadSearch, downloadSort, mediaGroups]);
     const historyGroups = React.useMemo(() => projectDownloadHistory(historyEvents, items), [historyEvents, items]);
     const selectedMediaGroup = React.useMemo(() => {
         return selectedMediaKey ? mediaGroups.find((group) => group.key === selectedMediaKey) || null : null;
     }, [mediaGroups, selectedMediaKey]);
     const hasItems = items.length > 0;
     const selectableRecordIds = React.useMemo(() => getSelectableDownloadIds(items), [items]);
+    const visibleRecords = React.useMemo(() => visibleMediaGroups.flatMap((group) => group.records), [visibleMediaGroups]);
+    const visibleSelectableRecordIds = React.useMemo(() => getSelectableDownloadIds(visibleRecords), [visibleRecords]);
+    const allVisibleSelected = visibleSelectableRecordIds.length > 0 && visibleSelectableRecordIds.every((id) => selectedRecordIds.has(String(id)));
     const selectedRecords = React.useMemo(() => items.filter((record) => record?.id && selectedRecordIds.has(String(record.id))), [items, selectedRecordIds]);
     const selectedTitleCount = React.useMemo(() => mediaGroups.filter((group) => group.records.some((record) => record?.id && selectedRecordIds.has(String(record.id)))).length, [mediaGroups, selectedRecordIds]);
-    const activeExcludedCount = items.length - selectableRecordIds.length;
+    const activeExcludedCount = visibleRecords.length - visibleSelectableRecordIds.length;
+    const downloadSortOptions = React.useMemo(() => [
+        { value: DOWNLOAD_LIBRARY_SORTS.RECENT, label: t('CUSTOM_DOWNLOADS_SORT_RECENT', { defaultValue: 'Recently updated' }) },
+        { value: DOWNLOAD_LIBRARY_SORTS.OLDEST, label: t('CUSTOM_DOWNLOADS_SORT_OLDEST', { defaultValue: 'Oldest updated' }) },
+        { value: DOWNLOAD_LIBRARY_SORTS.TITLE_ASC, label: t('CUSTOM_DOWNLOADS_SORT_TITLE_ASC', { defaultValue: 'Title A-Z' }) },
+        { value: DOWNLOAD_LIBRARY_SORTS.TITLE_DESC, label: t('CUSTOM_DOWNLOADS_SORT_TITLE_DESC', { defaultValue: 'Title Z-A' }) },
+        { value: DOWNLOAD_LIBRARY_SORTS.SIZE_DESC, label: t('CUSTOM_DOWNLOADS_SORT_SIZE', { defaultValue: 'Largest on device' }) },
+        { value: DOWNLOAD_LIBRARY_SORTS.CONTENT_DESC, label: t('CUSTOM_DOWNLOADS_SORT_CONTENT', { defaultValue: 'Most episodes/files' }) }
+    ], [t]);
     const updateScrollPosition = React.useCallback((scrollTop) => {
         const applyScrollPosition = () => {
             if (contentRef.current) {
@@ -139,8 +168,8 @@ const Downloads = () => {
         handleToggleRecords(getSelectableDownloadIds(group?.records));
     }, [handleToggleRecords, mediaGroups]);
     const handleToggleAll = React.useCallback(() => {
-        handleToggleRecords(selectableRecordIds);
-    }, [handleToggleRecords, selectableRecordIds]);
+        handleToggleRecords(visibleSelectableRecordIds);
+    }, [handleToggleRecords, visibleSelectableRecordIds]);
     const handleConfirmBatchDelete = React.useCallback(async () => {
         const recordIds = Array.from(selectedRecordIds);
         if (recordIds.length === 0 || batchDeleting) {
@@ -249,6 +278,8 @@ const Downloads = () => {
                     activeView === 'history' ?
                         <DownloadHistoryBrowser
                             groups={historyGroups}
+                            searchValue={historySearch}
+                            sortValue={historySort}
                             eventCount={historyEvents.length}
                             total={historyTotal}
                             invalidEntryCount={historyInvalidEntryCount}
@@ -256,6 +287,8 @@ const Downloads = () => {
                             refreshing={historyRefreshing}
                             error={historyError}
                             onRefresh={refreshHistory}
+                            onSearchChange={setHistorySearch}
+                            onSortChange={setHistorySort}
                             onNavigate={() => updateScrollPosition(0)}
                         />
                         : selectedMediaGroup ?
@@ -310,10 +343,12 @@ const Downloads = () => {
                                                     <span className={styles['selected-count-label']}>
                                                         {t('CUSTOM_DOWNLOADS_SELECTED_COUNT', { defaultValue: '{{count}} selected', count: selectedRecordIds.size })}
                                                     </span>
-                                                    <Button className={styles['select-all-button']} disabled={selectableRecordIds.length === 0} onClick={handleToggleAll}>
-                                                        {selectedRecordIds.size === selectableRecordIds.length && selectableRecordIds.length > 0 ?
+                                                    <Button className={styles['select-all-button']} disabled={visibleSelectableRecordIds.length === 0} onClick={handleToggleAll}>
+                                                        {allVisibleSelected ?
                                                             t('CUSTOM_DOWNLOADS_CLEAR_ALL', { defaultValue: 'Clear all' })
-                                                            : t('CUSTOM_DOWNLOADS_SELECT_ALL', { defaultValue: 'Select all' })}
+                                                            : downloadSearch.trim() ?
+                                                                t('CUSTOM_DOWNLOADS_SELECT_ALL_RESULTS', { defaultValue: 'Select all results' })
+                                                                : t('CUSTOM_DOWNLOADS_SELECT_ALL', { defaultValue: 'Select all' })}
                                                     </Button>
                                                     <Button className={styles['cancel-selection-button']} onClick={handleCancelSelection}>
                                                         {t('CUSTOM_DOWNLOADS_CANCEL_SELECTION', { defaultValue: 'Cancel' })}
@@ -321,7 +356,7 @@ const Downloads = () => {
                                                 </React.Fragment>
                                                 :
                                                 <React.Fragment>
-                                                    {hasItems ? <Button className={styles['select-button']} onClick={handleStartSelection}>{t('CUSTOM_DOWNLOADS_SELECT', { defaultValue: 'Select' })}</Button> : null}
+                                                    {hasItems ? <Button className={styles['select-button']} disabled={visibleMediaGroups.length === 0} onClick={handleStartSelection}>{t('CUSTOM_DOWNLOADS_SELECT', { defaultValue: 'Select' })}</Button> : null}
                                                     <Button
                                                         className={settingsOpen ? styles['options-button-active'] : styles['options-button']}
                                                         aria-expanded={settingsOpen}
@@ -407,28 +442,58 @@ const Downloads = () => {
                                                             </div>
                                                             <div className={styles['section-count']}>{mediaGroups.length}</div>
                                                         </div>
-                                                        <div className={styles['media-grid']}>
-                                                            {mediaGroups.map((group) => {
-                                                                const selection = getSelectionState(group.records, selectedRecordIds);
-                                                                return (
-                                                                    <DownloadMediaGroup
-                                                                        key={group.key}
-                                                                        group={group}
-                                                                        actionStates={actionStates}
-                                                                        actionErrors={actionErrors}
-                                                                        onPlay={play}
-                                                                        onOpen={handleOpenMedia}
-                                                                        selectionMode={selectionMode}
-                                                                        selected={selection.allSelected}
-                                                                        partiallySelected={selection.partiallySelected}
-                                                                        selectionDisabled={selection.selectableCount === 0}
-                                                                        selectableCount={selection.selectableCount}
-                                                                        selectedCount={selection.selectedCount}
-                                                                        onToggleSelection={handleToggleMediaGroup}
-                                                                    />
-                                                                );
-                                                            })}
-                                                        </div>
+                                                        <DownloadLibraryToolbar
+                                                            label={t('CUSTOM_DOWNLOADS_LIBRARY_CONTROLS', { defaultValue: 'Download library search and sorting' })}
+                                                            searchValue={downloadSearch}
+                                                            searchPlaceholder={t('CUSTOM_DOWNLOADS_SEARCH_PLACEHOLDER', { defaultValue: 'Search titles and episodes' })}
+                                                            clearLabel={t('CUSTOM_DOWNLOADS_CLEAR_SEARCH', { defaultValue: 'Clear search' })}
+                                                            sortLabel={t('CUSTOM_DOWNLOADS_SORT_LABEL', { defaultValue: 'Sort' })}
+                                                            sortValue={downloadSort}
+                                                            sortOptions={downloadSortOptions}
+                                                            resultSummary={visibleMediaGroups.length === mediaGroups.length ?
+                                                                t('CUSTOM_DOWNLOADS_RESULT_TOTAL', {
+                                                                    defaultValue: visibleMediaGroups.length === 1 ? '{{count}} title' : '{{count}} titles',
+                                                                    count: visibleMediaGroups.length
+                                                                })
+                                                                : t('CUSTOM_DOWNLOADS_RESULT_FILTERED', {
+                                                                    defaultValue: '{{visible}} of {{total}} titles',
+                                                                    visible: visibleMediaGroups.length,
+                                                                    total: mediaGroups.length
+                                                                })}
+                                                            disabled={selectionMode}
+                                                            onSearchChange={setDownloadSearch}
+                                                            onClear={() => setDownloadSearch('')}
+                                                            onSortChange={setDownloadSort}
+                                                        />
+                                                        {visibleMediaGroups.length === 0 ?
+                                                            <div className={styles['library-filter-empty']}>
+                                                                <Icon name={'search'} />
+                                                                <strong>{t('CUSTOM_DOWNLOADS_NO_MATCHES', { defaultValue: 'No matching titles' })}</strong>
+                                                                <span>{t('CUSTOM_DOWNLOADS_NO_MATCHES_DESCRIPTION', { defaultValue: 'Try another title, episode name, or season and episode number.' })}</span>
+                                                                <Button onClick={() => setDownloadSearch('')}>{t('CUSTOM_DOWNLOADS_CLEAR_SEARCH', { defaultValue: 'Clear search' })}</Button>
+                                                            </div>
+                                                            : <div className={styles['media-grid']}>
+                                                                {visibleMediaGroups.map((group) => {
+                                                                    const selection = getSelectionState(group.records, selectedRecordIds);
+                                                                    return (
+                                                                        <DownloadMediaGroup
+                                                                            key={group.key}
+                                                                            group={group}
+                                                                            actionStates={actionStates}
+                                                                            actionErrors={actionErrors}
+                                                                            onPlay={play}
+                                                                            onOpen={handleOpenMedia}
+                                                                            selectionMode={selectionMode}
+                                                                            selected={selection.allSelected}
+                                                                            partiallySelected={selection.partiallySelected}
+                                                                            selectionDisabled={selection.selectableCount === 0}
+                                                                            selectableCount={selection.selectableCount}
+                                                                            selectedCount={selection.selectedCount}
+                                                                            onToggleSelection={handleToggleMediaGroup}
+                                                                        />
+                                                                    );
+                                                                })}
+                                                            </div>}
                                                     </section>
                                                 </div>
                                 }

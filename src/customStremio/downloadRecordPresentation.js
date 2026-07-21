@@ -1,5 +1,19 @@
 const ACTIVE_DOWNLOAD_STATUSES = new Set(['queued', 'downloading', 'paused']);
 const POLLING_DOWNLOAD_STATUSES = new Set(['queued', 'downloading']);
+const {
+    matchesLibrarySearch,
+    compareLibraryTitles,
+    getEpisodeSearchValues
+} = require('./librarySearchSort');
+
+const DOWNLOAD_LIBRARY_SORTS = Object.freeze({
+    RECENT: 'recent',
+    OLDEST: 'oldest',
+    TITLE_ASC: 'title-asc',
+    TITLE_DESC: 'title-desc',
+    SIZE_DESC: 'size-desc',
+    CONTENT_DESC: 'content-desc'
+});
 
 const getTimestamp = (record) => {
     const value = record?.completedAt || record?.updatedAt || record?.createdAt;
@@ -218,6 +232,70 @@ const groupDownloadRecordsByMedia = (records) => {
     }).sort((left, right) => right.latestTimestamp - left.latestTimestamp);
 };
 
+const getDownloadRecordStoredArtifact = (record) => {
+    const completed = record?.status === 'completed';
+    const identity = completed ? record?.localFileIdentity : record?.partialFileIdentity;
+    const artifactPath = completed ? record?.localPath : record?.partialPath;
+    const identityKey = identity && identity.dev !== undefined && identity.ino !== undefined ? `${identity.dev}:${identity.ino}` : null;
+    const fallbackSize = completed ? (record?.bytesTotal ?? record?.bytesDownloaded) : record?.bytesDownloaded;
+    const size = Number(identity?.size ?? fallbackSize);
+    return {
+        key: identityKey || normalizeGroupValue(artifactPath).toLowerCase() || `record:${normalizeGroupValue(record?.id)}`,
+        size: Number.isFinite(size) && size >= 0 ? size : null
+    };
+};
+
+const getDownloadMediaGroupStoredBytes = (group) => {
+    const artifacts = new Map();
+    (group?.records || []).forEach((record) => {
+        const artifact = getDownloadRecordStoredArtifact(record);
+        if (!artifact.key || artifact.size === null) {
+            return;
+        }
+        artifacts.set(artifact.key, Math.max(artifacts.get(artifact.key) || 0, artifact.size));
+    });
+    return Array.from(artifacts.values()).reduce((total, size) => total + size, 0);
+};
+
+const getDownloadMediaGroupContentCount = (group) => {
+    return group?.type === 'series' ? Number(group.episodeCount) || 0 : Math.max(1, group?.records?.length || 0);
+};
+
+const matchesDownloadMediaGroupSearch = (group, query) => {
+    const values = [group?.title];
+    (group?.records || []).forEach((record) => {
+        values.push(record?.videoTitle, ...getEpisodeSearchValues(record));
+    });
+    return matchesLibrarySearch(values, query);
+};
+
+const sortDownloadMediaGroups = (groups, sort = DOWNLOAD_LIBRARY_SORTS.RECENT) => {
+    const sorted = [...(groups || [])];
+    sorted.sort((left, right) => {
+        if (sort === DOWNLOAD_LIBRARY_SORTS.OLDEST) {
+            return left.latestTimestamp - right.latestTimestamp || compareLibraryTitles(left, right);
+        }
+        if (sort === DOWNLOAD_LIBRARY_SORTS.TITLE_ASC) {
+            return compareLibraryTitles(left, right);
+        }
+        if (sort === DOWNLOAD_LIBRARY_SORTS.TITLE_DESC) {
+            return compareLibraryTitles(right, left);
+        }
+        if (sort === DOWNLOAD_LIBRARY_SORTS.SIZE_DESC) {
+            return getDownloadMediaGroupStoredBytes(right) - getDownloadMediaGroupStoredBytes(left) || compareLibraryTitles(left, right);
+        }
+        if (sort === DOWNLOAD_LIBRARY_SORTS.CONTENT_DESC) {
+            return getDownloadMediaGroupContentCount(right) - getDownloadMediaGroupContentCount(left) || compareLibraryTitles(left, right);
+        }
+        return right.latestTimestamp - left.latestTimestamp || compareLibraryTitles(left, right);
+    });
+    return sorted;
+};
+
+const filterAndSortDownloadMediaGroups = (groups, { query = '', sort = DOWNLOAD_LIBRARY_SORTS.RECENT } = {}) => {
+    return sortDownloadMediaGroups((groups || []).filter((group) => matchesDownloadMediaGroupSearch(group, query)), sort);
+};
+
 const groupDownloadRecords = (records) => {
     const groups = {
         active: [],
@@ -280,5 +358,12 @@ module.exports = {
     groupSeriesRecordsBySeason,
     getDownloadActivitySummary,
     getDownloadTitleHref,
-    getDownloadDetailsHref
+    getDownloadDetailsHref,
+    DOWNLOAD_LIBRARY_SORTS,
+    getDownloadRecordStoredArtifact,
+    getDownloadMediaGroupStoredBytes,
+    getDownloadMediaGroupContentCount,
+    matchesDownloadMediaGroupSearch,
+    sortDownloadMediaGroups,
+    filterAndSortDownloadMediaGroups
 };

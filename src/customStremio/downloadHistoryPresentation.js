@@ -4,6 +4,20 @@ const HISTORY_FILTERS = Object.freeze({
     ATTENTION: 'attention',
     DELETED: 'deleted'
 });
+const {
+    matchesLibrarySearch,
+    compareLibraryTitles,
+    getEpisodeSearchValues
+} = require('./librarySearchSort');
+
+const HISTORY_LIBRARY_SORTS = Object.freeze({
+    RECENT: 'recent',
+    OLDEST: 'oldest',
+    TITLE_ASC: 'title-asc',
+    TITLE_DESC: 'title-desc',
+    EPISODES_DESC: 'episodes-desc',
+    ATTEMPTS_DESC: 'attempts-desc'
+});
 
 const ATTENTION_OUTCOMES = new Set(['failed', 'canceled', 'partial']);
 const DELETED_OUTCOMES = new Set(['deleted', 'removed']);
@@ -161,6 +175,46 @@ const filterDownloadHistoryGroups = (groups, filter) => {
     return filter === HISTORY_FILTERS.ALL ? groups : groups.filter((group) => group.attempts.some((attempt) => attemptMatchesFilter(attempt, filter)));
 };
 
+const matchesDownloadHistoryGroupSearch = (group, query) => {
+    const values = [group?.title];
+    (group?.attempts || []).forEach((attempt) => {
+        values.push(attempt?.media?.videoTitle, ...getEpisodeSearchValues(attempt?.media));
+    });
+    return matchesLibrarySearch(values, query);
+};
+
+const sortDownloadHistoryGroups = (groups, sort = HISTORY_LIBRARY_SORTS.RECENT) => {
+    const sorted = [...(groups || [])];
+    sorted.sort((left, right) => {
+        if (sort === HISTORY_LIBRARY_SORTS.OLDEST) {
+            return left.latestTimestamp - right.latestTimestamp || compareLibraryTitles(left, right);
+        }
+        if (sort === HISTORY_LIBRARY_SORTS.TITLE_ASC) {
+            return compareLibraryTitles(left, right);
+        }
+        if (sort === HISTORY_LIBRARY_SORTS.TITLE_DESC) {
+            return compareLibraryTitles(right, left);
+        }
+        if (sort === HISTORY_LIBRARY_SORTS.EPISODES_DESC) {
+            return right.episodeCount - left.episodeCount || compareLibraryTitles(left, right);
+        }
+        if (sort === HISTORY_LIBRARY_SORTS.ATTEMPTS_DESC) {
+            return right.attemptCount - left.attemptCount || compareLibraryTitles(left, right);
+        }
+        return right.latestTimestamp - left.latestTimestamp || compareLibraryTitles(left, right);
+    });
+    return sorted;
+};
+
+const filterAndSortDownloadHistoryGroups = (groups, {
+    filter = HISTORY_FILTERS.ALL,
+    query = '',
+    sort = HISTORY_LIBRARY_SORTS.RECENT
+} = {}) => {
+    const outcomeGroups = filterDownloadHistoryGroups(groups, filter);
+    return sortDownloadHistoryGroups(outcomeGroups.filter((group) => matchesDownloadHistoryGroupSearch(group, query)), sort);
+};
+
 const getDownloadHistoryFilterCounts = (groups) => ({
     [HISTORY_FILTERS.ALL]: groups.length,
     [HISTORY_FILTERS.COMPLETED]: groups.filter((group) => group.attempts.some((attempt) => attemptMatchesFilter(attempt, HISTORY_FILTERS.COMPLETED))).length,
@@ -212,5 +266,9 @@ module.exports = {
     attemptMatchesFilter,
     filterDownloadHistoryGroups,
     getDownloadHistoryFilterCounts,
-    groupHistoryAttemptsBySeason
+    groupHistoryAttemptsBySeason,
+    HISTORY_LIBRARY_SORTS,
+    matchesDownloadHistoryGroupSearch,
+    sortDownloadHistoryGroups,
+    filterAndSortDownloadHistoryGroups
 };

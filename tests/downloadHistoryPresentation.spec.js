@@ -2,11 +2,13 @@
 
 const {
     HISTORY_FILTERS,
+    HISTORY_LIBRARY_SORTS,
     getAttemptOutcome,
     projectDownloadHistory,
     filterDownloadHistoryGroups,
     getDownloadHistoryFilterCounts,
-    groupHistoryAttemptsBySeason
+    groupHistoryAttemptsBySeason,
+    filterAndSortDownloadHistoryGroups
 } = require('../src/customStremio/downloadHistoryPresentation');
 
 const createEvent = ({
@@ -84,6 +86,21 @@ describe('download history presentation', () => {
         expect(filterDownloadHistoryGroups(groups, HISTORY_FILTERS.ATTENTION).map(({ title }) => title)).toEqual(['Failed Movie']);
         expect(filterDownloadHistoryGroups(groups, HISTORY_FILTERS.DELETED).map(({ title }) => title)).toEqual(['Deleted Movie']);
         expect(getDownloadHistoryFilterCounts(groups)).toEqual({ all: 3, completed: 1, attention: 1, deleted: 1 });
+    });
+
+    test('combines outcome filtering, title or episode search, and stable sorting', () => {
+        const groups = projectDownloadHistory([
+            createEvent({ eventType: 'download_completed', downloadId: 'zulu', metaId: 'zulu', title: 'Zulu Movie', occurredAt: '2026-07-19T12:00:00.000Z' }),
+            createEvent({ eventType: 'download_completed', downloadId: 'show-1', metaId: 'show', title: 'Example Show', type: 'series', videoId: 'show:2:5', videoTitle: 'The Return', season: 2, episode: 5, occurredAt: '2026-07-20T12:00:00.000Z' }),
+            createEvent({ eventType: 'download_failed', downloadId: 'show-2', metaId: 'show', title: 'Example Show', type: 'series', videoId: 'show:2:6', videoTitle: 'Aftermath', season: 2, episode: 6, status: 'failed', occurredAt: '2026-07-21T12:00:00.000Z' }),
+            createEvent({ eventType: 'download_completed', downloadId: 'alpha', metaId: 'alpha', title: 'Alpha Movie', occurredAt: '2026-07-18T12:00:00.000Z' })
+        ]);
+
+        expect(filterAndSortDownloadHistoryGroups(groups, { query: 'example s02e05' }).map(({ title }) => title)).toEqual(['Example Show']);
+        expect(filterAndSortDownloadHistoryGroups(groups, { filter: HISTORY_FILTERS.ATTENTION, query: 'aftermath' }).map(({ title }) => title)).toEqual(['Example Show']);
+        expect(filterAndSortDownloadHistoryGroups(groups, { sort: HISTORY_LIBRARY_SORTS.TITLE_ASC }).map(({ title }) => title)).toEqual(['Alpha Movie', 'Example Show', 'Zulu Movie']);
+        expect(filterAndSortDownloadHistoryGroups(groups, { sort: HISTORY_LIBRARY_SORTS.OLDEST }).map(({ title }) => title)).toEqual(['Alpha Movie', 'Zulu Movie', 'Example Show']);
+        expect(filterAndSortDownloadHistoryGroups(groups, { sort: HISTORY_LIBRARY_SORTS.ATTEMPTS_DESC }).map(({ title }) => title)[0]).toBe('Example Show');
     });
 
     test('ignores malformed events instead of creating broken cards', () => {

@@ -5,10 +5,12 @@ const { default: Icon } = require('@stremio/stremio-icons/react');
 const { Button, Image } = require('stremio/components');
 const {
     HISTORY_FILTERS,
-    filterDownloadHistoryGroups,
+    HISTORY_LIBRARY_SORTS,
+    filterAndSortDownloadHistoryGroups,
     getDownloadHistoryFilterCounts,
     groupHistoryAttemptsBySeason
 } = require('../downloadHistoryPresentation');
+const DownloadLibraryToolbar = require('./DownloadLibraryToolbar');
 const styles = require('./DownloadHistoryBrowser.less');
 
 const formatDate = (value) => {
@@ -232,6 +234,8 @@ HistoryDetails.propTypes = {
 
 const DownloadHistoryBrowser = ({
     groups,
+    searchValue,
+    sortValue,
     eventCount,
     total,
     invalidEntryCount,
@@ -239,6 +243,8 @@ const DownloadHistoryBrowser = ({
     refreshing,
     error,
     onRefresh,
+    onSearchChange,
+    onSortChange,
     onNavigate
 }) => {
     const { t } = useTranslation();
@@ -246,12 +252,24 @@ const DownloadHistoryBrowser = ({
     const [selectedGroupKey, setSelectedGroupKey] = React.useState(null);
     const selectedGroup = groups.find(({ key }) => key === selectedGroupKey) || null;
     const filterCounts = React.useMemo(() => getDownloadHistoryFilterCounts(groups), [groups]);
-    const filteredGroups = React.useMemo(() => filterDownloadHistoryGroups(groups, filter), [filter, groups]);
+    const filteredGroups = React.useMemo(() => filterAndSortDownloadHistoryGroups(groups, {
+        filter,
+        query: searchValue,
+        sort: sortValue
+    }), [filter, groups, searchValue, sortValue]);
     const filters = [
         { key: HISTORY_FILTERS.ALL, label: t('CUSTOM_HISTORY_FILTER_ALL', { defaultValue: 'All' }) },
         { key: HISTORY_FILTERS.COMPLETED, label: t('CUSTOM_HISTORY_FILTER_COMPLETED', { defaultValue: 'Completed' }) },
         { key: HISTORY_FILTERS.ATTENTION, label: t('CUSTOM_HISTORY_FILTER_ATTENTION', { defaultValue: 'Needs attention' }) },
         { key: HISTORY_FILTERS.DELETED, label: t('CUSTOM_HISTORY_FILTER_DELETED', { defaultValue: 'Deleted' }) }
+    ];
+    const sortOptions = [
+        { value: HISTORY_LIBRARY_SORTS.RECENT, label: t('CUSTOM_HISTORY_SORT_RECENT', { defaultValue: 'Latest activity' }) },
+        { value: HISTORY_LIBRARY_SORTS.OLDEST, label: t('CUSTOM_HISTORY_SORT_OLDEST', { defaultValue: 'Earliest activity' }) },
+        { value: HISTORY_LIBRARY_SORTS.TITLE_ASC, label: t('CUSTOM_HISTORY_SORT_TITLE_ASC', { defaultValue: 'Title A-Z' }) },
+        { value: HISTORY_LIBRARY_SORTS.TITLE_DESC, label: t('CUSTOM_HISTORY_SORT_TITLE_DESC', { defaultValue: 'Title Z-A' }) },
+        { value: HISTORY_LIBRARY_SORTS.EPISODES_DESC, label: t('CUSTOM_HISTORY_SORT_EPISODES', { defaultValue: 'Most episodes' }) },
+        { value: HISTORY_LIBRARY_SORTS.ATTEMPTS_DESC, label: t('CUSTOM_HISTORY_SORT_ATTEMPTS', { defaultValue: 'Most download attempts' }) }
     ];
 
     React.useEffect(() => {
@@ -292,6 +310,28 @@ const DownloadHistoryBrowser = ({
                     : groups.length === 0 ?
                         <div className={styles['state']}><Icon name={'download'} /><strong>{t('CUSTOM_HISTORY_EMPTY', { defaultValue: 'No download history yet' })}</strong><span>{t('CUSTOM_HISTORY_EMPTY_DESCRIPTION', { defaultValue: 'New downloads and lifecycle changes will be recorded here automatically.' })}</span></div>
                         : <React.Fragment>
+                            <DownloadLibraryToolbar
+                                label={t('CUSTOM_HISTORY_LIBRARY_CONTROLS', { defaultValue: 'Download history search and sorting' })}
+                                searchValue={searchValue}
+                                searchPlaceholder={t('CUSTOM_HISTORY_SEARCH_PLACEHOLDER', { defaultValue: 'Search titles and episodes' })}
+                                clearLabel={t('CUSTOM_HISTORY_CLEAR_SEARCH', { defaultValue: 'Clear history search' })}
+                                sortLabel={t('CUSTOM_HISTORY_SORT_LABEL', { defaultValue: 'Sort' })}
+                                sortValue={sortValue}
+                                sortOptions={sortOptions}
+                                resultSummary={filteredGroups.length === groups.length ?
+                                    t('CUSTOM_HISTORY_RESULT_TOTAL', {
+                                        defaultValue: filteredGroups.length === 1 ? '{{count}} title' : '{{count}} titles',
+                                        count: filteredGroups.length
+                                    })
+                                    : t('CUSTOM_HISTORY_RESULT_FILTERED', {
+                                        defaultValue: '{{visible}} of {{total}} titles',
+                                        visible: filteredGroups.length,
+                                        total: groups.length
+                                    })}
+                                onSearchChange={onSearchChange}
+                                onClear={() => onSearchChange('')}
+                                onSortChange={onSortChange}
+                            />
                             <div className={styles['filter-bar']} role={'tablist'} aria-label={t('CUSTOM_HISTORY_FILTERS', { defaultValue: 'History filters' })}>
                                 {filters.filter(({ key }) => key === HISTORY_FILTERS.ALL || filterCounts[key] > 0).map(({ key, label }) => (
                                     <button
@@ -342,6 +382,8 @@ const DownloadHistoryBrowser = ({
 
 DownloadHistoryBrowser.propTypes = {
     groups: PropTypes.arrayOf(PropTypes.object).isRequired,
+    searchValue: PropTypes.string.isRequired,
+    sortValue: PropTypes.string.isRequired,
     eventCount: PropTypes.number.isRequired,
     total: PropTypes.number.isRequired,
     invalidEntryCount: PropTypes.number.isRequired,
@@ -349,6 +391,8 @@ DownloadHistoryBrowser.propTypes = {
     refreshing: PropTypes.bool,
     error: PropTypes.string,
     onRefresh: PropTypes.func,
+    onSearchChange: PropTypes.func.isRequired,
+    onSortChange: PropTypes.func.isRequired,
     onNavigate: PropTypes.func
 };
 

@@ -318,6 +318,44 @@
     padding-top: 0.2rem;
 }
 
+.library-filter-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 0.55rem;
+    min-height: 17rem;
+    padding: 2rem;
+    text-align: center;
+
+    > svg {
+        width: 2.2rem;
+        height: 2.2rem;
+        margin-bottom: 0.3rem;
+        color: var(--primary-accent-color);
+        opacity: 0.72;
+    }
+
+    > strong {
+        font-size: 1.15rem;
+    }
+
+    > span {
+        max-width: 30rem;
+        font-size: 0.78rem;
+        line-height: 1.45;
+        opacity: 0.58;
+    }
+
+    > :last-child {
+        margin-top: 0.5rem;
+        padding: 0.55rem 0.9rem;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.06);
+    }
+}
+
 .selection-action-bar {
     position: sticky;
     z-index: 20;

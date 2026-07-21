@@ -58,7 +58,7 @@ Notes:
 - `3. Preferred addon stream sorting/filtering`: Completed for the planned scope (`Milestones 3A-3A.1`; preferred ordering and persistent original Stremio addon-filter state implemented)
 - `4. Add placeholder Download / Play Download buttons`: Completed and superseded by the real record-aware Download and Play controls
 - `5. Create local backend prototype`: Completed and superseded by the persistent local download backend
-- `6. Implement real download manager`: In progress (`Milestones 6A-6N.2` real downloads, persistence, retry/resume, FIFO scheduling, queue controls, concurrency settings, hybrid provider availability, provider-aware download safety, resolver HEAD fallback, safe local-media deletion, bulk selection/deletion, and permanent history persistence/browsing implemented)
+- `6. Implement real download manager`: In progress (`Milestones 6A-6N.3` real downloads, persistence, retry/resume, FIFO scheduling, queue controls, concurrency settings, hybrid provider availability, provider-aware download safety, resolver HEAD fallback, safe local-media deletion, bulk selection/deletion, permanent history persistence/browsing, and library search/sorting implemented)
 - `7. Add title-specific downloads panel`: Completed for the planned panel scope (`Milestones 7A-7B`; later shared file-management actions remain tracked under the download manager)
 - `8. Add global downloads page`: In progress (`Milestones 8A-8C.2` implemented)
 - `9. Add MPC-HC launch support`: Completed for the planned scope (`Milestones 9A-9C`; panel playback, stream-row playback, and persistent in-app player selection implemented)
@@ -85,7 +85,7 @@ Keep the first 6O pass focused on planning and the smallest safe queue-submissio
 ## Remaining Tracked Work
 
 - Multi-episode/season batch download planning, explicit source selection, and queue submission. Do not silently choose among multiple qualities or providers without a documented selection rule.
-- Optional download-history search and date-range controls if the permanent local record grows beyond comfortable outcome-based browsing.
+- Archive-wide Download History pagination/indexing: current History search and sorting cover the newest 1,000 lifecycle events returned by the bounded read API. Add cursor pagination or backend archive aggregation before describing search as covering an arbitrarily large permanent history. Date-range controls can join that scaling pass.
 - Watched/unwatched and playback-progress integration for real **Continue Watching**, resume position, next-episode behavior, and show-card progress.
 - Filesystem discovery for media that exists without a current record, plus metadata/artwork backfill for legacy persisted records.
 - Availability-history management UI, including an explicit clear-history action; current cached history remains intentionally retained by default.
@@ -94,6 +94,17 @@ Keep the first 6O pass focused on planning and the smallest safe queue-submissio
 - Windows application packaging after the local backend, download lifecycle, and playback integration are stable.
 
 The milestone findings below are chronological implementation records. Older sections may describe a feature as deferred or unavailable at that historical point even when a later milestone subsequently implemented it; the **Current Status**, **Next Recommended Step**, and **Remaining Tracked Work** sections above are authoritative for present planning.
+
+## Milestone 6N.3 Findings: Download Library Search and Sorting
+
+- Downloads and History now share one responsive library toolbar with title/episode search, a clear action, visible/total result feedback, and tab-appropriate sorting.
+- Downloads search matches title names, episode names, and season/episode identifiers such as `S02E05`. Sort choices cover recent or oldest activity, title A-Z/Z-A, largest on-device footprint, and most episodes/files.
+- On-device size is computed from current final or partial artifacts and deduplicated by recorded file identity/path, so shared-file records do not inflate title size. The operational active-transfer panel and persistent FIFO queue order are never reordered by library sorting.
+- History search combines with the existing outcome filters and supports the same title, episode, and season/episode terms. History-specific sorting covers latest/earliest activity, title A-Z/Z-A, most episodes, and most download attempts without pretending deleted history represents current disk usage.
+- Downloads and History keep separate queries while the route remains open. Each tab's sort preference persists locally across reloads, while search intentionally starts clean after a full reload.
+- Selection locks the Downloads search/sort toolbar. With an active query, **Select all results** is explicitly scoped to the visible matched titles so hidden records are not selected for destructive work.
+- Scaling limitation: History search/sort currently operate over the newest 1,000 loaded lifecycle events. Full permanent-archive search requires a later paginated or backend-aggregated history pass and remains listed under Remaining Tracked Work.
+- Validation: live browser checks covered filtering, clearing, sorting, combined History outcome/search filtering, tab switching, and result feedback. All 266 Jest tests pass across 32 suites, full frontend ESLint and `git diff --check` pass, and the production build completes with only the repository's existing bundle-size warnings.
 
 ## Milestone 6N.2 Findings: Permanent Download History UI
 

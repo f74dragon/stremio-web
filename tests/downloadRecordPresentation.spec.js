@@ -1,6 +1,7 @@
 /* global describe, test, expect */
 
 const {
+    DOWNLOAD_LIBRARY_SORTS,
     sortDownloadRecordsNewestFirst,
     getQueuePosition,
     sortActiveDownloadRecords,
@@ -12,7 +13,9 @@ const {
     groupSeriesRecordsBySeason,
     getDownloadActivitySummary,
     getDownloadTitleHref,
-    getDownloadDetailsHref
+    getDownloadDetailsHref,
+    getDownloadMediaGroupStoredBytes,
+    filterAndSortDownloadMediaGroups
 } = require('../src/customStremio/downloadRecordPresentation');
 
 describe('downloadRecordPresentation', () => {
@@ -198,6 +201,34 @@ describe('downloadRecordPresentation', () => {
             { key: 'season:2', ids: ['s2e1'] },
             { key: 'season:unknown', ids: ['special'] }
         ]);
+    });
+
+    test('searches title and episode metadata with normalized multi-term queries', () => {
+        const groups = groupDownloadRecordsByMedia([
+            { id: 'movie', metaId: 'movie', type: 'movie', parentTitle: 'Amélie', status: 'completed' },
+            { id: 'episode', metaId: 'show', type: 'series', parentTitle: 'Example Show', videoTitle: 'The Return', season: 2, episode: 5, status: 'completed' }
+        ]);
+
+        expect(filterAndSortDownloadMediaGroups(groups, { query: 'amelie' }).map(({ title }) => title)).toEqual(['Amélie']);
+        expect(filterAndSortDownloadMediaGroups(groups, { query: 'example s02e05' }).map(({ title }) => title)).toEqual(['Example Show']);
+        expect(filterAndSortDownloadMediaGroups(groups, { query: 'missing' })).toEqual([]);
+    });
+
+    test('sorts library groups without mutating them and deduplicates shared on-device artifacts', () => {
+        const groups = groupDownloadRecordsByMedia([
+            { id: 'shared-a', metaId: 'alpha', type: 'movie', parentTitle: 'Alpha', status: 'completed', localPath: 'C:\\Media\\Alpha.mkv', localFileIdentity: { dev: 1, ino: 2, size: 400 }, updatedAt: '2026-07-20T12:00:00.000Z' },
+            { id: 'shared-b', metaId: 'alpha', type: 'movie', parentTitle: 'Alpha', status: 'completed', localPath: 'C:\\Media\\Alpha.mkv', localFileIdentity: { dev: 1, ino: 2, size: 400 }, updatedAt: '2026-07-20T13:00:00.000Z' },
+            { id: 'large', metaId: 'zulu', type: 'movie', parentTitle: 'Zulu', status: 'completed', localPath: 'C:\\Media\\Zulu.mkv', bytesTotal: 900, updatedAt: '2026-07-19T12:00:00.000Z' },
+            { id: 's1e1', metaId: 'show', type: 'series', parentTitle: 'Beta Show', videoId: 'show:1:1', season: 1, episode: 1, status: 'completed' },
+            { id: 's1e2', metaId: 'show', type: 'series', parentTitle: 'Beta Show', videoId: 'show:1:2', season: 1, episode: 2, status: 'completed' }
+        ]);
+        const originalOrder = groups.map(({ title }) => title);
+
+        expect(getDownloadMediaGroupStoredBytes(groups.find(({ title }) => title === 'Alpha'))).toBe(400);
+        expect(filterAndSortDownloadMediaGroups(groups, { sort: DOWNLOAD_LIBRARY_SORTS.SIZE_DESC }).map(({ title }) => title)).toEqual(['Zulu', 'Alpha', 'Beta Show']);
+        expect(filterAndSortDownloadMediaGroups(groups, { sort: DOWNLOAD_LIBRARY_SORTS.CONTENT_DESC }).map(({ title }) => title)).toEqual(['Alpha', 'Beta Show', 'Zulu']);
+        expect(filterAndSortDownloadMediaGroups(groups, { sort: DOWNLOAD_LIBRARY_SORTS.TITLE_ASC }).map(({ title }) => title)).toEqual(['Alpha', 'Beta Show', 'Zulu']);
+        expect(groups.map(({ title }) => title)).toEqual(originalOrder);
     });
 
     test('calculates byte-weighted global download activity', () => {
