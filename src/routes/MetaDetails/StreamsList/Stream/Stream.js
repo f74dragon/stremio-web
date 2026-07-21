@@ -74,6 +74,11 @@ const Stream = ({
     availabilityCheckStage = 'cache',
     availabilityCheckError,
     isDownloadPending,
+    batchSelectionMode = false,
+    batchSourceEligible = false,
+    batchSourceVerifiable = false,
+    onSelectBatchSource,
+    onVerifyBatchSource,
     onDownloadPlaceholder,
     onPlayDownload,
     ...props
@@ -278,21 +283,30 @@ const Stream = ({
         event.nativeEvent.togglePopupPrevented = true;
         event.nativeEvent.buttonClickPrevented = true;
 
-        if (downloadRecord?.status === 'completed' && downloadRecord.id && !downloadAction && typeof onPlayDownload === 'function') {
+        if (batchSelectionMode) {
+            if (batchSourceEligible && typeof onSelectBatchSource === 'function') {
+                onSelectBatchSource();
+            } else if (batchSourceVerifiable && typeof onVerifyBatchSource === 'function') {
+                onVerifyBatchSource();
+            }
+        } else if (downloadRecord?.status === 'completed' && downloadRecord.id && !downloadAction && typeof onPlayDownload === 'function') {
             onPlayDownload(downloadRecord.id);
         } else if (!downloadRecord && !isDownloadPending && typeof onDownloadPlaceholder === 'function') {
             onDownloadPlaceholder(downloadPayload);
         }
-    }, [downloadPayload, downloadRecord, downloadAction, isDownloadPending, onDownloadPlaceholder, onPlayDownload]);
+    }, [batchSelectionMode, batchSourceEligible, batchSourceVerifiable, downloadPayload, downloadRecord, downloadAction, isDownloadPending, onDownloadPlaceholder, onPlayDownload, onSelectBatchSource, onVerifyBatchSource]);
 
     const downloadButtonLabel = React.useMemo(
-        () => isAvailabilityChecking ? 'Checking availability...' : getDownloadButtonLabel(downloadRecord, isDownloadPending, downloadAction, sourceReadiness),
-        [downloadRecord, isDownloadPending, downloadAction, sourceReadiness, isAvailabilityChecking]
+        () => isAvailabilityChecking ? 'Checking availability...' : batchSelectionMode ?
+            batchSourceEligible ? 'Use for batch' : 'Verify first'
+            : getDownloadButtonLabel(downloadRecord, isDownloadPending, downloadAction, sourceReadiness),
+        [batchSelectionMode, batchSourceEligible, downloadRecord, isDownloadPending, downloadAction, sourceReadiness, isAvailabilityChecking]
     );
     const downloadButtonIsPlayable = downloadRecord?.status === 'completed' && Boolean(downloadRecord.id);
     const hasNonPlayableDownloadRecord = Boolean(downloadRecord) && !downloadButtonIsPlayable;
     const sourceIsBlocked = isSourceReadinessBlocked(sourceReadiness) && !downloadButtonIsPlayable;
-    const downloadButtonDisabled = isAvailabilityChecking || isDownloadPending || Boolean(downloadAction) || hasNonPlayableDownloadRecord || sourceIsBlocked;
+    const downloadButtonDisabled = isAvailabilityChecking || isDownloadPending || Boolean(downloadAction) ||
+        (batchSelectionMode ? !batchSourceEligible && !batchSourceVerifiable : hasNonPlayableDownloadRecord || sourceIsBlocked);
     const showAllDebridCached = !isAvailabilityChecking && debridProvider === DEBRID_PROVIDER.ALLDEBRID && sourceReadiness === SOURCE_READINESS.CACHED && !downloadButtonIsPlayable;
     const showAllDebridPreviouslyCached = !isAvailabilityChecking && debridProvider === DEBRID_PROVIDER.ALLDEBRID && sourceReadiness === SOURCE_READINESS.PREVIOUSLY_CACHED && !downloadButtonIsPlayable;
     const showAllDebridRequiresCaching = !isAvailabilityChecking && debridProvider === DEBRID_PROVIDER.ALLDEBRID && sourceReadiness === SOURCE_READINESS.REQUIRES_CACHING && !downloadButtonIsPlayable;
@@ -472,7 +486,7 @@ const Stream = ({
                     tabIndex={-1}
                     onClick={downloadButtonOnClick}
                 >
-                    <Icon className={styles['download-icon']} name={downloadButtonIsPlayable ? 'play' : 'download'} />
+                    <Icon className={styles['download-icon']} name={batchSelectionMode && batchSourceEligible ? 'checkmark' : downloadButtonIsPlayable ? 'play' : 'download'} />
                     <div className={styles['download-label']}>{downloadButtonLabel}</div>
                 </Button>
                 {
@@ -485,7 +499,7 @@ const Stream = ({
                 {children}
             </Button>
         );
-    }, [thumbnail, progress, addonName, name, description, href, target, download, onClick, downloadButtonOnClick, downloadButtonDisabled, downloadButtonIsPlayable, downloadButtonLabel, downloadAction, downloadActionError, showAllDebridCached, showAllDebridPreviouslyCached, showAllDebridRequiresCaching, showAllDebridUnavailable, showRealDebridCached, showRealDebridReady, showRealDebridPreviouslyCached, showRealDebridUncached, showRealDebridUnavailable, sourceIsBlocked, sourceReadiness, debridProvider, availabilityVerifiedAt, realDebridAvailability, isAvailabilityChecking, availabilityCheckStage, availabilityCheckError]);
+    }, [thumbnail, progress, addonName, name, description, href, target, download, onClick, downloadButtonOnClick, downloadButtonDisabled, downloadButtonIsPlayable, downloadButtonLabel, downloadAction, downloadActionError, showAllDebridCached, showAllDebridPreviouslyCached, showAllDebridRequiresCaching, showAllDebridUnavailable, showRealDebridCached, showRealDebridReady, showRealDebridPreviouslyCached, showRealDebridUncached, showRealDebridUnavailable, sourceIsBlocked, sourceReadiness, debridProvider, availabilityVerifiedAt, realDebridAvailability, isAvailabilityChecking, availabilityCheckStage, availabilityCheckError, batchSelectionMode, batchSourceEligible, batchSourceVerifiable]);
 
     const renderMenu = React.useMemo(() => function renderMenu() {
         return (
@@ -587,6 +601,11 @@ Stream.propTypes = {
     availabilityCheckStage: PropTypes.oneOf(['cache', 'resolver']),
     availabilityCheckError: PropTypes.string,
     isDownloadPending: PropTypes.bool,
+    batchSelectionMode: PropTypes.bool,
+    batchSourceEligible: PropTypes.bool,
+    batchSourceVerifiable: PropTypes.bool,
+    onSelectBatchSource: PropTypes.func,
+    onVerifyBatchSource: PropTypes.func,
     onDownloadPlaceholder: PropTypes.func,
     onPlayDownload: PropTypes.func,
     onClick: PropTypes.func

@@ -8,6 +8,18 @@ const { useCore } = require('stremio/core');
 const { useContentGamepadNavigation } = require('stremio/services/GamepadNavigation');
 const { withCoreSuspender } = require('stremio/common');
 const useDownloadRecords = require('stremio/customStremio/useDownloadRecords');
+const { createDownload } = require('stremio/customStremio/localBackendClient');
+const {
+    SAFE_BATCH_READINESS,
+    createBatchDownloadSession,
+    assignBatchDownloadSource,
+    removeBatchDownloadAssignment,
+    markBatchDownloadAssignmentSubmitted,
+    getNextUnassignedBatchEpisode,
+    getBatchDownloadAssignments,
+    readBatchDownloadSession,
+    writeBatchDownloadSession
+} = require('stremio/customStremio/batchDownloadSelection');
 const { VerticalNavBar, HorizontalNavBar, DelayedRenderer, Image, MetaPreview, ModalDialog } = require('stremio/components');
 const StreamsList = require('./StreamsList');
 const VideosList = require('./VideosList');
@@ -75,6 +87,22 @@ const MetaDetails = ({ urlParams, queryParams }) => {
             null;
     }, [metaDetails.metaItem]);
     const titleDownloadsMetaId = metaItemContent?.id ?? null;
+    const [batchDownloadSession, setBatchDownloadSession] = React.useState(() => {
+        try {
+            return readBatchDownloadSession(typeof window === 'undefined' ? null : window.sessionStorage, urlParams.id);
+        } catch {
+            return null;
+        }
+    });
+    const [batchQueueState, setBatchQueueState] = React.useState(null);
+    const updateBatchDownloadSession = React.useCallback((session) => {
+        setBatchDownloadSession(session);
+        try {
+            writeBatchDownloadSession(typeof window === 'undefined' ? null : window.sessionStorage, session);
+        } catch {
+            // Keep the current batch working in memory when session storage is unavailable.
+        }
+    }, []);
     const {
         items: titleDownloadRecords,
         initialLoading: titleDownloadsInitialLoading,
@@ -95,6 +123,87 @@ const MetaDetails = ({ urlParams, queryParams }) => {
         metaId: titleDownloadsMetaId,
         enabled: streamPath !== null && Boolean(titleDownloadsMetaId)
     });
+    React.useEffect(() => {
+        try {
+            setBatchDownloadSession(readBatchDownloadSession(typeof window === 'undefined' ? null : window.sessionStorage, urlParams.id));
+        } catch {
+            setBatchDownloadSession(null);
+        }
+        setBatchQueueState(null);
+    }, [urlParams.id]);
+    const startBatchDownload = React.useCallback(({ episodes, providerPolicy }) => {
+        const session = createBatchDownloadSession({
+            metaId: titleDownloadsMetaId,
+            parentTitle: metaItemContent?.name,
+            episodes,
+            providerPolicy
+        });
+        if (session.episodes.length === 0) {
+            return;
+        }
+        updateBatchDownloadSession(session);
+        setBatchQueueState(null);
+        window.location.replace(session.episodes[0].href);
+    }, [titleDownloadsMetaId, metaItemContent?.name, updateBatchDownloadSession]);
+    const selectBatchDownloadSource = React.useCallback((candidate) => {
+        if (!batchDownloadSession || !video?.id || !candidate?.payload || !SAFE_BATCH_READINESS.has(candidate.readiness)) {
+            return;
+        }
+        const nextSession = assignBatchDownloadSource(batchDownloadSession, video.id, candidate);
+        updateBatchDownloadSession(nextSession);
+        const nextEpisode = getNextUnassignedBatchEpisode(nextSession);
+        if (nextEpisode) {
+            window.location.replace(nextEpisode.href);
+        }
+    }, [batchDownloadSession, video?.id, updateBatchDownloadSession]);
+    const changeBatchDownloadSource = React.useCallback((videoId) => {
+        if (!batchDownloadSession) {
+            return;
+        }
+        const episode = batchDownloadSession.episodes.find(({ id }) => id === videoId);
+        if (!episode) {
+            return;
+        }
+        updateBatchDownloadSession(removeBatchDownloadAssignment(batchDownloadSession, videoId));
+        window.location.replace(episode.href);
+    }, [batchDownloadSession, updateBatchDownloadSession]);
+    const cancelBatchDownload = React.useCallback(() => {
+        updateBatchDownloadSession(null);
+        setBatchQueueState(null);
+        const videosHref = video?.deepLinks?.metaDetailsVideos;
+        if (typeof videosHref === 'string') {
+            window.location.replace(videosHref + (typeof video.season === 'number' ? `?${new URLSearchParams({ season: video.season })}` : ''));
+        }
+    }, [updateBatchDownloadSession, video]);
+    const queueBatchDownloads = React.useCallback(async () => {
+        const assignments = getBatchDownloadAssignments(batchDownloadSession)
+            .filter(({ assignment }) => !assignment.submitted);
+        if (assignments.length === 0 || batchQueueState?.queueing) {
+            return;
+        }
+        setBatchQueueState({ queueing: true, completed: 0, total: assignments.length, errors: [] });
+        const errors = [];
+        let nextSession = batchDownloadSession;
+        for (let index = 0; index < assignments.length; index += 1) {
+            const { episode, assignment } = assignments[index];
+            try {
+                const record = await createDownload(assignment.payload);
+                handleDownloadCreated(record);
+                nextSession = markBatchDownloadAssignmentSubmitted(nextSession, episode.id, record);
+                updateBatchDownloadSession(nextSession);
+            } catch (error) {
+                errors.push({ episode, message: error?.backendError || error?.message || 'Could not queue this episode.' });
+            }
+            setBatchQueueState({ queueing: true, completed: index + 1, total: assignments.length, errors: [...errors] });
+        }
+        const allSubmitted = getBatchDownloadAssignments(nextSession).every(({ assignment }) => assignment.submitted);
+        if (errors.length === 0 && allSubmitted) {
+            updateBatchDownloadSession(null);
+            setBatchQueueState({ queueing: false, completed: assignments.length, total: assignments.length, errors: [], complete: true });
+        } else {
+            setBatchQueueState({ queueing: false, completed: assignments.length, total: assignments.length, errors });
+        }
+    }, [batchDownloadSession, batchQueueState?.queueing, handleDownloadCreated, updateBatchDownloadSession]);
     const addToLibrary = React.useCallback(() => {
         if (metaDetails.metaItem === null || metaDetails.metaItem.content.type !== 'Ready') {
             return;
@@ -372,19 +481,38 @@ const MetaDetails = ({ urlParams, queryParams }) => {
                                 onEpisodeSearch={handleEpisodeSearch}
                                 onDownloadCreated={handleDownloadCreated}
                                 onPlayDownload={handlePlayDownload}
+                                batchDownloadSession={batchDownloadSession}
+                                batchQueueState={batchQueueState}
+                                onSelectBatchDownloadSource={selectBatchDownloadSource}
+                                onChangeBatchDownloadSource={changeBatchDownloadSource}
+                                onQueueBatchDownloads={queueBatchDownloads}
+                                onCancelBatchDownload={cancelBatchDownload}
                             />
                         </div>
                         :
                         metaPath !== null ?
-                            <VideosList
-                                className={styles['videos-list']}
-                                metaItem={metaDetails.metaItem}
-                                libraryItem={metaDetails.libraryItem}
-                                season={season}
-                                selectedVideoId={metaDetails.libraryItem?.state?.video_id}
-                                seasonOnSelect={seasonOnSelect}
-                                toggleNotifications={toggleNotifications}
-                            />
+                            <div className={styles['streams-list-shell']} style={{ width: `${streamsSidebarWidth}px` }}>
+                                <div
+                                    className={styles['streams-list-resize-handle']}
+                                    onPointerDown={startSidebarResize}
+                                    title={'Resize episode sidebar'}
+                                    role={'separator'}
+                                    aria-orientation={'vertical'}
+                                    aria-label={'Resize episode sidebar'}
+                                />
+                                <VideosList
+                                    className={styles['videos-list']}
+                                    metaItem={metaDetails.metaItem}
+                                    libraryItem={metaDetails.libraryItem}
+                                    season={season}
+                                    selectedVideoId={metaDetails.libraryItem?.state?.video_id}
+                                    seasonOnSelect={seasonOnSelect}
+                                    toggleNotifications={toggleNotifications}
+                                    batchDownloadSession={batchDownloadSession}
+                                    onStartBatchDownload={startBatchDownload}
+                                    onCancelBatchDownload={cancelBatchDownload}
+                                />
+                            </div>
                             :
                             null
                 }

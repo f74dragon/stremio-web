@@ -6,14 +6,30 @@ const classnames = require('classnames');
 const { t } = require('i18next');
 const { useCore } = require('stremio/core');
 const { useProfile } = require('stremio/common');
-const { Image, SearchBar, Toggle, Video } = require('stremio/components');
+const { Image, SearchBar, Toggle, Video, Button } = require('stremio/components');
+const { default: Icon } = require('@stremio/stremio-icons/react');
+const {
+    BATCH_PROVIDER_POLICY,
+    getNextUnassignedBatchEpisode
+} = require('stremio/customStremio/batchDownloadSelection');
 const SeasonsBar = require('./SeasonsBar');
 const { default: EpisodePicker } = require('../EpisodePicker');
 const styles = require('./styles');
 
 let savedScrollTop = 0;
 
-const VideosList = ({ className, metaItem, libraryItem, season, seasonOnSelect, selectedVideoId, toggleNotifications }) => {
+const VideosList = ({
+    className,
+    metaItem,
+    libraryItem,
+    season,
+    seasonOnSelect,
+    selectedVideoId,
+    toggleNotifications,
+    batchDownloadSession,
+    onStartBatchDownload,
+    onCancelBatchDownload
+}) => {
     const core = useCore();
     const profile = useProfile();
     const showNotificationsToggle = React.useMemo(() => {
@@ -100,9 +116,62 @@ const VideosList = ({ className, metaItem, libraryItem, season, seasonOnSelect, 
     }, [selectedSeason]);
 
     const [search, setSearch] = React.useState('');
+    const [batchMode, setBatchMode] = React.useState(false);
+    const [selectedBatchVideoIds, setSelectedBatchVideoIds] = React.useState(() => new Set());
+    const [batchProviderPolicy, setBatchProviderPolicy] = React.useState(BATCH_PROVIDER_POLICY.EITHER);
     const searchInputOnChange = React.useCallback((event) => {
         setSearch(event.currentTarget.value);
     }, []);
+    const eligibleBatchVideos = React.useMemo(() => videos.filter((video) => !video.upcoming && typeof video?.deepLinks?.metaDetailsStreams === 'string'), [videos]);
+    const eligibleSeasonVideoIds = React.useMemo(() => videosForSeason
+        .filter((video) => !video.upcoming && typeof video?.deepLinks?.metaDetailsStreams === 'string')
+        .map(({ id }) => id), [videosForSeason]);
+    const allSeasonSelected = eligibleSeasonVideoIds.length > 0 && eligibleSeasonVideoIds.every((id) => selectedBatchVideoIds.has(id));
+    const toggleBatchVideo = React.useCallback((videoId) => {
+        setSelectedBatchVideoIds((currentIds) => {
+            const nextIds = new Set(currentIds);
+            if (nextIds.has(videoId)) {
+                nextIds.delete(videoId);
+            } else {
+                nextIds.add(videoId);
+            }
+            return nextIds;
+        });
+    }, []);
+    const toggleBatchSeason = React.useCallback(() => {
+        setSelectedBatchVideoIds((currentIds) => {
+            const nextIds = new Set(currentIds);
+            if (eligibleSeasonVideoIds.every((id) => nextIds.has(id))) {
+                eligibleSeasonVideoIds.forEach((id) => nextIds.delete(id));
+            } else {
+                eligibleSeasonVideoIds.forEach((id) => nextIds.add(id));
+            }
+            return nextIds;
+        });
+    }, [eligibleSeasonVideoIds]);
+    const cancelBatchSelection = React.useCallback(() => {
+        setBatchMode(false);
+        setSelectedBatchVideoIds(new Set());
+    }, []);
+    const startBatchReview = React.useCallback(() => {
+        if (selectedBatchVideoIds.size === 0 || typeof onStartBatchDownload !== 'function') {
+            return;
+        }
+        const selectedEpisodes = eligibleBatchVideos
+            .filter(({ id }) => selectedBatchVideoIds.has(id))
+            .sort((left, right) => (left.season ?? Number.MAX_SAFE_INTEGER) - (right.season ?? Number.MAX_SAFE_INTEGER) ||
+                (left.episode ?? Number.MAX_SAFE_INTEGER) - (right.episode ?? Number.MAX_SAFE_INTEGER))
+            .map((video) => ({
+                id: video.id,
+                title: video.title,
+                season: video.season,
+                episode: video.episode,
+                thumbnail: video.thumbnail,
+                href: video.deepLinks.metaDetailsStreams
+            }));
+        onStartBatchDownload({ episodes: selectedEpisodes, providerPolicy: batchProviderPolicy });
+    }, [batchProviderPolicy, eligibleBatchVideos, onStartBatchDownload, selectedBatchVideoIds]);
+    const nextBatchEpisode = getNextUnassignedBatchEpisode(batchDownloadSession);
 
     const onMarkVideoAsWatched = (video, watched) => {
         core.transport.dispatch({
@@ -176,6 +245,55 @@ const VideosList = ({ className, metaItem, libraryItem, season, seasonOnSelect, 
                                     :
                                     null
                             }
+                            {batchDownloadSession ?
+                                <div className={styles['batch-resume-bar']}>
+                                    <div>
+                                        <strong>{t('CUSTOM_BATCH_IN_PROGRESS', { defaultValue: 'Batch source review in progress' })}</strong>
+                                        <span>{t('CUSTOM_BATCH_PROGRESS', {
+                                            defaultValue: '{{selected}} of {{total}} episodes have sources',
+                                            selected: Object.keys(batchDownloadSession.assignments || {}).length,
+                                            total: batchDownloadSession.episodes.length
+                                        })}</span>
+                                    </div>
+                                    {nextBatchEpisode ?
+                                        <Button className={styles['batch-primary-action']} href={nextBatchEpisode.href}>
+                                            {t('CUSTOM_BATCH_CONTINUE', { defaultValue: 'Continue review' })}
+                                        </Button>
+                                        : null}
+                                    <Button className={styles['batch-secondary-action']} onClick={onCancelBatchDownload}>
+                                        {t('CUSTOM_BATCH_CANCEL', { defaultValue: 'Cancel batch' })}
+                                    </Button>
+                                </div>
+                                : <div className={styles['batch-toolbar']}>
+                                    {!batchMode ?
+                                        <Button className={styles['batch-start-button']} onClick={() => setBatchMode(true)}>
+                                            <Icon name={'download'} />
+                                            {t('CUSTOM_BATCH_SELECT_EPISODES', { defaultValue: 'Select episodes to download' })}
+                                        </Button>
+                                        : <React.Fragment>
+                                            <div className={styles['batch-selection-summary']}>
+                                                <strong>{t('CUSTOM_BATCH_SELECTED_COUNT', { defaultValue: '{{count}} selected', count: selectedBatchVideoIds.size })}</strong>
+                                                <span>{t('CUSTOM_BATCH_SELECTION_HELP', { defaultValue: 'Choose episodes across seasons, then review their sources.' })}</span>
+                                            </div>
+                                            <Button className={styles['batch-secondary-action']} disabled={eligibleSeasonVideoIds.length === 0} onClick={toggleBatchSeason}>
+                                                {allSeasonSelected ? t('CUSTOM_BATCH_CLEAR_SEASON', { defaultValue: 'Clear season' }) : t('CUSTOM_BATCH_SELECT_SEASON', { defaultValue: 'Select season' })}
+                                            </Button>
+                                            <label className={styles['batch-provider-field']}>
+                                                <span>{t('CUSTOM_BATCH_PROVIDER', { defaultValue: 'Provider' })}</span>
+                                                <select value={batchProviderPolicy} onChange={(event) => setBatchProviderPolicy(event.target.value)}>
+                                                    <option value={BATCH_PROVIDER_POLICY.EITHER}>{t('CUSTOM_BATCH_PROVIDER_EITHER', { defaultValue: 'AllDebrid or Real-Debrid' })}</option>
+                                                    <option value={BATCH_PROVIDER_POLICY.ALLDEBRID}>{t('CUSTOM_BATCH_PROVIDER_ALLDEBRID', { defaultValue: 'AllDebrid only' })}</option>
+                                                    <option value={BATCH_PROVIDER_POLICY.REALDEBRID}>{t('CUSTOM_BATCH_PROVIDER_REALDEBRID', { defaultValue: 'Real-Debrid only' })}</option>
+                                                </select>
+                                            </label>
+                                            <Button className={styles['batch-secondary-action']} onClick={cancelBatchSelection}>
+                                                {t('CUSTOM_BATCH_CANCEL', { defaultValue: 'Cancel' })}
+                                            </Button>
+                                            <Button className={styles['batch-primary-action']} disabled={selectedBatchVideoIds.size === 0} onClick={startBatchReview}>
+                                                {t('CUSTOM_BATCH_REVIEW_SOURCES', { defaultValue: 'Review sources' })}
+                                            </Button>
+                                        </React.Fragment>}
+                                </div>}
                             <SearchBar
                                 className={styles['search-bar']}
                                 title={t('SEARCH_VIDEOS')}
@@ -193,7 +311,18 @@ const VideosList = ({ className, metaItem, libraryItem, season, seasonOnSelect, 
                                                 );
                                         })
                                         .map((video, index) => (
-                                            <div key={index} onClick={saveScrollPosition}>
+                                            <div className={classnames(styles['batch-video-row'], batchMode ? styles['batch-video-row-active'] : null, batchMode && selectedBatchVideoIds.has(video.id) ? styles['batch-video-row-selected'] : null)} key={index} onClick={saveScrollPosition}>
+                                                {batchMode && !video.upcoming && typeof video?.deepLinks?.metaDetailsStreams === 'string' ?
+                                                    <button
+                                                        type={'button'}
+                                                        className={styles['batch-video-selector']}
+                                                        aria-pressed={selectedBatchVideoIds.has(video.id)}
+                                                        aria-label={t('CUSTOM_BATCH_TOGGLE_EPISODE', { defaultValue: 'Select {{title}} for batch download', title: video.title || video.id })}
+                                                        onClick={() => toggleBatchVideo(video.id)}
+                                                    >
+                                                        <Icon name={selectedBatchVideoIds.has(video.id) ? 'checkmark' : 'plus'} />
+                                                    </button>
+                                                    : null}
                                                 <Video
                                                     id={video.id}
                                                     title={video.title}
@@ -204,7 +333,7 @@ const VideosList = ({ className, metaItem, libraryItem, season, seasonOnSelect, 
                                                     upcoming={video.upcoming}
                                                     watched={video.watched}
                                                     progress={video.progress}
-                                                    deepLinks={video.deepLinks}
+                                                    deepLinks={batchMode ? null : video.deepLinks}
                                                     scheduled={video.scheduled}
                                                     seasonWatched={seasonWatched}
                                                     selected={video.id === selectedVideoId}
@@ -229,6 +358,9 @@ VideosList.propTypes = {
     selectedVideoId: PropTypes.string,
     seasonOnSelect: PropTypes.func,
     toggleNotifications: PropTypes.func,
+    batchDownloadSession: PropTypes.object,
+    onStartBatchDownload: PropTypes.func,
+    onCancelBatchDownload: PropTypes.func,
 };
 
 module.exports = VideosList;
