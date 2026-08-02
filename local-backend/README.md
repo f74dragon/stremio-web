@@ -50,6 +50,8 @@ Open **Downloads -> Download options -> MPC-HC playback progress** for setup. In
 
 Use **Test connection**, then enable and save progress tracking. The backend connects only to `127.0.0.1`, reads playback state without controlling the player, and accepts progress only when MPC-HC reports the exact file launched from a completed download record. MPC-HC remains responsible for actual resume behavior.
 
+Movie watched synchronization is a separate opt-in in the same panel. It requires verified progress of at least 90% and Stremio title metadata. New downloads save a bounded native metadata snapshot automatically; legacy movie records use their already-saved Stremio id, type, title, artwork, and descriptive metadata. Series/episode watched synchronization is not part of this pass.
+
 Verified observations are stored atomically in `%LOCALAPPDATA%\Custom Stremio\playback-progress.json`. Tracking is optional: playback continues normally if it is disabled or MPC-HC telemetry is unavailable. Full local paths are not returned by the progress API.
 
 ## Download Folder

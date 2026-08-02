@@ -62,7 +62,7 @@ Notes:
 - `7. Add title-specific downloads panel`: Completed for the planned panel scope (`Milestones 7A-7B`; later shared file-management actions remain tracked under the download manager)
 - `8. Add global downloads page`: In progress (`Milestones 8A-8C.2` implemented)
 - `9. Add MPC-HC launch support`: Completed for the planned scope (`Milestones 9A-9C`; panel playback, stream-row playback, and persistent in-app player selection implemented)
-- `10. Add watched/unwatched integration`: In progress (`Milestones 10A-10C.1` mapped existing behavior, added opt-in MPC-HC telemetry/persistent local progress, and surfaced safe local Continue playback UI; watched synchronization remains)
+- `10. Add watched/unwatched integration`: In progress (`Milestones 10A-10C.2` complete; movie watched sync is live-verified)
 - `11. Package as Windows app`: Not started
 
 ## Agent Rules
@@ -78,12 +78,23 @@ Notes:
 
 ## Next Recommended Step
 
-Live-test Milestone 10C.1: open a partially watched completed movie and episode from Downloads, confirm the playback percentage/time and **Continue** action appear, then confirm MPC-HC retains native resume. Next: Milestone 10C.2 watched/unwatched synchronization only after defining and testing completion thresholds.
+Design the next Continue Watching pass: synchronize verified local MPC-HC playback into Stremio's home-screen Continue Watching state, then surface the same resume progress clearly on Downloads posters.
 
 ## Remaining Tracked Work
 
 - Archive-wide Download History pagination/indexing: current History search and sorting cover the newest 1,000 lifecycle events returned by the bounded read API. Add cursor pagination or backend archive aggregation before describing search as covering an arbitrarily large permanent history. Date-range controls can join that scaling pass.
-- Watched/unwatched synchronization, home-screen Continue Watching, next-episode behavior, and near-end completion rules. Local Download-page Continue is implemented; it intentionally does not write Stremio watched state.
+- Synchronize verified local MPC-HC playback position into Stremio's home-screen Continue Watching state. This must preserve Stremio's own progress semantics and remain opt-in/safe when the local backend is offline.
+- Add a Continue Watching-style resume indicator to Download-page posters: visible progress and remaining/elapsed context for partially watched local movies and episodes, without confusing it with download progress.
+- Episode/season watched synchronization, next-episode behavior, and further near-end rule refinement remain. Local Download-page Continue is implemented; movie watched sync is an explicit opt-in.
+
+## Milestone 10C.2 Implementation: Movie Watched Synchronization
+
+- Movie synchronization is opt-in and requires MPC-HC progress tracking, a valid duration, a verified progress observation at or above 90%, and a completed matching download record.
+- New downloads persist a bounded native Stremio metadata snapshot already available on the title page. Legacy records deterministically construct the same required `MetaItemPreview` fields from their saved Stremio id, type, title, artwork, and descriptive metadata; Downloads never creates a second `MetaDetails` model.
+- Eligible movies use Stremio's existing `AddToLibrary` and `MetaItemMarkAsWatched` context actions. A small local ledger prevents polling, reloads, or repeated Downloads renders from dispatching the same movie again.
+- The setting is stored in the local backend settings document, defaults off, and is automatically disabled when MPC-HC progress tracking is disabled.
+- This pass is movie-only. Episode/season synchronization remains deferred because Stremio uses video-specific watched actions for series.
+- Automated validation passes: focused metadata/settings/synchronization tests, backend integration tests, frontend ESLint, diff checks, and the production build. Live verification confirmed eligible movies are added to the Stremio library and marked watched.
 - Filesystem discovery for media that exists without a current record, plus metadata/artwork backfill for legacy persisted records.
 - Availability-history management UI, including an explicit clear-history action; current cached history remains intentionally retained by default.
 - Explicit send-to-debrid behavior remains separate from cache checking and ordinary Stremio-link downloads.

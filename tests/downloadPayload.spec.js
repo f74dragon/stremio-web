@@ -11,6 +11,9 @@ describe('downloadPayload', () => {
             poster: 'https://images.example/poster.jpg',
             background: 'https://images.example/background.jpg',
             mediaMetadata: {
+                id: 'tt123',
+                type: 'series',
+                name: 'Example Show',
                 logo: 'https://images.example/logo.png',
                 description: 'A test show summary.',
                 runtime: '52 min',
@@ -61,6 +64,11 @@ describe('downloadPayload', () => {
                 { category: 'Genres', name: 'Drama', url: 'stremio:///discover/drama' },
                 { category: 'imdb', name: '8.4', url: 'https://imdb.com/title/tt123' }
             ],
+            stremioMetaItem: expect.objectContaining({
+                id: 'tt123',
+                type: 'series',
+                name: 'Example Show'
+            }),
             videoId: 'tt123:1:2',
             videoTitle: 'Second Episode',
             videoThumbnail: 'https://images.example/episode.jpg',

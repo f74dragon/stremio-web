@@ -32,6 +32,7 @@ The frontend will send `POST /downloads` using the current `buildDownloadPayload
 - `releaseInfo`
 - `titleReleased`
 - `metaLinks`
+- `stremioMetaItem` (bounded native title metadata used only for opt-in watched synchronization)
 - `videoId`
 - `videoTitle`
 - `videoThumbnail`
@@ -831,9 +832,9 @@ Security and response notes:
 - `CUSTOM_STREMIO_DATA_DIR` overrides the directory for both record and settings documents.
 - Writes use atomic temporary-file replacement.
 - The AllDebrid API key and Real-Debrid client secret/access/refresh tokens are stored only in this local backend document and are omitted from every frontend settings response. Protect the Windows account and data directory accordingly.
-- Version-one concurrency-only, version-two AllDebrid, version-three player, and version-four Real-Debrid settings migrate in memory with their existing values preserved, then write in version five on the next save.
+- Older concurrency, debrid, player, and playback-progress settings migrate in memory with their existing values preserved, then write in version six on the next save.
 - The saved `player.executablePath` is an absolute Windows `.exe` path used by `POST /play`; it is never supplied by the play request itself.
-- `player.progressTracking` stores the opt-in enabled state, MPC-HC Web Interface port, and explicit localhost-only confirmation. Enabling is rejected unless that confirmation is present.
+- `player.progressTracking` stores the opt-in enabled state, MPC-HC Web Interface port, explicit localhost-only confirmation, and the separate movie watched-sync opt-in. Watched sync is forced off whenever progress tracking is disabled.
 - A saved `downloads.maxConcurrentDownloads` value takes precedence over `CUSTOM_STREMIO_MAX_CONCURRENT_DOWNLOADS` on startup.
 - When no saved document exists, the environment value is used if it is a positive integer or `unlimited`; otherwise the scheduler default is `2`.
 - Invalid or unsupported settings documents stop backend startup rather than being silently overwritten.

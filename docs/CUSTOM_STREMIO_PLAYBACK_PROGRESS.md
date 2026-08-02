@@ -15,7 +15,7 @@
 - The backend polls MPC-HC only through `127.0.0.1`, matches the exact reported local file, and records playing, paused, stopped, or unreachable observations.
 - **Downloads -> Download options** contains opt-in setup, port configuration, localhost-only confirmation, and connection testing.
 - External-player observations are persisted in `%LOCALAPPDATA%\Custom Stremio\playback-progress.json` and exposed through a sanitized read endpoint.
-- Watched-state synchronization and Continue Watching presentation are intentionally not implemented yet.
+- Download-page Continue presentation is implemented. Movie-only watched synchronization is implemented behind a separate opt-in and awaits live verification; episode synchronization remains deferred.
 
 ## Verified MPC-HC Capabilities
 
@@ -99,3 +99,11 @@ The playback-progress store must be independent from active download records and
 3. Synchronize verified completion with existing Stremio movie/episode watched actions without marking on launch.
 4. Present persisted position in download details and title cards.
 5. Add Continue Watching and next-episode selection only after watched synchronization is reliable.
+
+## Milestone 10C.2 Movie Rule
+
+- A movie is eligible only when the matching download is completed, MPC-HC reported a valid positive duration, and verified progress reached at least 90%.
+- The frontend uses a bounded native Stremio metadata snapshot captured during download creation. Legacy movie records construct a compatible `MetaItemPreview` from their already-saved Stremio id, type, title, artwork, and descriptive metadata.
+- Downloads does not load or unload the global `MetaDetails` model. It dispatches the existing `AddToLibrary` and `MetaItemMarkAsWatched` context actions directly from saved native metadata.
+- A local synchronization ledger deduplicates repeated polling and page reloads. Disabling the option prevents future watched-state writes but does not undo titles already added or marked watched.
+- Series and episode watched state are outside this pass.

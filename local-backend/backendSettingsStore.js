@@ -3,12 +3,13 @@ const path = require('path');
 const { getDefaultDataDirectory } = require('./downloadRecordStore');
 const { isValidMaxConcurrentDownloads } = require('./downloadScheduler');
 
-const SETTINGS_STORE_VERSION = 5;
+const SETTINGS_STORE_VERSION = 6;
 const LEGACY_SETTINGS_STORE_VERSION = 1;
 const ALLDEBRID_SETTINGS_STORE_VERSION = 2;
 const PLAYER_SETTINGS_STORE_VERSION = 3;
 const REALDEBRID_SETTINGS_STORE_VERSION = 4;
 const PLAYBACK_PROGRESS_SETTINGS_STORE_VERSION = 5;
+const WATCHED_SYNC_SETTINGS_STORE_VERSION = 6;
 const SETTINGS_FILE_NAME = 'backend-settings.json';
 const DEFAULT_MPC_HC_WEB_PORT = 13579;
 
@@ -92,7 +93,8 @@ const normalizePlayerProgressTracking = (settings) => {
     return {
         enabled,
         port,
-        localhostOnlyConfirmed
+        localhostOnlyConfirmed,
+        watchedSyncEnabled: enabled && settings?.watchedSyncEnabled === true
     };
 };
 
@@ -153,6 +155,7 @@ const readBackendSettings = async (filePath = getDefaultSettingsPath(), fallback
             ALLDEBRID_SETTINGS_STORE_VERSION,
             PLAYER_SETTINGS_STORE_VERSION,
             REALDEBRID_SETTINGS_STORE_VERSION,
+            PLAYBACK_PROGRESS_SETTINGS_STORE_VERSION,
             SETTINGS_STORE_VERSION
         ].includes(document.version)) {
             const formatError = new Error(`Backend settings use an unsupported format: ${filePath}`);
@@ -236,6 +239,7 @@ module.exports = {
     PLAYER_SETTINGS_STORE_VERSION,
     REALDEBRID_SETTINGS_STORE_VERSION,
     PLAYBACK_PROGRESS_SETTINGS_STORE_VERSION,
+    WATCHED_SYNC_SETTINGS_STORE_VERSION,
     SETTINGS_FILE_NAME,
     DEFAULT_MPC_HC_WEB_PORT,
     createBackendSettings,

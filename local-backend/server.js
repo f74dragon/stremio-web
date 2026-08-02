@@ -31,6 +31,7 @@ const {
     sortQueuedDownloadRecords
 } = require('./downloadScheduler');
 const { createBackendSettings, BackendSettingsStore } = require('./backendSettingsStore');
+const { validateStremioMetaItemSnapshot } = require('../src/customStremio/stremioMetaItemSnapshot');
 const { AllDebridClient } = require('./allDebridClient');
 const {
     REALDEBRID_OPEN_SOURCE_CLIENT_ID,
@@ -66,7 +67,11 @@ const DEFAULT_TRUSTED_DEBRID_ORIGINS = new Set([
     'http://localhost:8080',
     'https://localhost:8080',
     'http://127.0.0.1:8080',
-    'https://127.0.0.1:8080'
+    'https://127.0.0.1:8080',
+    'http://localhost:8081',
+    'https://localhost:8081',
+    'http://127.0.0.1:8081',
+    'https://127.0.0.1:8081'
 ]);
 const TRUSTED_DEBRID_ORIGINS = new Set([
     ...DEFAULT_TRUSTED_DEBRID_ORIGINS,
@@ -225,6 +230,10 @@ const createDownloadRecord = (payload) => {
         releaseInfo: payload?.releaseInfo ?? null,
         titleReleased: payload?.titleReleased ?? null,
         metaLinks: Array.isArray(payload?.metaLinks) ? payload.metaLinks : [],
+        stremioMetaItem: validateStremioMetaItemSnapshot(payload?.stremioMetaItem, {
+            metaId: payload?.metaId ?? null,
+            type: payload?.type ?? null
+        }),
         videoId: payload?.videoId ?? null,
         videoTitle: payload?.videoTitle ?? null,
         videoThumbnail: payload?.videoThumbnail ?? null,

@@ -1,4 +1,5 @@
 const React = require('react');
+const PropTypes = require('prop-types');
 const { useTranslation } = require('react-i18next');
 const { Button } = require('stremio/components');
 const {
@@ -18,7 +19,7 @@ const styles = require('./DownloadManagerSettingsPanel.less');
 const PRIMARY_CONCURRENCY_OPTIONS = [1, 2, 3, 4];
 const UNLIMITED_CONCURRENT_DOWNLOADS = 'unlimited';
 
-const DownloadManagerSettingsPanel = () => {
+const DownloadManagerSettingsPanel = ({ onSettingsChange }) => {
     const { t } = useTranslation();
     const mountedRef = React.useRef(false);
     const requestSequenceRef = React.useRef(0);
@@ -40,7 +41,8 @@ const DownloadManagerSettingsPanel = () => {
     const [progressDraft, setProgressDraft] = React.useState({
         enabled: false,
         port: '13579',
-        localhostOnlyConfirmed: false
+        localhostOnlyConfirmed: false,
+        watchedSyncEnabled: false
     });
     const [progressOperation, setProgressOperation] = React.useState(null);
     const [progressError, setProgressError] = React.useState(null);
@@ -110,12 +112,14 @@ const DownloadManagerSettingsPanel = () => {
         setProgressDraft({
             enabled: progressTracking.enabled === true,
             port: String(progressTracking.port || 13579),
-            localhostOnlyConfirmed: progressTracking.localhostOnlyConfirmed === true
+            localhostOnlyConfirmed: progressTracking.localhostOnlyConfirmed === true,
+            watchedSyncEnabled: progressTracking.watchedSyncEnabled === true
         });
     }, [
         playerSettings?.progressTracking?.enabled,
         playerSettings?.progressTracking?.port,
-        playerSettings?.progressTracking?.localhostOnlyConfirmed
+        playerSettings?.progressTracking?.localhostOnlyConfirmed,
+        playerSettings?.progressTracking?.watchedSyncEnabled
     ]);
 
     const choosePlayerExecutable = React.useCallback(async () => {
@@ -173,12 +177,14 @@ const DownloadManagerSettingsPanel = () => {
                     progressTracking: {
                         enabled: progressDraft.enabled,
                         port,
-                        localhostOnlyConfirmed: progressDraft.localhostOnlyConfirmed
+                        localhostOnlyConfirmed: progressDraft.localhostOnlyConfirmed,
+                        watchedSyncEnabled: progressDraft.watchedSyncEnabled
                     }
                 }
             });
             if (mountedRef.current) {
                 setSettings(nextSettings);
+                onSettingsChange?.(nextSettings);
             }
         } catch (requestError) {
             if (mountedRef.current) {
@@ -191,7 +197,7 @@ const DownloadManagerSettingsPanel = () => {
                 setProgressOperation(null);
             }
         }
-    }, [getProgressPort, progressBusy, progressDraft, settings, t]);
+    }, [getProgressPort, onSettingsChange, progressBusy, progressDraft, settings, t]);
 
     const testProgressConnection = React.useCallback(async () => {
         if (!settings || progressBusy) {
@@ -746,6 +752,21 @@ const DownloadManagerSettingsPanel = () => {
                         <span className={styles['progress-checkbox']} aria-hidden={'true'} />
                         <span>{t('CUSTOM_DOWNLOAD_MANAGER_MPC_CONFIRM_LOCALHOST', { defaultValue: 'I enabled “Allow access from localhost only” in MPC-HC.' })}</span>
                     </label>
+                    <label className={styles['progress-confirmation']}>
+                        <input
+                            type={'checkbox'}
+                            checked={progressDraft.watchedSyncEnabled}
+                            disabled={!settings || !progressDraft.enabled || progressBusy}
+                            onChange={(event) => {
+                                setProgressDraft((current) => ({ ...current, watchedSyncEnabled: event.target.checked }));
+                                setProgressError(null);
+                            }}
+                        />
+                        <span className={styles['progress-checkbox']} aria-hidden={'true'} />
+                        <span>{t('CUSTOM_DOWNLOAD_MANAGER_MPC_WATCH_SYNC', {
+                            defaultValue: 'Add downloaded movies to my Stremio library and mark watched after verified 90% playback'
+                        })}</span>
+                    </label>
                     <div className={styles['progress-actions']}>
                         <button
                             className={styles['progress-test-button']}
@@ -969,6 +990,10 @@ const DownloadManagerSettingsPanel = () => {
             </section>
         </div>
     );
+};
+
+DownloadManagerSettingsPanel.propTypes = {
+    onSettingsChange: PropTypes.func
 };
 
 module.exports = DownloadManagerSettingsPanel;

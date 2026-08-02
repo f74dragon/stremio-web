@@ -4,9 +4,12 @@ const React = require('react');
 const { useTranslation } = require('react-i18next');
 const { default: Icon } = require('@stremio/stremio-icons/react');
 const { Button, MainNavBars } = require('stremio/components');
+const { useCore } = require('stremio/core');
 const useDownloadRecords = require('stremio/customStremio/useDownloadRecords');
 const useDownloadHistory = require('stremio/customStremio/useDownloadHistory');
 const usePlaybackProgress = require('stremio/customStremio/usePlaybackProgress');
+const { useMpcHcWatchedSync } = require('stremio/customStremio/mpcHcWatchedSync');
+const { getBackendSettings } = require('stremio/customStremio/localBackendClient');
 const useLibrarySortPreference = require('stremio/customStremio/useLibrarySortPreference');
 const {
     DOWNLOAD_LIBRARY_SORTS,
@@ -29,6 +32,8 @@ const HISTORY_SORT_VALUES = Object.values(HISTORY_LIBRARY_SORTS);
 
 const Downloads = () => {
     const { t } = useTranslation();
+    const core = useCore();
+    const [watchedSyncEnabled, setWatchedSyncEnabled] = React.useState(false);
     const contentRef = React.useRef(null);
     const libraryScrollPositionRef = React.useRef(0);
     const [activeView, setActiveView] = React.useState('downloads');
@@ -64,7 +69,24 @@ const Downloads = () => {
         removeMedia,
         removeMediaBatch
     } = useDownloadRecords();
-    const { progressByDownloadId } = usePlaybackProgress();
+    const { records: playbackProgressRecords, progressByDownloadId } = usePlaybackProgress();
+    React.useEffect(() => {
+        let canceled = false;
+        getBackendSettings().then((settings) => {
+            if (!canceled) {
+                setWatchedSyncEnabled(settings?.player?.progressTracking?.watchedSyncEnabled === true);
+            }
+        }).catch(() => undefined);
+        return () => {
+            canceled = true;
+        };
+    }, []);
+    useMpcHcWatchedSync({
+        core,
+        downloads: items,
+        progressRecords: playbackProgressRecords,
+        enabled: watchedSyncEnabled
+    });
     const {
         events: historyEvents,
         total: historyTotal,
@@ -381,7 +403,9 @@ const Downloads = () => {
                                     </div>
                                 </header>
 
-                                {settingsOpen ? <DownloadManagerSettingsPanel /> : null}
+                                {settingsOpen ? <DownloadManagerSettingsPanel onSettingsChange={(settings) => {
+                                    setWatchedSyncEnabled(settings?.player?.progressTracking?.watchedSyncEnabled === true);
+                                }} /> : null}
 
                                 <DownloadActivityPanel
                                     records={items}

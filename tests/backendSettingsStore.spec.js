@@ -9,6 +9,7 @@ const {
     ALLDEBRID_SETTINGS_STORE_VERSION,
     PLAYER_SETTINGS_STORE_VERSION,
     REALDEBRID_SETTINGS_STORE_VERSION,
+    PLAYBACK_PROGRESS_SETTINGS_STORE_VERSION,
     createBackendSettings,
     readBackendSettings,
     writeBackendSettings,
@@ -19,7 +20,8 @@ describe('backendSettingsStore', () => {
     const defaultProgressTracking = {
         enabled: false,
         port: 13579,
-        localhostOnlyConfirmed: false
+        localhostOnlyConfirmed: false,
+        watchedSyncEnabled: false
     };
     let tempDirectory;
     let settingsPath;
@@ -175,7 +177,8 @@ describe('backendSettingsStore', () => {
         const progressTracking = {
             enabled: true,
             port: 13580,
-            localhostOnlyConfirmed: true
+            localhostOnlyConfirmed: true,
+            watchedSyncEnabled: true
         };
         await expect(writeBackendSettings(
             settingsPath,
@@ -225,6 +228,29 @@ describe('backendSettingsStore', () => {
             downloads: { maxConcurrentDownloads: 3 },
             player: { executablePath: 'C:\\Players\\mpc-hc64.exe', progressTracking: defaultProgressTracking },
             debrid: { allDebrid: null, realDebrid }
+        });
+    });
+
+    test('migrates version five progress settings with watched synchronization off', async () => {
+        fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+        fs.writeFileSync(settingsPath, JSON.stringify({
+            version: PLAYBACK_PROGRESS_SETTINGS_STORE_VERSION,
+            settings: createBackendSettings(2, null, null, null, {
+                enabled: true,
+                port: 13579,
+                localhostOnlyConfirmed: true
+            })
+        }), 'utf8');
+
+        await expect(readBackendSettings(settingsPath, createBackendSettings(1))).resolves.toMatchObject({
+            player: {
+                progressTracking: {
+                    enabled: true,
+                    port: 13579,
+                    localhostOnlyConfirmed: true,
+                    watchedSyncEnabled: false
+                }
+            }
         });
     });
 

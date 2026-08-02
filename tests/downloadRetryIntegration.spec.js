@@ -20,14 +20,15 @@ const getFreePort = () => new Promise((resolve, reject) => {
     });
 });
 
-const requestJson = (port, requestPath, { method = 'GET', body } = {}) => new Promise((resolve, reject) => {
+const requestJson = (port, requestPath, { method = 'GET', body, headers = {} } = {}) => new Promise((resolve, reject) => {
     const payload = body === undefined ? null : JSON.stringify(body);
     const request = http.request({
         host: '127.0.0.1',
         port,
         path: requestPath,
         method,
-        headers: payload === null ? {} : {
+        headers: payload === null ? headers : {
+            ...headers,
             'Content-Type': 'application/json',
             'Content-Length': Buffer.byteLength(payload)
         }
@@ -1023,6 +1024,7 @@ describe('download lifecycle API integration', () => {
 
         const updatedSettings = await requestJson(backendPort, '/settings', {
             method: 'PATCH',
+            headers: { Origin: 'https://localhost:8081' },
             body: { downloads: { maxConcurrentDownloads: 2 } }
         });
         expect(updatedSettings.statusCode).toBe(200);

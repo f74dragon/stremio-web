@@ -3,6 +3,7 @@ const {
     getDebridProvider,
     getStreamInfoHash
 } = require('./debridSourceReadiness');
+const { buildStremioMetaItemSnapshot } = require('./stremioMetaItemSnapshot');
 
 const toIsoDateOrNull = (value) => {
     return value instanceof Date && !isNaN(value.getTime()) ?
@@ -78,6 +79,7 @@ const buildDownloadPayload = (input) => {
             name: link?.name ?? null,
             url: link?.url ?? null
         })) : [],
+        stremioMetaItem: buildStremioMetaItemSnapshot(mediaMetadata),
         videoId: video?.id ?? null,
         videoTitle: video?.title ?? null,
         videoThumbnail: video?.thumbnail ?? null,
