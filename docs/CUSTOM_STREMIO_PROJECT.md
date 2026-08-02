@@ -62,7 +62,7 @@ Notes:
 - `7. Add title-specific downloads panel`: Completed for the planned panel scope (`Milestones 7A-7B`; later shared file-management actions remain tracked under the download manager)
 - `8. Add global downloads page`: In progress (`Milestones 8A-8C.2` implemented)
 - `9. Add MPC-HC launch support`: Completed for the planned scope (`Milestones 9A-9C`; panel playback, stream-row playback, and persistent in-app player selection implemented)
-- `10. Add watched/unwatched integration`: Not started
+- `10. Add watched/unwatched integration`: In progress (`Milestones 10A-10B` mapped existing behavior and implemented opt-in MPC-HC telemetry plus persistent local playback progress; watched synchronization and Continue Watching UI remain)
 - `11. Package as Windows app`: Not started
 
 ## Agent Rules
@@ -78,18 +78,41 @@ Notes:
 
 ## Next Recommended Step
 
-Begin watched/unwatched and playback-progress integration as the next major feature area. First map the existing Stremio watched state and local-player launch lifecycle, then define a small persistence contract for resume position before changing playback behavior.
+Live-test Milestone 10B with MPC-HC's Web Interface and localhost-only access enabled. Confirm connection testing, exact-file progress persistence, native MPC-HC resume, and graceful player/backend shutdown behavior before beginning Milestone 10C watched-state synchronization and Continue Watching UI.
 
 ## Remaining Tracked Work
 
 - Archive-wide Download History pagination/indexing: current History search and sorting cover the newest 1,000 lifecycle events returned by the bounded read API. Add cursor pagination or backend archive aggregation before describing search as covering an arbitrarily large permanent history. Date-range controls can join that scaling pass.
-- Watched/unwatched and playback-progress integration for real **Continue Watching**, resume position, next-episode behavior, and show-card progress.
+- Live validation of MPC-HC playback telemetry, followed by watched/unwatched synchronization and real **Continue Watching**, next-episode behavior, and show-card progress.
 - Filesystem discovery for media that exists without a current record, plus metadata/artwork backfill for legacy persisted records.
 - Availability-history management UI, including an explicit clear-history action; current cached history remains intentionally retained by default.
 - Explicit send-to-debrid behavior remains separate from cache checking and ordinary Stremio-link downloads.
 - Windows application packaging after the local backend, download lifecycle, and playback integration are stable.
 
 The milestone findings below are chronological implementation records. Older sections may describe a feature as deferred or unavailable at that historical point even when a later milestone subsequently implemented it; the **Current Status**, **Next Recommended Step**, and **Remaining Tracked Work** sections above are authoritative for present planning.
+
+## Milestone 10B Findings: MPC-HC Telemetry and Persistent Playback Progress
+
+- **Downloads -> Download options** now contains an opt-in MPC-HC progress section with setup guidance, configurable Web Interface port, explicit localhost-only confirmation, connection testing, and saved enable/disable state.
+- Backend settings schema version 5 persists progress tracking independently while safely migrating versions 1-4 without losing download concurrency, player path, AllDebrid credentials, or Real-Debrid credentials.
+- The status client connects only to `127.0.0.1`, reads MPC-HC's non-mutating `/variables.html` page, applies strict timeouts and response-size limits, and validates numeric state, position, and duration values.
+- Each tracked `POST /play` launch receives a backend-created playback session. Progress is accepted only after MPC-HC reports the exact normalized Windows path belonging to that stored completed download; similar filenames, relative paths, and a different open file are rejected.
+- A new versioned `%LOCALAPPDATA%\Custom Stremio\playback-progress.json` store atomically retains the newest verified position per movie or episode. It is independent from active download records and permanent download history, so media/record deletion does not silently erase playback history.
+- The public progress endpoint omits full local paths and returns only safe media identity, basename, position, duration, state, timestamps, and player ownership metadata.
+- Telemetry remains optional and fail-open: disabled, offline, malformed, or interrupted MPC-HC telemetry never prevents local playback. Disconnect/close is recorded as unreachable rather than watched or completed.
+- MPC-HC remains the resume authority. The launcher still passes only the file path and does not add `/start` or `/startpos`.
+- Focused tests cover settings migration and validation, client request confinement, malformed/oversized responses, Windows path matching, atomic persistence, different-file rejection, stopped sessions, offline recovery state, and frontend client requests. All 291 Jest tests pass across 36 suites, full frontend ESLint passes, the production build completes with only the repository's existing bundle-size warnings, and a temporary-port backend smoke test confirmed default settings plus the sanitized progress endpoint. Watched-state synchronization and Continue Watching presentation remain deferred until live telemetry is confirmed.
+
+## Milestone 10A Findings: MPC-HC Resume and Playback-Progress Contract
+
+- MPC-HC already owns reliable resume for an exact local file when **Options -> Player -> History -> Remember File position** is enabled. The current launcher passes only the media path, so it does not override that native behavior.
+- The installed MPC-HC `2.7.0` source behavior was reviewed: meaningful position changes are saved periodically, state is forced to storage on close, and near-end playback clears the saved resume point.
+- MPC-HC's optional Web Interface can report current state, position, duration, and file path. It is the safest available bridge for observing external playback without injecting control or replacing MPC-HC's resume system.
+- The Web Interface is not safe to enable blindly. Milestone 10B must be opt-in, use `127.0.0.1`, require MPC-HC's **Allow access from localhost only** option, and provide an explicit connection test.
+- Stremio's internal player already sends time/duration updates to core and reads `timeOffset`; movie, episode, and season watched actions also already exist. The missing piece is translating verified external-player progress into that existing model.
+- Launching a local file must no longer be treated as proof of watching. A future watched update requires a valid duration and a verified near-end observation; disconnect/close alone is inconclusive.
+- A separate versioned local progress store will retain content identity, exact download/file identity, position, duration, state, and observation timestamps. It remains independent from active download records and permanent download history.
+- The detailed ownership, safety, persistence, and next-pass contract is recorded in `docs/CUSTOM_STREMIO_PLAYBACK_PROGRESS.md`. No playback behavior changed in this findings-only pass.
 
 ## Milestone 6O.2 Findings: Automatic Ranked Source Verification
 

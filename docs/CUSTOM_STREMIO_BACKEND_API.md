@@ -5,11 +5,11 @@
 The local backend will run on the user’s machine and handle:
 
 - direct video file downloads from resolved Stremio/RealDebrid stream URLs
-- progress tracking
+- download and opt-in MPC-HC playback progress tracking
 - pause/resume/retry/cancel/delete
 - organized file paths
 - launching MPC-HC for completed downloads
-- later watched/progress integration
+- later watched-state and Continue Watching presentation
 
 ## Development Base URL
 
@@ -696,7 +696,23 @@ Behavior and security:
 - The chosen path applies immediately and is stored in `%LOCALAPPDATA%\Custom Stremio\backend-settings.json`.
 - `GET /settings`, `PATCH /settings`, and this selector endpoint share the trusted-local-origin policy because settings now include a local executable path.
 
-### 12. `POST /play`
+### 12. `POST /settings/player/progress/test`
+
+Purpose:
+- Test the configured MPC-HC Web Interface without saving settings or controlling playback.
+
+Request body:
+
+```json
+{ "port": 13579 }
+```
+
+Behavior:
+- The backend connects only to `127.0.0.1` and requests `/variables.html` with a strict timeout and response-size limit.
+- Success reports whether MPC-HC currently has a media file open, plus its state and numeric timing fields. It does not expose the reported file path.
+- Expected errors include `400` for an invalid port and `503` when MPC-HC is offline, the Web Interface is disabled, the port is wrong, or the response is invalid.
+
+### 13. `POST /play`
 
 Purpose:
 - Launch MPC-HC or the configured external player for a completed local file.
@@ -712,7 +728,12 @@ Response shape:
   "ok": true,
   "downloadId": "dl_0001",
   "localPath": "C:\\Users\\User\\Videos\\Stremio Downloads\\Show Name\\Season 01\\S01E01 - Episode Title.mkv",
-  "launched": true
+  "launched": true,
+  "playback": {
+    "enabled": true,
+    "sessionId": "playback_0001",
+    "state": "waiting_for_player"
+  }
 }
 ```
 
@@ -722,7 +743,25 @@ Notes:
 - The player executable is selected under **Downloads -> Download options -> Video player** and applies without restarting. `CUSTOM_STREMIO_PLAYER_PATH` is retained only as a fallback when no saved selection exists.
 - The backend validates that both the configured player and downloaded media are regular files before launching.
 - The player is launched directly with the media path as a single process argument; no shell command is constructed.
+- Passing only the media path deliberately preserves MPC-HC's native remembered-file-position behavior. Do not add `/start` or `/startpos` by default.
+- When progress tracking is enabled, the backend creates a session after launch and waits for MPC-HC to report the exact normalized stored media path. Tracking failure never turns a successful launch into a play error.
 - Expected errors include `400` for a missing id, `404` for an unknown record, `409` for a non-completed record, `410` for a missing downloaded file, and `503` for missing/invalid player configuration.
+
+### 14. `GET /playback/progress`
+
+Purpose:
+- Return persisted external-player progress for future watched and Continue Watching features.
+
+Query:
+- Optional `metaId` filters records to one Stremio title.
+
+Security and response notes:
+- Records include media/video identity, download id, basename-only filename, position, duration, progress, playback state, timestamps, end reason, and player ownership metadata.
+- Full local paths are never returned by this endpoint.
+- No caller can create or attach a progress record through the API; records come only from an exact file match in a backend-created `POST /play` session.
+- Progress storage is independent from download records and permanent download history.
+- Launching alone, losing telemetry, or closing MPC-HC does not mark content watched.
+- The full ownership and persistence contract is in `docs/CUSTOM_STREMIO_PLAYBACK_PROGRESS.md`.
 
 ## Status Values
 
@@ -792,11 +831,20 @@ Notes:
 - `CUSTOM_STREMIO_DATA_DIR` overrides the directory for both record and settings documents.
 - Writes use atomic temporary-file replacement.
 - The AllDebrid API key and Real-Debrid client secret/access/refresh tokens are stored only in this local backend document and are omitted from every frontend settings response. Protect the Windows account and data directory accordingly.
-- Version-one concurrency-only, version-two AllDebrid, and version-three player settings migrate in memory with their existing values preserved, then write in version four on the next save.
+- Version-one concurrency-only, version-two AllDebrid, version-three player, and version-four Real-Debrid settings migrate in memory with their existing values preserved, then write in version five on the next save.
 - The saved `player.executablePath` is an absolute Windows `.exe` path used by `POST /play`; it is never supplied by the play request itself.
+- `player.progressTracking` stores the opt-in enabled state, MPC-HC Web Interface port, and explicit localhost-only confirmation. Enabling is rejected unless that confirmation is present.
 - A saved `downloads.maxConcurrentDownloads` value takes precedence over `CUSTOM_STREMIO_MAX_CONCURRENT_DOWNLOADS` on startup.
 - When no saved document exists, the environment value is used if it is a positive integer or `unlimited`; otherwise the scheduler default is `2`.
 - Invalid or unsupported settings documents stop backend startup rather than being silently overwritten.
+
+## Persistent Playback Progress
+
+- Default Windows path: `%LOCALAPPDATA%\Custom Stremio\playback-progress.json`
+- `CUSTOM_STREMIO_DATA_DIR` overrides the containing data directory.
+- The versioned document uses atomic temporary-file replacement and retains the newest verified observation per movie or episode content identity.
+- Each record keeps internal normalized file identity for strict MPC-HC matching, but full paths are omitted from public progress responses.
+- A stopped player, changed file, or repeated telemetry failure ends its in-memory session. The last verified position remains persisted, and an unreachable session is not treated as completed.
 
 ## File Organization Rule
 

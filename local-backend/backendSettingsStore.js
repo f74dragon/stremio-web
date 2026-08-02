@@ -3,11 +3,14 @@ const path = require('path');
 const { getDefaultDataDirectory } = require('./downloadRecordStore');
 const { isValidMaxConcurrentDownloads } = require('./downloadScheduler');
 
-const SETTINGS_STORE_VERSION = 4;
+const SETTINGS_STORE_VERSION = 5;
 const LEGACY_SETTINGS_STORE_VERSION = 1;
 const ALLDEBRID_SETTINGS_STORE_VERSION = 2;
 const PLAYER_SETTINGS_STORE_VERSION = 3;
+const REALDEBRID_SETTINGS_STORE_VERSION = 4;
+const PLAYBACK_PROGRESS_SETTINGS_STORE_VERSION = 5;
 const SETTINGS_FILE_NAME = 'backend-settings.json';
+const DEFAULT_MPC_HC_WEB_PORT = 13579;
 
 const normalizeAllDebridSettings = (settings) => {
     if (settings === null || settings === undefined) {
@@ -70,17 +73,42 @@ const normalizePlayerExecutablePath = (value) => {
     return executablePath;
 };
 
+const normalizePlayerProgressTracking = (settings) => {
+    const enabled = settings?.enabled === true;
+    const port = settings?.port === undefined || settings?.port === null || settings?.port === '' ?
+        DEFAULT_MPC_HC_WEB_PORT
+        : Number(settings.port);
+    const localhostOnlyConfirmed = settings?.localhostOnlyConfirmed === true;
+    if (!Number.isSafeInteger(port) || port < 1 || port > 65535) {
+        const error = new Error('Backend settings contain an invalid MPC-HC Web Interface port');
+        error.code = 'BACKEND_SETTINGS_INVALID';
+        throw error;
+    }
+    if (enabled && !localhostOnlyConfirmed) {
+        const error = new Error('Confirm that MPC-HC allows Web Interface access from localhost only before enabling progress tracking');
+        error.code = 'BACKEND_SETTINGS_INVALID';
+        throw error;
+    }
+    return {
+        enabled,
+        port,
+        localhostOnlyConfirmed
+    };
+};
+
 const createBackendSettings = (
     maxConcurrentDownloads,
     allDebrid = null,
     playerExecutablePath = null,
-    realDebrid = null
+    realDebrid = null,
+    playerProgressTracking = null
 ) => ({
     downloads: {
         maxConcurrentDownloads
     },
     player: {
-        executablePath: normalizePlayerExecutablePath(playerExecutablePath)
+        executablePath: normalizePlayerExecutablePath(playerExecutablePath),
+        progressTracking: normalizePlayerProgressTracking(playerProgressTracking)
     },
     debrid: {
         allDebrid: normalizeAllDebridSettings(allDebrid),
@@ -102,7 +130,8 @@ const validateBackendSettings = (settings) => {
         maxConcurrentDownloads,
         settings?.debrid?.allDebrid ?? null,
         settings?.player?.executablePath ?? null,
-        settings?.debrid?.realDebrid ?? null
+        settings?.debrid?.realDebrid ?? null,
+        settings?.player?.progressTracking ?? null
     );
 };
 
@@ -123,6 +152,7 @@ const readBackendSettings = async (filePath = getDefaultSettingsPath(), fallback
             LEGACY_SETTINGS_STORE_VERSION,
             ALLDEBRID_SETTINGS_STORE_VERSION,
             PLAYER_SETTINGS_STORE_VERSION,
+            REALDEBRID_SETTINGS_STORE_VERSION,
             SETTINGS_STORE_VERSION
         ].includes(document.version)) {
             const formatError = new Error(`Backend settings use an unsupported format: ${filePath}`);
@@ -130,17 +160,26 @@ const readBackendSettings = async (filePath = getDefaultSettingsPath(), fallback
             throw formatError;
         }
 
-        const settings = document.version < SETTINGS_STORE_VERSION ? {
+        const settings = {
             ...document.settings,
-            player: document.version >= PLAYER_SETTINGS_STORE_VERSION ?
-                document.settings?.player
-                :
-                fallbackSettings?.player ?? { executablePath: null },
+            player: {
+                executablePath: document.version >= PLAYER_SETTINGS_STORE_VERSION ?
+                    document.settings?.player?.executablePath ?? null
+                    :
+                    fallbackSettings?.player?.executablePath ?? null,
+                progressTracking: document.version >= PLAYBACK_PROGRESS_SETTINGS_STORE_VERSION ?
+                    document.settings?.player?.progressTracking
+                    :
+                    fallbackSettings?.player?.progressTracking ?? null
+            },
             debrid: {
                 allDebrid: document.settings?.debrid?.allDebrid ?? null,
-                realDebrid: null
+                realDebrid: document.version >= REALDEBRID_SETTINGS_STORE_VERSION ?
+                    document.settings?.debrid?.realDebrid ?? null
+                    :
+                    null
             }
-        } : document.settings;
+        };
         return validateBackendSettings(settings);
     } catch (error) {
         if (error?.code === 'ENOENT') {
@@ -195,10 +234,14 @@ module.exports = {
     LEGACY_SETTINGS_STORE_VERSION,
     ALLDEBRID_SETTINGS_STORE_VERSION,
     PLAYER_SETTINGS_STORE_VERSION,
+    REALDEBRID_SETTINGS_STORE_VERSION,
+    PLAYBACK_PROGRESS_SETTINGS_STORE_VERSION,
     SETTINGS_FILE_NAME,
+    DEFAULT_MPC_HC_WEB_PORT,
     createBackendSettings,
     normalizeRealDebridSettings,
     normalizePlayerExecutablePath,
+    normalizePlayerProgressTracking,
     getDefaultSettingsPath,
     validateBackendSettings,
     readBackendSettings,

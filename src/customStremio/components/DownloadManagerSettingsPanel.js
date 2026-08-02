@@ -10,7 +10,8 @@ const {
     startRealDebridDeviceAuth,
     checkRealDebridDeviceAuth,
     disconnectRealDebrid,
-    selectPlayerExecutable
+    selectPlayerExecutable,
+    testMpcHcProgressConnection
 } = require('../localBackendClient');
 const styles = require('./DownloadManagerSettingsPanel.less');
 
@@ -36,6 +37,15 @@ const DownloadManagerSettingsPanel = () => {
     const [realDebridError, setRealDebridError] = React.useState(null);
     const [playerBusy, setPlayerBusy] = React.useState(false);
     const [playerError, setPlayerError] = React.useState(null);
+    const [progressDraft, setProgressDraft] = React.useState({
+        enabled: false,
+        port: '13579',
+        localhostOnlyConfirmed: false
+    });
+    const [progressOperation, setProgressOperation] = React.useState(null);
+    const [progressError, setProgressError] = React.useState(null);
+    const [progressTestResult, setProgressTestResult] = React.useState(null);
+    const progressBusy = progressOperation !== null;
 
     React.useEffect(() => {
         mountedRef.current = true;
@@ -92,6 +102,22 @@ const DownloadManagerSettingsPanel = () => {
         :
         null;
 
+    React.useEffect(() => {
+        const progressTracking = playerSettings?.progressTracking;
+        if (!progressTracking) {
+            return;
+        }
+        setProgressDraft({
+            enabled: progressTracking.enabled === true,
+            port: String(progressTracking.port || 13579),
+            localhostOnlyConfirmed: progressTracking.localhostOnlyConfirmed === true
+        });
+    }, [
+        playerSettings?.progressTracking?.enabled,
+        playerSettings?.progressTracking?.port,
+        playerSettings?.progressTracking?.localhostOnlyConfirmed
+    ]);
+
     const choosePlayerExecutable = React.useCallback(async () => {
         if (!settings || playerBusy) {
             return;
@@ -115,6 +141,90 @@ const DownloadManagerSettingsPanel = () => {
             }
         }
     }, [settings, playerBusy, t]);
+
+    const getProgressPort = React.useCallback(() => {
+        const port = Number(progressDraft.port);
+        return Number.isSafeInteger(port) && port >= 1 && port <= 65535 ? port : null;
+    }, [progressDraft.port]);
+
+    const saveProgressTracking = React.useCallback(async () => {
+        if (!settings || progressBusy) {
+            return;
+        }
+        const port = getProgressPort();
+        if (port === null) {
+            setProgressError(t('CUSTOM_DOWNLOAD_MANAGER_MPC_PORT_ERROR', {
+                defaultValue: 'Enter a port between 1 and 65535.'
+            }));
+            return;
+        }
+        if (progressDraft.enabled && !progressDraft.localhostOnlyConfirmed) {
+            setProgressError(t('CUSTOM_DOWNLOAD_MANAGER_MPC_LOCALHOST_REQUIRED', {
+                defaultValue: 'Confirm the localhost-only MPC-HC setting before enabling progress tracking.'
+            }));
+            return;
+        }
+
+        setProgressOperation('save');
+        setProgressError(null);
+        try {
+            const nextSettings = await updateBackendSettings({
+                player: {
+                    progressTracking: {
+                        enabled: progressDraft.enabled,
+                        port,
+                        localhostOnlyConfirmed: progressDraft.localhostOnlyConfirmed
+                    }
+                }
+            });
+            if (mountedRef.current) {
+                setSettings(nextSettings);
+            }
+        } catch (requestError) {
+            if (mountedRef.current) {
+                setProgressError(requestError?.backendError || t('CUSTOM_DOWNLOAD_MANAGER_MPC_SAVE_ERROR', {
+                    defaultValue: 'Could not save MPC-HC progress tracking settings.'
+                }));
+            }
+        } finally {
+            if (mountedRef.current) {
+                setProgressOperation(null);
+            }
+        }
+    }, [getProgressPort, progressBusy, progressDraft, settings, t]);
+
+    const testProgressConnection = React.useCallback(async () => {
+        if (!settings || progressBusy) {
+            return;
+        }
+        const port = getProgressPort();
+        if (port === null) {
+            setProgressError(t('CUSTOM_DOWNLOAD_MANAGER_MPC_PORT_ERROR', {
+                defaultValue: 'Enter a port between 1 and 65535.'
+            }));
+            return;
+        }
+
+        setProgressOperation('test');
+        setProgressError(null);
+        setProgressTestResult(null);
+        try {
+            const result = await testMpcHcProgressConnection(port);
+            if (mountedRef.current) {
+                setProgressTestResult(result);
+            }
+        } catch (requestError) {
+            if (mountedRef.current) {
+                setProgressError(requestError?.backendError || t('CUSTOM_DOWNLOAD_MANAGER_MPC_TEST_ERROR', {
+                    defaultValue: 'Could not connect. Open MPC-HC, enable its Web Interface, and verify the port.'
+                }));
+            }
+        } finally {
+            if (mountedRef.current) {
+                setProgressOperation(null);
+            }
+        }
+    }, [getProgressPort, progressBusy, settings, t]);
 
     const startAllDebridConnection = React.useCallback(async () => {
         if (allDebridBusy) {
@@ -565,6 +675,115 @@ const DownloadManagerSettingsPanel = () => {
                     }
                 </div>
                 {playerError ? <div className={styles['error-row']} role={'alert'}>{playerError}</div> : null}
+            </section>
+            <section className={styles['progress-panel']} aria-labelledby={'download-manager-progress-title'}>
+                <div className={styles['progress-intro']}>
+                    <div className={styles['player-heading-row']}>
+                        <h2 id={'download-manager-progress-title'}>
+                            {t('CUSTOM_DOWNLOAD_MANAGER_MPC_PROGRESS_TITLE', { defaultValue: 'MPC-HC playback progress' })}
+                        </h2>
+                        {
+                            playerSettings?.progressTracking?.enabled ?
+                                <span className={styles['progress-enabled']}>
+                                    {t('CUSTOM_DOWNLOAD_MANAGER_MPC_PROGRESS_ENABLED', { defaultValue: 'Tracking enabled' })}
+                                </span>
+                                : null
+                        }
+                    </div>
+                    <p>
+                        {t('CUSTOM_DOWNLOAD_MANAGER_MPC_PROGRESS_DESCRIPTION', {
+                            defaultValue: 'Observe local playback for future watched and Continue Watching features. MPC-HC still controls resume position.'
+                        })}
+                    </p>
+                    <ol className={styles['progress-setup']}>
+                        <li>{t('CUSTOM_DOWNLOAD_MANAGER_MPC_SETUP_WEB', { defaultValue: 'In MPC-HC, open Options → Player → Web Interface and enable Listen on port.' })}</li>
+                        <li><strong>{t('CUSTOM_DOWNLOAD_MANAGER_MPC_SETUP_LOCAL', { defaultValue: 'Enable Allow access from localhost only.' })}</strong></li>
+                        <li>{t('CUSTOM_DOWNLOAD_MANAGER_MPC_SETUP_HISTORY', { defaultValue: 'Under Player → History, enable Keep history and Remember File position.' })}</li>
+                    </ol>
+                </div>
+                <div className={styles['progress-controls']}>
+                    <label className={styles['progress-toggle']}>
+                        <input
+                            type={'checkbox'}
+                            checked={progressDraft.enabled}
+                            disabled={!settings || progressBusy}
+                            onChange={(event) => {
+                                setProgressDraft((current) => ({ ...current, enabled: event.target.checked }));
+                                setProgressError(null);
+                            }}
+                        />
+                        <span className={styles['progress-checkbox']} aria-hidden={'true'} />
+                        <span>{t('CUSTOM_DOWNLOAD_MANAGER_MPC_ENABLE', { defaultValue: 'Enable progress tracking' })}</span>
+                    </label>
+                    <label className={styles['progress-port']} htmlFor={'mpc-hc-web-port'}>
+                        <span>{t('CUSTOM_DOWNLOAD_MANAGER_MPC_PORT', { defaultValue: 'Web Interface port' })}</span>
+                        <input
+                            id={'mpc-hc-web-port'}
+                            type={'number'}
+                            min={'1'}
+                            max={'65535'}
+                            step={'1'}
+                            inputMode={'numeric'}
+                            value={progressDraft.port}
+                            disabled={!settings || progressBusy}
+                            onChange={(event) => {
+                                setProgressDraft((current) => ({ ...current, port: event.target.value }));
+                                setProgressError(null);
+                                setProgressTestResult(null);
+                            }}
+                        />
+                    </label>
+                    <label className={styles['progress-confirmation']}>
+                        <input
+                            type={'checkbox'}
+                            checked={progressDraft.localhostOnlyConfirmed}
+                            disabled={!settings || progressBusy}
+                            onChange={(event) => {
+                                setProgressDraft((current) => ({ ...current, localhostOnlyConfirmed: event.target.checked }));
+                                setProgressError(null);
+                            }}
+                        />
+                        <span className={styles['progress-checkbox']} aria-hidden={'true'} />
+                        <span>{t('CUSTOM_DOWNLOAD_MANAGER_MPC_CONFIRM_LOCALHOST', { defaultValue: 'I enabled “Allow access from localhost only” in MPC-HC.' })}</span>
+                    </label>
+                    <div className={styles['progress-actions']}>
+                        <button
+                            className={styles['progress-test-button']}
+                            type={'button'}
+                            disabled={!settings || progressBusy}
+                            onClick={testProgressConnection}
+                        >
+                            {progressOperation === 'test' ?
+                                t('CUSTOM_DOWNLOAD_MANAGER_MPC_WORKING', { defaultValue: 'Checking...' })
+                                :
+                                t('CUSTOM_DOWNLOAD_MANAGER_MPC_TEST', { defaultValue: 'Test connection' })}
+                        </button>
+                        <button
+                            className={styles['progress-save-button']}
+                            type={'button'}
+                            disabled={!settings || progressBusy}
+                            onClick={saveProgressTracking}
+                        >
+                            {progressOperation === 'save' ?
+                                t('CUSTOM_DOWNLOAD_MANAGER_MPC_SAVING', { defaultValue: 'Saving...' })
+                                :
+                                t('CUSTOM_DOWNLOAD_MANAGER_MPC_SAVE', { defaultValue: 'Save' })}
+                        </button>
+                    </div>
+                    <div className={styles['progress-status']} aria-live={'polite'}>
+                        {
+                            progressTestResult?.connected ?
+                                <span className={styles['progress-success']}>
+                                    {progressTestResult.playerActive ?
+                                        t('CUSTOM_DOWNLOAD_MANAGER_MPC_CONNECTED_ACTIVE', { defaultValue: 'Connected. MPC-HC is reporting an open media file.' })
+                                        :
+                                        t('CUSTOM_DOWNLOAD_MANAGER_MPC_CONNECTED_IDLE', { defaultValue: 'Connected. MPC-HC is ready; no media is currently open.' })}
+                                </span>
+                                : null
+                        }
+                        {progressError ? <span className={styles['progress-error']} role={'alert'}>{progressError}</span> : null}
+                    </div>
+                </div>
             </section>
             <section className={styles['debrid-panel']} aria-labelledby={'download-manager-alldebrid-title'}>
                 <div className={styles['settings-copy']}>

@@ -39,6 +39,19 @@ npm start
 
 `POST /play` accepts only a stored `downloadId`; callers cannot submit arbitrary local paths or executable paths for the backend to open.
 
+### MPC-HC Playback Progress
+
+Open **Downloads -> Download options -> MPC-HC playback progress** for setup. In MPC-HC:
+
+1. Open **Options -> Player -> Web Interface** and enable **Listen on port**.
+2. Keep the displayed port aligned with Custom Stremio (MPC-HC defaults to `13579`).
+3. Enable **Allow access from localhost only**.
+4. Under **Player -> History**, enable **Keep history** and **Remember File position**.
+
+Use **Test connection**, then enable and save progress tracking. The backend connects only to `127.0.0.1`, reads playback state without controlling the player, and accepts progress only when MPC-HC reports the exact file launched from a completed download record. MPC-HC remains responsible for actual resume behavior.
+
+Verified observations are stored atomically in `%LOCALAPPDATA%\Custom Stremio\playback-progress.json`. Tracking is optional: playback continues normally if it is disabled or MPC-HC telemetry is unavailable. Full local paths are not returned by the progress API.
+
 ## Download Folder
 
 Default root:

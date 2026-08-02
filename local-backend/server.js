@@ -2,6 +2,7 @@
 
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
 const {
     startDownload,
     pauseDownload,
@@ -48,6 +49,9 @@ const {
     launchMediaFile
 } = require('./playerLauncher');
 const { selectPlayerExecutable } = require('./playerExecutableSelector');
+const { MpcHcStatusClient } = require('./mpcHcStatusClient');
+const { MpcHcPlaybackTracker } = require('./mpcHcPlaybackTracker');
+const { PlaybackProgressStore } = require('./playbackProgressStore');
 const { openDownloadLocation } = require('./fileExplorerLauncher');
 const { DownloadRecordStore, recoverInterruptedDownloadRecords } = require('./downloadRecordStore');
 const { STATUS_EVENT_TYPES, DownloadHistoryStore } = require('./downloadHistoryStore');
@@ -93,6 +97,15 @@ const downloadScheduler = new DownloadScheduler({
     onTaskError: (error, recordId) => console.error(`Scheduled download ${recordId} failed unexpectedly:`, error)
 });
 const settingsStore = new BackendSettingsStore();
+const playbackProgressStore = new PlaybackProgressStore({
+    onError: (error) => console.error('Could not persist playback progress:', error)
+});
+const mpcHcStatusClient = new MpcHcStatusClient();
+const mpcHcPlaybackTracker = new MpcHcPlaybackTracker({
+    client: mpcHcStatusClient,
+    store: playbackProgressStore,
+    onWarning: (message) => console.warn(message)
+});
 const allDebridClient = new AllDebridClient();
 const realDebridClient = new RealDebridClient();
 const allDebridCleanupStore = new AllDebridCleanupStore();
@@ -607,7 +620,8 @@ const getBackendSettingsResponse = () => ({
     },
     player: {
         configured: Boolean(backendSettings.player.executablePath),
-        executablePath: backendSettings.player.executablePath
+        executablePath: backendSettings.player.executablePath,
+        progressTracking: backendSettings.player.progressTracking
     },
     debrid: {
         allDebrid: getAllDebridConnectionResponse(),
@@ -620,7 +634,8 @@ const saveAllDebridConnection = async (allDebrid) => {
         backendSettings.downloads.maxConcurrentDownloads,
         allDebrid,
         backendSettings.player.executablePath,
-        backendSettings.debrid.realDebrid
+        backendSettings.debrid.realDebrid,
+        backendSettings.player.progressTracking
     ));
     return getAllDebridConnectionResponse();
 };
@@ -630,7 +645,8 @@ const saveRealDebridConnection = async (realDebrid) => {
         backendSettings.downloads.maxConcurrentDownloads,
         backendSettings.debrid.allDebrid,
         backendSettings.player.executablePath,
-        realDebrid
+        realDebrid,
+        backendSettings.player.progressTracking
     ));
     return getRealDebridConnectionResponse();
 };
@@ -754,7 +770,19 @@ app.get('/settings', requireTrustedLocalOrigin, (request, response) => {
 });
 
 app.patch('/settings', requireTrustedLocalOrigin, async (request, response) => {
-    const maxConcurrentDownloads = request.body?.downloads?.maxConcurrentDownloads;
+    const hasDownloadsUpdate = Object.prototype.hasOwnProperty.call(request.body?.downloads || {}, 'maxConcurrentDownloads');
+    const hasProgressUpdate = Object.prototype.hasOwnProperty.call(request.body?.player || {}, 'progressTracking');
+    if (!hasDownloadsUpdate && !hasProgressUpdate) {
+        response.status(400).json({
+            ok: false,
+            error: 'Provide a supported download or player setting to update'
+        });
+        return;
+    }
+
+    const maxConcurrentDownloads = hasDownloadsUpdate ?
+        request.body.downloads.maxConcurrentDownloads
+        : backendSettings.downloads.maxConcurrentDownloads;
     if (!isValidMaxConcurrentDownloads(maxConcurrentDownloads)) {
         response.status(400).json({
             ok: false,
@@ -763,19 +791,22 @@ app.patch('/settings', requireTrustedLocalOrigin, async (request, response) => {
         return;
     }
 
-    const nextSettings = createBackendSettings(
-        maxConcurrentDownloads,
-        backendSettings.debrid.allDebrid,
-        backendSettings.player.executablePath,
-        backendSettings.debrid.realDebrid
-    );
     try {
+        const nextSettings = createBackendSettings(
+            maxConcurrentDownloads,
+            backendSettings.debrid.allDebrid,
+            backendSettings.player.executablePath,
+            backendSettings.debrid.realDebrid,
+            hasProgressUpdate ? request.body.player.progressTracking : backendSettings.player.progressTracking
+        );
         backendSettings = await settingsStore.save(nextSettings);
     } catch (error) {
+        const invalidSettings = error?.code === 'BACKEND_SETTINGS_INVALID';
         console.error('Could not persist backend settings:', error);
-        response.status(500).json({
+        response.status(invalidSettings ? 400 : 500).json({
             ok: false,
-            error: 'Could not save local download settings'
+            errorCode: error?.code || 'BACKEND_SETTINGS_SAVE_FAILED',
+            error: invalidSettings ? error.message : 'Could not save local download settings'
         });
         return;
     }
@@ -799,7 +830,8 @@ app.post('/settings/player/select', requireTrustedLocalOrigin, async (request, r
             backendSettings.downloads.maxConcurrentDownloads,
             backendSettings.debrid.allDebrid,
             executablePath,
-            backendSettings.debrid.realDebrid
+            backendSettings.debrid.realDebrid,
+            backendSettings.player.progressTracking
         ));
         response.json({ ...getBackendSettingsResponse(), selectionCanceled: false });
     } catch (error) {
@@ -811,6 +843,30 @@ app.post('/settings/player/select', requireTrustedLocalOrigin, async (request, r
             ok: false,
             errorCode: error?.code || 'PLAYER_SELECTION_FAILED',
             error: error?.message || 'Could not choose the video player executable'
+        });
+    }
+});
+
+app.post('/settings/player/progress/test', requireTrustedLocalOrigin, async (request, response) => {
+    const port = request.body?.port ?? backendSettings.player.progressTracking.port;
+    try {
+        const status = await mpcHcStatusClient.getStatus(port);
+        response.json({
+            ok: true,
+            connected: true,
+            port: Number(port),
+            playerActive: Boolean(status.filePath),
+            state: status.state,
+            positionMs: status.positionMs,
+            durationMs: status.durationMs
+        });
+    } catch (error) {
+        const invalidPort = error?.code === 'MPC_HC_PORT_INVALID';
+        response.status(invalidPort ? 400 : 503).json({
+            ok: false,
+            connected: false,
+            errorCode: error?.code || 'MPC_HC_CONNECTION_FAILED',
+            error: invalidPort ? error.message : 'Could not connect to the MPC-HC Web Interface on this port'
         });
     }
 });
@@ -1847,11 +1903,27 @@ app.post('/play', async (request, response) => {
 
     try {
         const launchResult = await launchMediaFile(record.localPath, backendSettings.player.executablePath);
+        let playbackSession = null;
+        if (backendSettings.player.progressTracking.enabled) {
+            try {
+                playbackSession = mpcHcPlaybackTracker.start(record, {
+                    port: backendSettings.player.progressTracking.port
+                });
+            } catch (trackingError) {
+                console.warn(`Could not start playback tracking for ${record.id}: ${trackingError.message || 'unknown error'}`);
+            }
+        }
         response.json({
             ok: true,
             downloadId: record.id,
             localPath: launchResult.localPath,
-            launched: true
+            launched: true,
+            playback: {
+                enabled: backendSettings.player.progressTracking.enabled,
+                sessionId: playbackSession?.id ?? null,
+                state: playbackSession ? 'waiting_for_player' :
+                    backendSettings.player.progressTracking.enabled ? 'unavailable' : 'disabled'
+            }
         });
     } catch (error) {
         const status = error?.code === 'MEDIA_FILE_NOT_FOUND' ?
@@ -1866,6 +1938,33 @@ app.post('/play', async (request, response) => {
     }
 });
 
+app.get('/playback/progress', requireTrustedLocalOrigin, (request, response) => {
+    const metaId = typeof request.query.metaId === 'string' && request.query.metaId.trim() ? request.query.metaId.trim() : null;
+    const records = playbackProgressStore.list({ metaId }).map((record) => ({
+        version: record.version,
+        contentKey: record.contentKey,
+        downloadId: record.downloadId,
+        metaId: record.metaId,
+        videoId: record.videoId,
+        mediaType: record.mediaType,
+        title: record.title,
+        parentTitle: record.parentTitle,
+        season: record.season,
+        episode: record.episode,
+        fileName: record.localPath ? path.win32.basename(record.localPath) : null,
+        positionMs: record.positionMs,
+        durationMs: record.durationMs,
+        progress: record.progress,
+        state: record.state,
+        startedAt: record.startedAt,
+        lastObservedAt: record.lastObservedAt,
+        lastPlayedAt: record.lastPlayedAt,
+        sessionEndedReason: record.sessionEndedReason,
+        player: record.player
+    }));
+    response.json({ records });
+});
+
 const shutdown = async (signal) => {
     if (shuttingDown) {
         return;
@@ -1873,6 +1972,7 @@ const shutdown = async (signal) => {
 
     shuttingDown = true;
     downloadScheduler.stop();
+    mpcHcPlaybackTracker.stopAll('backend_shutdown');
     console.log(`${signal} received; saving download records before shutdown.`);
 
     if (httpServer !== null) {
@@ -1882,7 +1982,8 @@ const shutdown = async (signal) => {
     try {
         await Promise.all([
             persistDownloadRecordsNow(),
-            historyStore.flush()
+            historyStore.flush(),
+            playbackProgressStore.flush()
         ]);
         process.exit(0);
     } catch (error) {
@@ -1898,6 +1999,7 @@ const startServer = async () => {
         getConfiguredPlayerPath()
     ));
     downloadScheduler.setMaxConcurrentDownloads(backendSettings.downloads.maxConcurrentDownloads);
+    await playbackProgressStore.initialize();
 
     const allDebridApiKey = backendSettings.debrid.allDebrid?.apiKey;
     if (allDebridApiKey) {
@@ -1994,6 +2096,7 @@ const startServer = async () => {
         console.log(`Download records: ${recordStore.filePath}`);
         console.log(`Download history: ${historyStore.filePath}`);
         console.log(`Backend settings: ${settingsStore.filePath}`);
+        console.log(`Playback progress: ${playbackProgressStore.filePath}`);
         console.log(`Maximum concurrent downloads: ${downloadScheduler.maxConcurrentDownloads}`);
     });
 

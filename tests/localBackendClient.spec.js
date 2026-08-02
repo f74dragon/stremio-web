@@ -14,6 +14,8 @@ const {
     probeRealDebridAvailability,
     getRealDebridAvailabilityHistory,
     selectPlayerExecutable,
+    testMpcHcProgressConnection,
+    listPlaybackProgress,
     listDownloadHistory,
     moveDownloadInQueue,
     deleteDownloadMedia
@@ -268,6 +270,29 @@ describe('localBackendClient settings', () => {
             method: 'POST',
             headers: {}
         });
+    });
+
+    test('tests MPC-HC progress through the backend and reads sanitized progress', async () => {
+        global.fetch
+            .mockResolvedValueOnce(createJsonResponse({ connected: true, port: 13579 }))
+            .mockResolvedValueOnce(createJsonResponse({ records: [{ contentKey: 'movie:tt1' }] }));
+
+        await expect(testMpcHcProgressConnection(13579)).resolves.toMatchObject({ connected: true });
+        expect(global.fetch).toHaveBeenNthCalledWith(1, `${LOCAL_BACKEND_BASE_URL}/settings/player/progress/test`, {
+            method: 'POST',
+            body: JSON.stringify({ port: 13579 }),
+            headers: { 'Content-Type': 'application/json' }
+        });
+
+        await expect(listPlaybackProgress('tt1')).resolves.toEqual({ records: [{ contentKey: 'movie:tt1' }] });
+        expect(global.fetch).toHaveBeenNthCalledWith(2, `${LOCAL_BACKEND_BASE_URL}/playback/progress?metaId=tt1`, {
+            headers: {}
+        });
+    });
+
+    test('rejects an invalid MPC-HC port before making a request', async () => {
+        await expect(testMpcHcProgressConnection(70000)).rejects.toThrow('valid port');
+        expect(global.fetch).not.toHaveBeenCalled();
     });
 
     test('rejects invalid queue positions before making a request', async () => {

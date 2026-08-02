@@ -60,6 +60,212 @@
     box-shadow: 0 0.6rem 1.6rem rgba(0, 0, 0, 0.12);
 }
 
+.progress-panel {
+    display: grid;
+    width: 100%;
+    grid-template-columns: minmax(0, 1fr) minmax(20rem, 38rem);
+    align-items: start;
+    gap: 1rem 2rem;
+    padding: 1rem 1.15rem;
+    border: 1px solid rgba(128, 117, 255, 0.24);
+    border-radius: calc(var(--border-radius) * 1.1);
+    background: linear-gradient(135deg, rgba(84, 65, 187, 0.14), rgba(255, 255, 255, 0.03));
+    box-shadow: 0 0.6rem 1.6rem rgba(0, 0, 0, 0.12);
+}
+
+.progress-intro {
+    min-width: 0;
+
+    > p {
+        margin: 0.3rem 0 0;
+        color: var(--primary-foreground-color);
+        font-size: 0.72rem;
+        line-height: 1.4;
+        opacity: 0.7;
+    }
+}
+
+.progress-enabled {
+    padding: 0.2rem 0.5rem;
+    border-radius: 999px;
+    color: rgba(230, 225, 255, 0.98);
+    font-size: 0.64rem;
+    font-weight: 700;
+    background-color: rgba(119, 92, 238, 0.32);
+}
+
+.progress-setup {
+    margin: 0.65rem 0 0;
+    padding-left: 1.25rem;
+    color: var(--primary-foreground-color);
+    font-size: 0.67rem;
+    line-height: 1.5;
+    opacity: 0.72;
+}
+
+.progress-controls {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 0.65rem;
+}
+
+.progress-toggle,
+.progress-confirmation {
+    position: relative;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.55rem;
+    color: var(--primary-foreground-color);
+    font-size: 0.72rem;
+    line-height: 1.35;
+    cursor: pointer;
+
+    > input {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        margin: -1px;
+        padding: 0;
+        overflow: hidden;
+        border: 0;
+        white-space: nowrap;
+        clip: rect(0 0 0 0);
+        clip-path: inset(50%);
+
+        &:checked + .progress-checkbox {
+            border-color: rgba(164, 145, 255, 0.95);
+            background-color: var(--secondary-accent-color);
+            box-shadow: 0 0 0.8rem rgba(126, 94, 255, 0.32);
+
+            &::after {
+                opacity: 1;
+                transform: rotate(45deg) scale(1);
+            }
+        }
+
+        &:focus-visible + .progress-checkbox {
+            outline: 2px solid rgba(205, 194, 255, 0.95);
+            outline-offset: 0.18rem;
+        }
+
+        &:disabled + .progress-checkbox {
+            opacity: 0.45;
+        }
+    }
+}
+
+.progress-checkbox {
+    position: relative;
+    flex: 0 0 1rem;
+    width: 1rem;
+    height: 1rem;
+    margin-top: 0.02rem;
+    border: 1px solid rgba(216, 207, 255, 0.5);
+    border-radius: 0.28rem;
+    background-color: rgba(8, 6, 22, 0.54);
+    transition: border-color 120ms ease, background-color 120ms ease, box-shadow 120ms ease;
+
+    &::after {
+        position: absolute;
+        top: 0.12rem;
+        left: 0.34rem;
+        width: 0.25rem;
+        height: 0.5rem;
+        border-right: 0.14rem solid #fff;
+        border-bottom: 0.14rem solid #fff;
+        content: '';
+        opacity: 0;
+        transform: rotate(45deg) scale(0.65);
+        transition: opacity 120ms ease, transform 120ms ease;
+    }
+}
+
+.progress-confirmation {
+    padding: 0.55rem 0.65rem;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: var(--border-radius);
+    background-color: rgba(255, 255, 255, 0.04);
+    font-size: 0.67rem;
+}
+
+.progress-port {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    color: var(--primary-foreground-color);
+    font-size: 0.7rem;
+
+    > input {
+        width: 7rem;
+        min-height: 2.15rem;
+        padding: 0 0.65rem;
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        border-radius: var(--border-radius);
+        outline: none;
+        color: var(--primary-foreground-color);
+        background-color: rgba(10, 8, 24, 0.38);
+
+        &:focus-visible {
+            border-color: var(--secondary-accent-color);
+            box-shadow: 0 0 0 0.15rem rgba(124, 92, 255, 0.2);
+        }
+    }
+}
+
+.progress-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.55rem;
+}
+
+.progress-test-button,
+.progress-save-button {
+    min-height: 2.3rem;
+    padding: 0 0.9rem;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 999px;
+    color: var(--primary-foreground-color);
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.72rem;
+    font-weight: 650;
+    background-color: rgba(255, 255, 255, 0.08);
+
+    &:hover,
+    &:focus-visible {
+        border-color: rgba(158, 139, 255, 0.62);
+        background-color: rgba(119, 92, 238, 0.28);
+    }
+
+    &:disabled {
+        cursor: wait;
+        opacity: 0.55;
+    }
+}
+
+.progress-save-button {
+    border-color: rgba(148, 126, 255, 0.48);
+    background-color: rgba(119, 92, 238, 0.34);
+}
+
+.progress-status {
+    min-height: 1rem;
+    color: var(--primary-foreground-color);
+    font-size: 0.68rem;
+    line-height: 1.4;
+    text-align: right;
+}
+
+.progress-success {
+    color: rgba(154, 241, 196, 0.98);
+}
+
+.progress-error {
+    color: rgba(255, 156, 156, 0.98);
+}
+
 .player-heading-row {
     display: flex;
     align-items: center;
@@ -545,6 +751,11 @@
         gap: 0.85rem;
     }
 
+    .progress-panel {
+        grid-template-columns: 1fr;
+        gap: 0.85rem;
+    }
+
     .player-control {
         justify-content: flex-start;
         flex-wrap: wrap;
@@ -553,6 +764,14 @@
     .player-path-copy {
         flex-basis: 100%;
         align-items: flex-start;
+        text-align: left;
+    }
+
+    .progress-actions {
+        justify-content: flex-start;
+    }
+
+    .progress-status {
         text-align: left;
     }
 

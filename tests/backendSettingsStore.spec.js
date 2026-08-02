@@ -8,6 +8,7 @@ const {
     LEGACY_SETTINGS_STORE_VERSION,
     ALLDEBRID_SETTINGS_STORE_VERSION,
     PLAYER_SETTINGS_STORE_VERSION,
+    REALDEBRID_SETTINGS_STORE_VERSION,
     createBackendSettings,
     readBackendSettings,
     writeBackendSettings,
@@ -15,6 +16,11 @@ const {
 } = require('../local-backend/backendSettingsStore');
 
 describe('backendSettingsStore', () => {
+    const defaultProgressTracking = {
+        enabled: false,
+        port: 13579,
+        localhostOnlyConfirmed: false
+    };
     let tempDirectory;
     let settingsPath;
 
@@ -30,7 +36,7 @@ describe('backendSettingsStore', () => {
     test('uses the environment-derived fallback until a saved value exists', async () => {
         await expect(readBackendSettings(settingsPath, createBackendSettings(2))).resolves.toEqual({
             downloads: { maxConcurrentDownloads: 2 },
-            player: { executablePath: null },
+            player: { executablePath: null, progressTracking: defaultProgressTracking },
             debrid: { allDebrid: null, realDebrid: null }
         });
 
@@ -39,7 +45,7 @@ describe('backendSettingsStore', () => {
         await store.save(createBackendSettings(3));
         await expect(store.load(createBackendSettings(1))).resolves.toEqual({
             downloads: { maxConcurrentDownloads: 3 },
-            player: { executablePath: null },
+            player: { executablePath: null, progressTracking: defaultProgressTracking },
             debrid: { allDebrid: null, realDebrid: null }
         });
 
@@ -58,14 +64,14 @@ describe('backendSettingsStore', () => {
     test('persists custom and unlimited concurrency values', async () => {
         await expect(writeBackendSettings(settingsPath, {
             downloads: { maxConcurrentDownloads: 128 }
-        })).resolves.toEqual({ downloads: { maxConcurrentDownloads: 128 }, player: { executablePath: null }, debrid: { allDebrid: null, realDebrid: null } });
+        })).resolves.toEqual({ downloads: { maxConcurrentDownloads: 128 }, player: { executablePath: null, progressTracking: defaultProgressTracking }, debrid: { allDebrid: null, realDebrid: null } });
 
         await expect(writeBackendSettings(settingsPath, {
             downloads: { maxConcurrentDownloads: 'unlimited' }
-        })).resolves.toEqual({ downloads: { maxConcurrentDownloads: 'unlimited' }, player: { executablePath: null }, debrid: { allDebrid: null, realDebrid: null } });
+        })).resolves.toEqual({ downloads: { maxConcurrentDownloads: 'unlimited' }, player: { executablePath: null, progressTracking: defaultProgressTracking }, debrid: { allDebrid: null, realDebrid: null } });
         await expect(readBackendSettings(settingsPath, createBackendSettings(2))).resolves.toEqual({
             downloads: { maxConcurrentDownloads: 'unlimited' },
-            player: { executablePath: null },
+            player: { executablePath: null, progressTracking: defaultProgressTracking },
             debrid: { allDebrid: null, realDebrid: null }
         });
     });
@@ -79,7 +85,7 @@ describe('backendSettingsStore', () => {
         });
         await expect(writeBackendSettings(settingsPath, settings)).resolves.toEqual({
             downloads: { maxConcurrentDownloads: 2 },
-            player: { executablePath: null },
+            player: { executablePath: null, progressTracking: defaultProgressTracking },
             debrid: {
                 allDebrid: {
                     apiKey: 'secret-api-key',
@@ -97,7 +103,7 @@ describe('backendSettingsStore', () => {
         }), 'utf8');
         await expect(readBackendSettings(settingsPath, createBackendSettings(1))).resolves.toEqual({
             downloads: { maxConcurrentDownloads: 4 },
-            player: { executablePath: null },
+            player: { executablePath: null, progressTracking: defaultProgressTracking },
             debrid: { allDebrid: null, realDebrid: null }
         });
 
@@ -107,7 +113,7 @@ describe('backendSettingsStore', () => {
         }), 'utf8');
         await expect(readBackendSettings(settingsPath, createBackendSettings(1, null, 'C:\\Players\\mpc-hc64.exe'))).resolves.toMatchObject({
             downloads: { maxConcurrentDownloads: 2 },
-            player: { executablePath: 'C:\\Players\\mpc-hc64.exe' },
+            player: { executablePath: 'C:\\Players\\mpc-hc64.exe', progressTracking: defaultProgressTracking },
             debrid: { allDebrid: { apiKey: 'secret-api-key' } }
         });
 
@@ -117,7 +123,7 @@ describe('backendSettingsStore', () => {
         }), 'utf8');
         await expect(readBackendSettings(settingsPath, createBackendSettings(1))).resolves.toEqual({
             downloads: { maxConcurrentDownloads: 2 },
-            player: { executablePath: 'C:\\Players\\mpc-hc64.exe' },
+            player: { executablePath: 'C:\\Players\\mpc-hc64.exe', progressTracking: defaultProgressTracking },
             debrid: { allDebrid: null, realDebrid: null }
         });
     });
@@ -136,7 +142,7 @@ describe('backendSettingsStore', () => {
         };
         await expect(writeBackendSettings(settingsPath, createBackendSettings(2, null, null, realDebrid))).resolves.toEqual({
             downloads: { maxConcurrentDownloads: 2 },
-            player: { executablePath: null },
+            player: { executablePath: null, progressTracking: defaultProgressTracking },
             debrid: {
                 allDebrid: null,
                 realDebrid: { ...realDebrid, userId: '42' }
@@ -153,7 +159,7 @@ describe('backendSettingsStore', () => {
         const executablePath = 'C:\\Program Files\\MPC-HC\\mpc-hc64.exe';
         await expect(writeBackendSettings(settingsPath, createBackendSettings(2, null, executablePath))).resolves.toEqual({
             downloads: { maxConcurrentDownloads: 2 },
-            player: { executablePath },
+            player: { executablePath, progressTracking: defaultProgressTracking },
             debrid: { allDebrid: null, realDebrid: null }
         });
         await expect(writeBackendSettings(settingsPath, {
@@ -162,6 +168,63 @@ describe('backendSettingsStore', () => {
             debrid: { allDebrid: null, realDebrid: null }
         })).rejects.toMatchObject({
             code: 'BACKEND_SETTINGS_INVALID'
+        });
+    });
+
+    test('persists opt-in MPC-HC progress settings and requires localhost-only confirmation', async () => {
+        const progressTracking = {
+            enabled: true,
+            port: 13580,
+            localhostOnlyConfirmed: true
+        };
+        await expect(writeBackendSettings(
+            settingsPath,
+            createBackendSettings(2, null, 'C:\\Players\\mpc-hc64.exe', null, progressTracking)
+        )).resolves.toMatchObject({
+            player: {
+                executablePath: 'C:\\Players\\mpc-hc64.exe',
+                progressTracking
+            }
+        });
+
+        expect(() => createBackendSettings(2, null, null, null, {
+            enabled: true,
+            port: 13579,
+            localhostOnlyConfirmed: false
+        })).toThrow(expect.objectContaining({ code: 'BACKEND_SETTINGS_INVALID' }));
+        expect(() => createBackendSettings(2, null, null, null, {
+            enabled: false,
+            port: 70000,
+            localhostOnlyConfirmed: false
+        })).toThrow(expect.objectContaining({ code: 'BACKEND_SETTINGS_INVALID' }));
+    });
+
+    test('migrates version four settings without losing Real-Debrid credentials', async () => {
+        const realDebrid = {
+            clientId: 'client',
+            clientSecret: 'secret',
+            accessToken: 'access',
+            refreshToken: 'refresh',
+            tokenExpiresAt: '2030-01-01T00:00:00.000Z',
+            userId: '42',
+            username: 'viewer',
+            isPremium: true,
+            premiumUntil: null
+        };
+        fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+        fs.writeFileSync(settingsPath, JSON.stringify({
+            version: REALDEBRID_SETTINGS_STORE_VERSION,
+            settings: {
+                downloads: { maxConcurrentDownloads: 3 },
+                player: { executablePath: 'C:\\Players\\mpc-hc64.exe' },
+                debrid: { allDebrid: null, realDebrid }
+            }
+        }), 'utf8');
+
+        await expect(readBackendSettings(settingsPath, createBackendSettings(1))).resolves.toEqual({
+            downloads: { maxConcurrentDownloads: 3 },
+            player: { executablePath: 'C:\\Players\\mpc-hc64.exe', progressTracking: defaultProgressTracking },
+            debrid: { allDebrid: null, realDebrid }
         });
     });
 

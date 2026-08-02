@@ -168,6 +168,23 @@ const selectPlayerExecutable = async () => requestJson('/settings/player/select'
     method: 'POST'
 });
 
+const testMpcHcProgressConnection = async (port) => {
+    if (!Number.isSafeInteger(Number(port)) || Number(port) < 1 || Number(port) > 65535) {
+        throw new Error('testMpcHcProgressConnection requires a valid port');
+    }
+    return requestJson('/settings/player/progress/test', {
+        method: 'POST',
+        body: { port: Number(port) }
+    });
+};
+
+const listPlaybackProgress = async (metaId) => {
+    const path = typeof metaId === 'string' && metaId.length > 0 ?
+        `/playback/progress?metaId=${encodeURIComponent(metaId)}`
+        : '/playback/progress';
+    return requestJson(path);
+};
+
 const checkAllDebridAvailability = async (hashes, options = {}) => {
     if (!Array.isArray(hashes)) {
         throw new Error('checkAllDebridAvailability requires a hashes array');
@@ -296,6 +313,8 @@ module.exports = {
     probeRealDebridAvailability,
     getRealDebridAvailabilityHistory,
     selectPlayerExecutable,
+    testMpcHcProgressConnection,
+    listPlaybackProgress,
     checkAllDebridAvailability,
     getAllDebridAvailabilityHistory,
     createDownload,
