@@ -9,6 +9,7 @@ const {
     groupSeriesRecordsByEpisode
 } = require('../downloadBatchDeletion');
 const DownloadRecordCard = require('./DownloadRecordCard');
+const { findMostRecentPlaybackRecord, getPlaybackProgressForRecord } = require('../playbackProgressPresentation');
 const styles = require('./DownloadMediaDetails.less');
 
 const getRecordArtwork = (record, group) => {
@@ -53,6 +54,7 @@ const DownloadMediaDetails = ({
     error,
     actionStates,
     actionErrors,
+    playbackProgressByDownloadId,
     onBack,
     onPause,
     onResume,
@@ -70,8 +72,9 @@ const DownloadMediaDetails = ({
 }) => {
     const { t } = useTranslation();
     const isMovie = group.type === 'movie';
-    const playableRecord = group.latestCompletedRecord;
+    const playableRecord = findMostRecentPlaybackRecord(group.records, playbackProgressByDownloadId) || group.latestCompletedRecord;
     const playableRecordId = playableRecord?.id;
+    const playablePlaybackProgress = getPlaybackProgressForRecord(playableRecord, playbackProgressByDownloadId);
     const playAction = playableRecordId ? actionStates[playableRecordId] : null;
     const playActionInProgress = typeof playAction === 'string';
     const heroArtwork = group.background || group.poster || getRecordArtwork(group.records[0], group);
@@ -199,7 +202,7 @@ const DownloadMediaDetails = ({
                                     onClick={() => !playActionInProgress && onPlay?.(playableRecordId)}
                                 >
                                     <Icon name={'play'} />
-                                    <span>{playAction === 'play' ? t('CUSTOM_DOWNLOAD_OPENING', { defaultValue: 'Opening...' }) : t('CUSTOM_DOWNLOADS_PLAY_LATEST', { defaultValue: 'Play latest download' })}</span>
+                                    <span>{playAction === 'play' ? t('CUSTOM_DOWNLOAD_OPENING', { defaultValue: 'Opening...' }) : playablePlaybackProgress ? t('CUSTOM_DOWNLOAD_CONTINUE_FROM_PROGRESS', { defaultValue: 'Continue from {{progress}}%', progress: playablePlaybackProgress.percent }) : t('CUSTOM_DOWNLOADS_PLAY_LATEST', { defaultValue: 'Play latest download' })}</span>
                                 </button>
                                 :
                                 null
@@ -324,6 +327,7 @@ const DownloadMediaDetails = ({
                                     variant={'library'}
                                     action={record.id ? actionStates[record.id] : null}
                                     actionError={record.id ? actionErrors[record.id] : null}
+                                    playbackProgress={getPlaybackProgressForRecord(record, playbackProgressByDownloadId)}
                                     onPause={onPause}
                                     onResume={onResume}
                                     onCancel={onCancel}
@@ -382,6 +386,7 @@ const DownloadMediaDetails = ({
                                                     variant={'library'}
                                                     action={record.id ? actionStates[record.id] : null}
                                                     actionError={record.id ? actionErrors[record.id] : null}
+                                                    playbackProgress={getPlaybackProgressForRecord(record, playbackProgressByDownloadId)}
                                                     onPause={onPause}
                                                     onResume={onResume}
                                                     onCancel={onCancel}
@@ -429,6 +434,7 @@ DownloadMediaDetails.propTypes = {
     error: PropTypes.string,
     actionStates: PropTypes.object.isRequired,
     actionErrors: PropTypes.object.isRequired,
+    playbackProgressByDownloadId: PropTypes.object,
     onBack: PropTypes.func.isRequired,
     onPause: PropTypes.func,
     onResume: PropTypes.func,

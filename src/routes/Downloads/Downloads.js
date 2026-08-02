@@ -6,6 +6,7 @@ const { default: Icon } = require('@stremio/stremio-icons/react');
 const { Button, MainNavBars } = require('stremio/components');
 const useDownloadRecords = require('stremio/customStremio/useDownloadRecords');
 const useDownloadHistory = require('stremio/customStremio/useDownloadHistory');
+const usePlaybackProgress = require('stremio/customStremio/usePlaybackProgress');
 const useLibrarySortPreference = require('stremio/customStremio/useLibrarySortPreference');
 const {
     DOWNLOAD_LIBRARY_SORTS,
@@ -63,6 +64,7 @@ const Downloads = () => {
         removeMedia,
         removeMediaBatch
     } = useDownloadRecords();
+    const { progressByDownloadId } = usePlaybackProgress();
     const {
         events: historyEvents,
         total: historyTotal,
@@ -308,6 +310,7 @@ const Downloads = () => {
                                     error={error}
                                     actionStates={actionStates}
                                     actionErrors={actionErrors}
+                                    playbackProgressByDownloadId={progressByDownloadId}
                                     onBack={handleBackToLibrary}
                                     onPause={pause}
                                     onResume={resume}
@@ -481,6 +484,7 @@ const Downloads = () => {
                                                                             group={group}
                                                                             actionStates={actionStates}
                                                                             actionErrors={actionErrors}
+                                                                            playbackProgressByDownloadId={progressByDownloadId}
                                                                             onPlay={play}
                                                                             onOpen={handleOpenMedia}
                                                                             selectionMode={selectionMode}

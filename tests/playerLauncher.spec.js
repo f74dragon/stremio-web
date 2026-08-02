@@ -90,4 +90,18 @@ describe('playerLauncher', () => {
         await launchMediaFile(mediaPath, savedPlayerPath);
         expect(spawn).toHaveBeenCalledWith(savedPlayerPath, [mediaPath], expect.objectContaining({ shell: false }));
     });
+
+    test('passes a dedicated Web Interface port only to MPC-HC', async () => {
+        const mpcPath = path.join(tempDirectory, 'mpc-hc64.exe');
+        fs.writeFileSync(mpcPath, 'test player');
+        const childProcess = new EventEmitter();
+        childProcess.unref = jest.fn();
+        spawn.mockImplementation(() => {
+            process.nextTick(() => childProcess.emit('spawn'));
+            return childProcess;
+        });
+
+        await launchMediaFile(mediaPath, mpcPath, { mpcHcWebPort: 13580 });
+        expect(spawn).toHaveBeenCalledWith(mpcPath, [mediaPath, '/webport', '13580'], expect.objectContaining({ shell: false }));
+    });
 });

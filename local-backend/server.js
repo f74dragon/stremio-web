@@ -51,6 +51,7 @@ const {
 const { selectPlayerExecutable } = require('./playerExecutableSelector');
 const { MpcHcStatusClient } = require('./mpcHcStatusClient');
 const { MpcHcPlaybackTracker } = require('./mpcHcPlaybackTracker');
+const { findAvailableMpcHcPort } = require('./mpcHcPortAllocator');
 const { PlaybackProgressStore } = require('./playbackProgressStore');
 const { openDownloadLocation } = require('./fileExplorerLauncher');
 const { DownloadRecordStore, recoverInterruptedDownloadRecords } = require('./downloadRecordStore');
@@ -1902,12 +1903,18 @@ app.post('/play', async (request, response) => {
     }
 
     try {
-        const launchResult = await launchMediaFile(record.localPath, backendSettings.player.executablePath);
+        const progressTrackingEnabled = backendSettings.player.progressTracking.enabled;
+        const telemetryPort = progressTrackingEnabled ?
+            await findAvailableMpcHcPort(backendSettings.player.progressTracking.port)
+            : null;
+        const launchResult = await launchMediaFile(record.localPath, backendSettings.player.executablePath, {
+            mpcHcWebPort: telemetryPort
+        });
         let playbackSession = null;
-        if (backendSettings.player.progressTracking.enabled) {
+        if (progressTrackingEnabled) {
             try {
                 playbackSession = mpcHcPlaybackTracker.start(record, {
-                    port: backendSettings.player.progressTracking.port
+                    port: telemetryPort
                 });
             } catch (trackingError) {
                 console.warn(`Could not start playback tracking for ${record.id}: ${trackingError.message || 'unknown error'}`);
@@ -1919,10 +1926,10 @@ app.post('/play', async (request, response) => {
             localPath: launchResult.localPath,
             launched: true,
             playback: {
-                enabled: backendSettings.player.progressTracking.enabled,
+                enabled: progressTrackingEnabled,
                 sessionId: playbackSession?.id ?? null,
                 state: playbackSession ? 'waiting_for_player' :
-                    backendSettings.player.progressTracking.enabled ? 'unavailable' : 'disabled'
+                    progressTrackingEnabled ? 'unavailable' : 'disabled'
             }
         });
     } catch (error) {
@@ -1963,6 +1970,20 @@ app.get('/playback/progress', requireTrustedLocalOrigin, (request, response) => 
         player: record.player
     }));
     response.json({ records });
+});
+
+app.delete('/playback/progress', requireTrustedLocalOrigin, async (_request, response) => {
+    try {
+        mpcHcPlaybackTracker.stopAll('progress_cleared');
+        await playbackProgressStore.clear();
+        response.json({ ok: true, records: [] });
+    } catch (error) {
+        response.status(500).json({
+            ok: false,
+            errorCode: 'PLAYBACK_PROGRESS_CLEAR_FAILED',
+            error: error?.message || 'Could not clear local playback progress'
+        });
+    }
 });
 
 const shutdown = async (signal) => {

@@ -21,6 +21,8 @@ const getConfiguredPlayerPath = (savedPlayerPath = null) => {
     return typeof configuredPath === 'string' && configuredPath.trim().length > 0 ? configuredPath.trim() : null;
 };
 
+const isMpcHcExecutable = (playerPath) => /^mpc-hc(?:64)?\.exe$/i.test(path.basename(playerPath || ''));
+
 const validatePlayerExecutable = async (playerPath) => {
     await requireRegularFile(playerPath, {
         invalidCode: 'PLAYER_PATH_INVALID',
@@ -51,9 +53,12 @@ const requireRegularFile = async (filePath, options) => {
     }
 };
 
-const spawnPlayer = (playerPath, localPath) => {
+const spawnPlayer = (playerPath, localPath, { mpcHcWebPort = null } = {}) => {
     return new Promise((resolve, reject) => {
-        const childProcess = spawn(playerPath, [localPath], {
+        const argumentsList = isMpcHcExecutable(playerPath) && Number.isSafeInteger(mpcHcWebPort) ?
+            [localPath, '/webport', String(mpcHcWebPort)]
+            : [localPath];
+        const childProcess = spawn(playerPath, argumentsList, {
             detached: true,
             shell: false,
             stdio: 'ignore',
@@ -74,7 +79,7 @@ const spawnPlayer = (playerPath, localPath) => {
     });
 };
 
-const launchMediaFile = async (localPath, savedPlayerPath = null) => {
+const launchMediaFile = async (localPath, savedPlayerPath = null, options = {}) => {
     const playerPath = getConfiguredPlayerPath(savedPlayerPath);
     if (!playerPath) {
         throw new PlayerLaunchError(
@@ -90,7 +95,7 @@ const launchMediaFile = async (localPath, savedPlayerPath = null) => {
         missingCode: 'MEDIA_FILE_NOT_FOUND',
         missingMessage: `The downloaded file was not found at ${localPath}.`
     });
-    await spawnPlayer(playerPath, localPath);
+    await spawnPlayer(playerPath, localPath, options);
 
     return {
         launched: true,
@@ -102,6 +107,7 @@ module.exports = {
     PLAYER_PATH_ENV,
     PlayerLaunchError,
     getConfiguredPlayerPath,
+    isMpcHcExecutable,
     validatePlayerExecutable,
     launchMediaFile
 };

@@ -88,6 +88,16 @@ describe('playbackProgressStore', () => {
         }));
     });
 
+    test('clears only the persisted playback progress records', async () => {
+        const store = new PlaybackProgressStore({ filePath, debounceMs: 1 });
+        await store.initialize();
+        store.upsert(createProgress());
+        await store.clear();
+
+        expect(store.list()).toEqual([]);
+        expect(await readPlaybackProgress(filePath)).toEqual([]);
+    });
+
     test('rejects corrupt or unsupported documents instead of overwriting them', async () => {
         fs.mkdirSync(path.dirname(filePath), { recursive: true });
         fs.writeFileSync(filePath, '{broken', 'utf8');

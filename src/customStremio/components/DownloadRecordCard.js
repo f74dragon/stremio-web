@@ -119,6 +119,7 @@ const DownloadRecordCard = ({
     variant = 'compact',
     action,
     actionError,
+    playbackProgress,
     onPause,
     onResume,
     onCancel,
@@ -151,10 +152,9 @@ const DownloadRecordCard = ({
     const canDeleteMedia = recordId && MEDIA_DELETABLE_STATUSES.has(status) && typeof onDeleteMedia === 'function';
     const isPartialMedia = status !== 'completed';
     const localDataSize = formatBytes(isPartialMedia ? record?.bytesDownloaded : record?.bytesTotal ?? record?.bytesDownloaded);
-    const playTitle = t('CUSTOM_DOWNLOAD_PLAY_TITLE', {
-        defaultValue: 'Play {{title}} in MPC-HC',
-        title: labels.title
-    });
+    const playTitle = playbackProgress ?
+        t('CUSTOM_DOWNLOAD_CONTINUE_TITLE', { defaultValue: 'Continue {{title}} in MPC-HC', title: labels.title })
+        : t('CUSTOM_DOWNLOAD_PLAY_TITLE', { defaultValue: 'Play {{title}} in MPC-HC', title: labels.title });
 
     React.useEffect(() => {
         setConfirmingMediaDelete(false);
@@ -202,6 +202,19 @@ const DownloadRecordCard = ({
             <div className={styles['progress-track']} aria-hidden={'true'}>
                 <div className={styles['progress-value']} style={{ width: `${progress.value}%` }} />
             </div>
+            {
+                playbackProgress ?
+                    <div className={styles['playback-progress']}>
+                        <div className={styles['playback-progress-label']}>
+                            <span>{t('CUSTOM_DOWNLOAD_PLAYBACK_PROGRESS', { defaultValue: 'Playback {{progress}}%', progress: playbackProgress.percent })}</span>
+                            {playbackProgress.positionLabel && playbackProgress.durationLabel ? <span>{playbackProgress.positionLabel} / {playbackProgress.durationLabel}</span> : null}
+                        </div>
+                        <div className={styles['playback-progress-track']} aria-hidden={'true'}>
+                            <div className={styles['playback-progress-value']} style={{ width: `${playbackProgress.percent}%` }} />
+                        </div>
+                    </div>
+                    : null
+            }
             {record?.error ? <div className={styles['record-error']}>{record.error}</div> : null}
             {
                 variant === 'library' ?
@@ -382,7 +395,7 @@ const DownloadRecordCard = ({
                                     {action === 'play' ?
                                         t('CUSTOM_DOWNLOAD_OPENING', { defaultValue: 'Opening...' })
                                         :
-                                        t('CUSTOM_DOWNLOAD_PLAY', { defaultValue: 'Play' })}
+                                        playbackProgress ? t('CUSTOM_DOWNLOAD_CONTINUE', { defaultValue: 'Continue' }) : t('CUSTOM_DOWNLOAD_PLAY', { defaultValue: 'Play' })}
                                 </Button>
                                 :
                                 null
@@ -462,6 +475,11 @@ DownloadRecordCard.propTypes = {
     variant: PropTypes.oneOf(['compact', 'library']),
     action: PropTypes.oneOf(['queue', 'pause', 'resume', 'cancel', 'retry', 'play', 'location', 'remove', 'deleteMedia']),
     actionError: PropTypes.string,
+    playbackProgress: PropTypes.shape({
+        percent: PropTypes.number,
+        positionLabel: PropTypes.string,
+        durationLabel: PropTypes.string
+    }),
     onPause: PropTypes.func,
     onResume: PropTypes.func,
     onCancel: PropTypes.func,

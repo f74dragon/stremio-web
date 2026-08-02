@@ -62,7 +62,7 @@ Notes:
 - `7. Add title-specific downloads panel`: Completed for the planned panel scope (`Milestones 7A-7B`; later shared file-management actions remain tracked under the download manager)
 - `8. Add global downloads page`: In progress (`Milestones 8A-8C.2` implemented)
 - `9. Add MPC-HC launch support`: Completed for the planned scope (`Milestones 9A-9C`; panel playback, stream-row playback, and persistent in-app player selection implemented)
-- `10. Add watched/unwatched integration`: In progress (`Milestones 10A-10B` mapped existing behavior and implemented opt-in MPC-HC telemetry plus persistent local playback progress; watched synchronization and Continue Watching UI remain)
+- `10. Add watched/unwatched integration`: In progress (`Milestones 10A-10C.1` mapped existing behavior, added opt-in MPC-HC telemetry/persistent local progress, and surfaced safe local Continue playback UI; watched synchronization remains)
 - `11. Package as Windows app`: Not started
 
 ## Agent Rules
@@ -78,18 +78,25 @@ Notes:
 
 ## Next Recommended Step
 
-Live-test Milestone 10B with MPC-HC's Web Interface and localhost-only access enabled. Confirm connection testing, exact-file progress persistence, native MPC-HC resume, and graceful player/backend shutdown behavior before beginning Milestone 10C watched-state synchronization and Continue Watching UI.
+Live-test Milestone 10C.1: open a partially watched completed movie and episode from Downloads, confirm the playback percentage/time and **Continue** action appear, then confirm MPC-HC retains native resume. Next: Milestone 10C.2 watched/unwatched synchronization only after defining and testing completion thresholds.
 
 ## Remaining Tracked Work
 
 - Archive-wide Download History pagination/indexing: current History search and sorting cover the newest 1,000 lifecycle events returned by the bounded read API. Add cursor pagination or backend archive aggregation before describing search as covering an arbitrarily large permanent history. Date-range controls can join that scaling pass.
-- Live validation of MPC-HC playback telemetry, followed by watched/unwatched synchronization and real **Continue Watching**, next-episode behavior, and show-card progress.
+- Watched/unwatched synchronization, home-screen Continue Watching, next-episode behavior, and near-end completion rules. Local Download-page Continue is implemented; it intentionally does not write Stremio watched state.
 - Filesystem discovery for media that exists without a current record, plus metadata/artwork backfill for legacy persisted records.
 - Availability-history management UI, including an explicit clear-history action; current cached history remains intentionally retained by default.
 - Explicit send-to-debrid behavior remains separate from cache checking and ordinary Stremio-link downloads.
 - Windows application packaging after the local backend, download lifecycle, and playback integration are stable.
 
 The milestone findings below are chronological implementation records. Older sections may describe a feature as deferred or unavailable at that historical point even when a later milestone subsequently implemented it; the **Current Status**, **Next Recommended Step**, and **Remaining Tracked Work** sections above are authoritative for present planning.
+
+## Milestone 10C.1 Findings: Local Playback Progress and Continue UI
+
+- Downloads now polls the sanitized local playback-progress endpoint in the background without clearing existing results if the backend or MPC-HC is temporarily unavailable.
+- A completed movie or episode with verified incomplete MPC-HC progress shows a separate playback bar, percentage, and elapsed/duration time. The existing download-progress bar remains strictly download-related.
+- Individual file actions change from **Play** to **Continue** when local progress exists. Movie tiles/details select the most recently played incomplete completed copy; episodes retain their own progress and action.
+- This is presentation only: it does not declare content watched, write to Stremio core/account state, force a start position, or change MPC-HC native resume behavior. Records not launched through the local backend remain intentionally untracked.
 
 ## Milestone 10B Findings: MPC-HC Telemetry and Persistent Playback Progress
 

@@ -5,12 +5,14 @@ const { useTranslation } = require('react-i18next');
 const { default: Icon } = require('@stremio/stremio-icons/react');
 const { Image } = require('stremio/components');
 const { getDownloadActivitySummary } = require('../downloadRecordPresentation');
+const { findMostRecentPlaybackRecord, getPlaybackProgressForRecord } = require('../playbackProgressPresentation');
 const styles = require('./DownloadMediaGroup.less');
 
 const DownloadMediaGroup = ({
     group,
     actionStates,
     actionErrors,
+    playbackProgressByDownloadId,
     onPlay,
     onOpen,
     selectionMode = false,
@@ -23,8 +25,9 @@ const DownloadMediaGroup = ({
 }) => {
     const { t } = useTranslation();
     const isMovie = group.type === 'movie';
-    const playableRecord = group.latestCompletedRecord;
+    const playableRecord = findMostRecentPlaybackRecord(group.records, playbackProgressByDownloadId) || group.latestCompletedRecord;
     const playableRecordId = playableRecord?.id;
+    const playbackProgress = getPlaybackProgressForRecord(playableRecord, playbackProgressByDownloadId);
     const playAction = playableRecordId ? actionStates[playableRecordId] : null;
     const playActionInProgress = typeof playAction === 'string';
     const playError = playableRecordId ? actionErrors[playableRecordId] : null;
@@ -35,7 +38,9 @@ const DownloadMediaGroup = ({
         defaultValue: group.episodeCount === 1 ? '{{count}} downloaded episode' : '{{count}} downloaded episodes',
         count: group.episodeCount
     });
-    const playTitle = t('CUSTOM_DOWNLOAD_PLAY_TITLE', { defaultValue: 'Play {{title}} in MPC-HC', title: group.title });
+    const playTitle = playbackProgress ?
+        t('CUSTOM_DOWNLOAD_CONTINUE_TITLE', { defaultValue: 'Continue {{title}} in MPC-HC', title: group.title })
+        : t('CUSTOM_DOWNLOAD_PLAY_TITLE', { defaultValue: 'Play {{title}} in MPC-HC', title: group.title });
 
     const handlePlay = (event) => {
         event.preventDefault();
@@ -156,6 +161,7 @@ DownloadMediaGroup.propTypes = {
     }).isRequired,
     actionStates: PropTypes.object.isRequired,
     actionErrors: PropTypes.object.isRequired,
+    playbackProgressByDownloadId: PropTypes.object,
     onPlay: PropTypes.func,
     onOpen: PropTypes.func,
     selectionMode: PropTypes.bool,

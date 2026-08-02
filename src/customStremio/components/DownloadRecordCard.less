@@ -139,6 +139,44 @@
     transition: width 0.3s ease;
 }
 
+.playback-progress {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    padding: 0.5rem 0.6rem;
+    border: 1px solid rgba(160, 138, 255, 0.22);
+    border-radius: calc(var(--border-radius) * 0.65);
+    background: rgba(111, 81, 235, 0.1);
+}
+
+.playback-progress-label {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.65rem;
+    font-size: 0.73rem;
+    font-weight: 600;
+    color: rgba(238, 234, 255, 0.94);
+
+    > :last-child {
+        font-variant-numeric: tabular-nums;
+        opacity: 0.72;
+    }
+}
+
+.playback-progress-track {
+    height: 0.22rem;
+    overflow: hidden;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.13);
+}
+
+.playback-progress-value {
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, #a799ff, #e2d4ff);
+    transition: width 0.3s ease;
+}
+
 .record-path,
 .record-created,
 .record-error {

@@ -134,7 +134,7 @@ const writePlaybackProgress = async (filePath, records) => {
         await fs.promises.writeFile(temporaryPath, `${JSON.stringify(document, null, 2)}\n`, 'utf8');
         await fs.promises.rename(temporaryPath, filePath);
     } catch (error) {
-        await fs.promises.rm(temporaryPath, { force: true }).catch(() => {});
+        await fs.promises.rm(temporaryPath, { force: true }).catch(() => undefined);
         throw error;
     }
     return document.records;
@@ -177,6 +177,20 @@ class PlaybackProgressStore {
         this.records.set(normalized.contentKey, normalized);
         this.schedule();
         return normalized;
+    }
+
+    async clear() {
+        if (this.timer !== null) {
+            clearTimeout(this.timer);
+            this.timer = null;
+        }
+        if (this.writePromise !== null) {
+            await this.writePromise;
+        }
+        this.records.clear();
+        this.writePending = true;
+        await this.flush();
+        return [];
     }
 
     schedule() {
