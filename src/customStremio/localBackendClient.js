@@ -232,11 +232,22 @@ const listDownloads = async (metaId) => {
     return requestJson(path);
 };
 
-const listDownloadHistory = async (limit) => {
-    if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1)) {
+const listDownloadHistory = async (options) => {
+    const normalized = Number.isSafeInteger(options) ? { limit: options } : (options || {});
+    if (normalized.limit !== undefined && (!Number.isSafeInteger(normalized.limit) || normalized.limit < 1)) {
         throw new Error('listDownloadHistory limit must be a positive integer');
     }
-    return requestJson(limit === undefined ? '/downloads/history' : `/downloads/history?limit=${limit}`);
+    if (options !== undefined && !Number.isSafeInteger(options) && (!options || typeof options !== 'object' || Array.isArray(options))) {
+        throw new Error('listDownloadHistory options must be an object');
+    }
+    const params = new URLSearchParams();
+    ['limit', 'cursor', 'from', 'to'].forEach((key) => {
+        if (normalized[key] !== undefined && normalized[key] !== null && String(normalized[key]).length > 0) {
+            params.set(key, String(normalized[key]));
+        }
+    });
+    const query = params.toString();
+    return requestJson(`/downloads/history${query ? `?${query}` : ''}`);
 };
 
 const requireDownloadIdValue = (id, functionName) => {

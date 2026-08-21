@@ -764,7 +764,7 @@ const DownloadManagerSettingsPanel = ({ onSettingsChange }) => {
                         />
                         <span className={styles['progress-checkbox']} aria-hidden={'true'} />
                         <span>{t('CUSTOM_DOWNLOAD_MANAGER_MPC_WATCH_SYNC', {
-                            defaultValue: 'Add downloaded movies to my Stremio library and mark watched after verified 90% playback'
+                            defaultValue: 'Show verified MPC-HC resume progress on Home and sync completed movies after verified 90% playback'
                         })}</span>
                     </label>
                     <div className={styles['progress-actions']}>

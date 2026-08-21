@@ -2,6 +2,7 @@
 
 const {
     formatPlaybackTime,
+    formatRemainingPlaybackTime,
     getPlaybackProgressForRecord,
     findMostRecentPlaybackRecord
 } = require('../src/customStremio/playbackProgressPresentation');
@@ -13,12 +14,24 @@ describe('playbackProgressPresentation', () => {
         expect(formatPlaybackTime(-1)).toBeNull();
     });
 
+    test('formats remaining time only from a valid elapsed and duration pair', () => {
+        expect(formatRemainingPlaybackTime(3_055_757, 6_314_815)).toBe('54:19');
+        expect(formatRemainingPlaybackTime(7_000, 6_000)).toBeNull();
+        expect(formatRemainingPlaybackTime(null, 6_000)).toBeNull();
+        expect(formatRemainingPlaybackTime(undefined, 6_000)).toBeNull();
+    });
+
     test('uses only incomplete, positive progress for a completed download record', () => {
         const progress = getPlaybackProgressForRecord({ id: 'download-1', status: 'completed' }, {
             'download-1': { progress: 0.4839, positionMs: 3_055_757, durationMs: 6_314_815 }
         });
 
-        expect(progress).toMatchObject({ percent: 48, positionLabel: '50:55', durationLabel: '1:45:14' });
+        expect(progress).toMatchObject({
+            percent: 48,
+            positionLabel: '50:55',
+            durationLabel: '1:45:14',
+            remainingLabel: '54:19'
+        });
         expect(getPlaybackProgressForRecord({ id: 'download-2', status: 'completed' }, {
             'download-2': { progress: 1, positionMs: 1, durationMs: 1 }
         })).toBeNull();

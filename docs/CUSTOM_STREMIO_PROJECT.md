@@ -60,9 +60,9 @@ Notes:
 - `5. Create local backend prototype`: Completed and superseded by the persistent local download backend
 - `6. Implement real download manager`: In progress (`Milestones 6A-6O.2` real downloads, persistence, retry/resume, FIFO scheduling, queue controls, concurrency settings, hybrid provider availability, provider-aware download safety, resolver HEAD fallback, safe local-media deletion, bulk selection/deletion, permanent history persistence/browsing, library search/sorting, and automatic multi-episode source selection implemented)
 - `7. Add title-specific downloads panel`: Completed for the planned panel scope (`Milestones 7A-7B`; later shared file-management actions remain tracked under the download manager)
-- `8. Add global downloads page`: In progress (`Milestones 8A-8C.2` implemented)
+- `8. Add global downloads page`: In progress (`Milestones 8A-8C.3` implemented, including archive-wide cursor pagination and date filtering)
 - `9. Add MPC-HC launch support`: Completed for the planned scope (`Milestones 9A-9C`; panel playback, stream-row playback, and persistent in-app player selection implemented)
-- `10. Add watched/unwatched integration`: In progress (`Milestones 10A-10C.2` complete; movie watched sync is live-verified)
+- `10. Add watched/unwatched integration`: In progress (`Milestones 10A-10D` complete; movie watched sync is live-verified and opt-in local Home resume integration is implemented)
 - `11. Package as Windows app`: Not started
 
 ## Agent Rules
@@ -78,14 +78,34 @@ Notes:
 
 ## Next Recommended Step
 
-Design the next Continue Watching pass: synchronize verified local MPC-HC playback into Stremio's home-screen Continue Watching state, then surface the same resume progress clearly on Downloads posters.
+Add a narrow supported stremio-core context action for verified external playback progress, or adopt an upstream equivalent that accepts identity, position, and duration without loading the singleton Player/MetaDetails models. Use that action for true account-backed Continue Watching plus canonical episode/season and next-episode synchronization.
 
 ## Remaining Tracked Work
 
-- Archive-wide Download History pagination/indexing: current History search and sorting cover the newest 1,000 lifecycle events returned by the bounded read API. Add cursor pagination or backend archive aggregation before describing search as covering an arbitrarily large permanent history. Date-range controls can join that scaling pass.
-- Synchronize verified local MPC-HC playback position into Stremio's home-screen Continue Watching state. This must preserve Stremio's own progress semantics and remain opt-in/safe when the local backend is offline.
-- Add a Continue Watching-style resume indicator to Download-page posters: visible progress and remaining/elapsed context for partially watched local movies and episodes, without confusing it with download progress.
-- Episode/season watched synchronization, next-episode behavior, and further near-end rule refinement remain. Local Download-page Continue is implemented; movie watched sync is an explicit opt-in.
+- True account-backed Continue Watching synchronization remains blocked by the pinned `@stremio/stremio-core-web` 0.58.0 action surface. The local Home row is implemented safely, but core exposes no supported global action for writing external position and duration.
+- Episode/season watched synchronization and canonical next-episode behavior require the same supported core path. Do not infer canonical episode order only from downloaded files or background-load the singleton Player/MetaDetails models.
+
+## Milestone 10D Findings: Local Home Resume Integration and Core Boundary
+
+- When the existing explicit MPC-HC watched-sync option is enabled, verified partial local playback is merged into the existing Home Continue Watching presentation without mutating Stremio core or account state.
+- Local entries require a completed matching download, exact download/meta/type/video identity, a positive finite position, and a valid duration. Backend-offline and disabled states fail closed.
+- A matching native Continue Watching item is replaced in presentation rather than duplicated. Near-end series observations advance only to the next completed local episode for presentation; this is intentionally not claimed as canonical Stremio next-episode state.
+- Local Home items use a dedicated presentation path and route to Downloads. They do not dispatch native rewind, watched, removal, Player, or MetaDetails actions.
+- Background `Player`/`MetaDetails` loading was rejected: both are singleton models, and hidden loading can clobber active state, fetch addons, emit analytics/Trakt effects, race async state, and apply destructive near-end unload semantics.
+- The pinned core exposes no context action for arbitrary playback position/duration. True synchronization now has a proven minimal dependency: a narrow supported context action that persists verified external progress through core's normal library update path.
+- Existing movie watched synchronization now awaits both bridge dispatches before committing its deduplication ledger; rejected actions remain retryable.
+
+## Milestone 8C.3 Findings: Archive-wide History Pagination and Date Ranges
+
+- `GET /downloads/history` retains its legacy response fields and adds snapshot-stable opaque cursor pagination, `filteredTotal`, `hasMore`, and `nextCursor`.
+- Inclusive `from` and `to` ISO date-time filters are validated and bound to the cursor. Invalid ranges, mismatched/stale cursors, and malformed dates return a structured `400` response.
+- Pagination remains stable when new events are appended during traversal, avoiding duplicates, skips, and changing snapshot totals.
+- The frontend traverses the archive for full search/sort coverage, retains efficient first-page polling after the initial load, and exposes date-range controls in Download History.
+
+## Milestone 10C.3 Findings: Downloads Poster Resume Presentation
+
+- Partially watched Downloads posters now show a gold Continue Watching panel that is visually distinct from purple download state.
+- The panel includes watched percentage, episode identity, elapsed time, remaining time, and a playback-only progress bar; selection mode suppresses it.
 
 ## Milestone 10C.2 Implementation: Movie Watched Synchronization
 

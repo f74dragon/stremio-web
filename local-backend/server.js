@@ -56,7 +56,11 @@ const { findAvailableMpcHcPort } = require('./mpcHcPortAllocator');
 const { PlaybackProgressStore } = require('./playbackProgressStore');
 const { openDownloadLocation } = require('./fileExplorerLauncher');
 const { DownloadRecordStore, recoverInterruptedDownloadRecords } = require('./downloadRecordStore');
-const { STATUS_EVENT_TYPES, DownloadHistoryStore } = require('./downloadHistoryStore');
+const {
+    STATUS_EVENT_TYPES,
+    DownloadHistoryQueryError,
+    DownloadHistoryStore
+} = require('./downloadHistoryStore');
 
 const HOST = '127.0.0.1';
 const PORT = Number(process.env.PORT) || 5577;
@@ -1295,8 +1299,21 @@ app.get('/downloads/history', async (request, response) => {
     }
 
     try {
-        response.json(await historyStore.list({ limit: requestedLimit }));
+        response.json(await historyStore.list({
+            limit: requestedLimit,
+            cursor: request.query.cursor,
+            from: request.query.from,
+            to: request.query.to
+        }));
     } catch (error) {
+        if (error instanceof DownloadHistoryQueryError) {
+            response.status(400).json({
+                ok: false,
+                errorCode: error.code,
+                error: error.message
+            });
+            return;
+        }
         console.error('Could not read download history:', error);
         response.status(500).json({
             ok: false,

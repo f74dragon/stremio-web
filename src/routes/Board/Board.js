@@ -1,6 +1,7 @@
 // Copyright (C) 2017-2023 Smart code 203358507
 
 const React = require('react');
+const PropTypes = require('prop-types');
 const classnames = require('classnames');
 const debounce = require('lodash.debounce');
 const useTranslate = require('stremio/common/useTranslate');
@@ -8,15 +9,56 @@ const { useStreamingServer, useNotifications, withCoreSuspender, getVisibleChild
 const { ContinueWatchingItem, EventModal, MainNavBars, MetaItem, MetaRow } = require('stremio/components');
 const useBoard = require('./useBoard');
 const useContinueWatchingPreview = require('./useContinueWatchingPreview');
+const useDownloadRecords = require('stremio/customStremio/useDownloadRecords');
+const usePlaybackProgress = require('stremio/customStremio/usePlaybackProgress');
+const { getBackendSettings } = require('stremio/customStremio/localBackendClient');
+const { mergeLocalContinueWatching } = require('stremio/customStremio/continueWatchingPresentation');
 const styles = require('./styles');
 const { default: StreamingServerWarning } = require('./StreamingServerWarning');
 
 const THRESHOLD = 5;
 
+const BoardContinueWatchingItem = ({ customStremioLocal, customStremioDownloadId, onPlayLocal, ...props }) => customStremioLocal ?
+    <MetaItem
+        {...props}
+        onPlayClick={(event) => {
+            event.preventDefault();
+            onPlayLocal?.(customStremioDownloadId);
+        }}
+    /> : <ContinueWatchingItem {...props} />;
+
+BoardContinueWatchingItem.propTypes = {
+    customStremioLocal: PropTypes.bool,
+    customStremioDownloadId: PropTypes.string,
+    onPlayLocal: PropTypes.func
+};
+
 const Board = () => {
     const t = useTranslate();
     const streamingServer = useStreamingServer();
-    const continueWatchingPreview = useContinueWatchingPreview();
+    const nativeContinueWatchingPreview = useContinueWatchingPreview();
+    const [localProgressEnabled, setLocalProgressEnabled] = React.useState(false);
+    const { items: downloadRecords, play: playDownload } = useDownloadRecords({ enabled: localProgressEnabled });
+    const { records: playbackProgressRecords } = usePlaybackProgress({ enabled: localProgressEnabled });
+    React.useEffect(() => {
+        let canceled = false;
+        getBackendSettings().then((settings) => {
+            if (!canceled) {
+                setLocalProgressEnabled(settings?.player?.progressTracking?.enabled === true &&
+                    settings?.player?.progressTracking?.watchedSyncEnabled === true);
+            }
+        }).catch(() => undefined);
+        return () => {
+            canceled = true;
+        };
+    }, []);
+    const continueWatchingPreview = React.useMemo(() => localProgressEnabled ?
+        mergeLocalContinueWatching(nativeContinueWatchingPreview, downloadRecords, playbackProgressRecords) :
+        nativeContinueWatchingPreview,
+    [downloadRecords, localProgressEnabled, nativeContinueWatchingPreview, playbackProgressRecords]);
+    const continueWatchingItemComponent = React.useCallback((props) => (
+        <BoardContinueWatchingItem {...props} onPlayLocal={playDownload} />
+    ), [playDownload]);
     const [board, loadBoardRows] = useBoard();
     const notifications = useNotifications();
     const profile = useProfile();
@@ -56,7 +98,7 @@ const Board = () => {
                                 className={classnames(styles['board-row'], styles['continue-watching-row'], 'animation-fade-in')}
                                 title={t.string('BOARD_CONTINUE_WATCHING')}
                                 catalog={continueWatchingPreview}
-                                itemComponent={ContinueWatchingItem}
+                                itemComponent={continueWatchingItemComponent}
                                 notifications={notifications}
                             />
                             :

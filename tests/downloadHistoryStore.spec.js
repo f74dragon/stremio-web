@@ -5,7 +5,9 @@ const os = require('os');
 const path = require('path');
 const {
     HISTORY_SCHEMA_VERSION,
+    MAX_HISTORY_LIMIT,
     getBaseFileName,
+    normalizeHistoryEvent,
     DownloadHistoryStore
 } = require('../local-backend/downloadHistoryStore');
 
@@ -173,10 +175,153 @@ describe('DownloadHistoryStore', () => {
 
         await expect(store.list({ limit: 2 })).resolves.toMatchObject({
             total: 3,
+            filteredTotal: 3,
+            hasMore: true,
             items: [
                 expect.objectContaining({ eventType: 'download_completed' }),
                 expect.objectContaining({ eventType: 'download_started' })
             ]
+        });
+    });
+
+    test('uses deterministic cursors to traverse more than the maximum page size', async () => {
+        const events = Array.from({ length: MAX_HISTORY_LIMIT + 5 }, (_, index) => normalizeHistoryEvent({
+            eventId: `archive-${index}`,
+            eventType: 'download_started',
+            occurredAt: now,
+            record: createRecord({ id: `dl-archive-${index}`, status: 'downloading' })
+        }));
+        fs.mkdirSync(path.dirname(historyPath), { recursive: true });
+        fs.writeFileSync(historyPath, `${events.map((event) => JSON.stringify(event)).join('\n')}\n`, 'utf8');
+
+        const store = createStore();
+        const firstPage = await store.list({ limit: MAX_HISTORY_LIMIT });
+        expect(firstPage).toMatchObject({
+            total: MAX_HISTORY_LIMIT + 5,
+            filteredTotal: MAX_HISTORY_LIMIT + 5,
+            hasMore: true
+        });
+        expect(firstPage.items).toHaveLength(MAX_HISTORY_LIMIT);
+        expect(firstPage.items[0].eventId).toBe(`archive-${MAX_HISTORY_LIMIT + 4}`);
+        expect(firstPage.items[MAX_HISTORY_LIMIT - 1].eventId).toBe('archive-5');
+
+        const secondPage = await store.list({ limit: MAX_HISTORY_LIMIT, cursor: firstPage.nextCursor });
+        expect(secondPage).toMatchObject({
+            total: MAX_HISTORY_LIMIT + 5,
+            filteredTotal: MAX_HISTORY_LIMIT + 5,
+            hasMore: false,
+            nextCursor: null
+        });
+        expect(secondPage.items.map(({ eventId }) => eventId)).toEqual([
+            'archive-4',
+            'archive-3',
+            'archive-2',
+            'archive-1',
+            'archive-0'
+        ]);
+        expect(new Set([...firstPage.items, ...secondPage.items].map(({ eventId }) => eventId))).toHaveProperty('size', MAX_HISTORY_LIMIT + 5);
+    });
+
+    test('keeps a cursor traversal on its original archive snapshot while new events append', async () => {
+        const store = createStore();
+        for (let index = 1; index <= 5; index += 1) {
+            await store.append({
+                eventId: `snapshot-${index}`,
+                eventType: 'download_started',
+                record: createRecord({ id: `dl-snapshot-${index}`, status: 'downloading' })
+            });
+        }
+
+        const firstPage = await store.list({ limit: 2 });
+        expect(firstPage.items.map(({ eventId }) => eventId)).toEqual(['snapshot-5', 'snapshot-4']);
+        await store.append({
+            eventId: 'snapshot-6',
+            eventType: 'download_completed',
+            record: createRecord({ id: 'dl-snapshot-6' })
+        });
+
+        const secondPage = await store.list({ limit: 2, cursor: firstPage.nextCursor });
+        expect(secondPage).toMatchObject({ total: 5, filteredTotal: 5, hasMore: true });
+        expect(secondPage.items.map(({ eventId }) => eventId)).toEqual(['snapshot-3', 'snapshot-2']);
+        const thirdPage = await store.list({ limit: 2, cursor: secondPage.nextCursor });
+        expect(thirdPage.items.map(({ eventId }) => eventId)).toEqual(['snapshot-1']);
+        expect(thirdPage.hasMore).toBe(false);
+
+        const refreshedFirstPage = await store.list({ limit: 2 });
+        expect(refreshedFirstPage.total).toBe(6);
+        expect(refreshedFirstPage.items[0].eventId).toBe('snapshot-6');
+    });
+
+    test('filters an inclusive ISO date range across cursor pages', async () => {
+        const store = createStore();
+        for (let day = 18; day <= 21; day += 1) {
+            await store.append({
+                eventId: `date-${day}`,
+                eventType: 'download_completed',
+                occurredAt: `2026-07-${day}T12:00:00.000Z`,
+                record: createRecord({ id: `dl-date-${day}` })
+            });
+        }
+
+        const firstPage = await store.list({
+            limit: 1,
+            from: '2026-07-19T08:00:00.000-04:00',
+            to: '2026-07-20T12:00:00.000Z'
+        });
+        expect(firstPage).toMatchObject({
+            total: 4,
+            filteredTotal: 2,
+            hasMore: true,
+            items: [expect.objectContaining({ eventId: 'date-20' })]
+        });
+
+        const secondPage = await store.list({
+            limit: 1,
+            cursor: firstPage.nextCursor,
+            from: '2026-07-19T12:00:00.000Z',
+            to: '2026-07-20T12:00:00.000Z'
+        });
+        expect(secondPage).toMatchObject({
+            total: 4,
+            filteredTotal: 2,
+            hasMore: false,
+            nextCursor: null,
+            items: [expect.objectContaining({ eventId: 'date-19' })]
+        });
+    });
+
+    test('rejects malformed dates, reversed ranges, cursors, and cursor filter changes', async () => {
+        const store = createStore();
+        await store.append({ eventType: 'download_created', record: createRecord() });
+        await store.append({ eventType: 'download_completed', record: createRecord() });
+
+        await expect(store.list({ from: '2026-02-30T12:00:00.000Z' })).rejects.toMatchObject({
+            code: 'INVALID_HISTORY_DATE'
+        });
+        await expect(store.list({ from: '2026-07-21T12:00:00.000Z', to: '2026-07-20T12:00:00.000Z' })).rejects.toMatchObject({
+            code: 'INVALID_HISTORY_DATE_RANGE'
+        });
+        await expect(store.list({ cursor: 'not-a-valid-cursor!' })).rejects.toMatchObject({
+            code: 'INVALID_HISTORY_CURSOR'
+        });
+
+        const firstPage = await store.list({ limit: 1, from: '2026-07-20T00:00:00.000Z' });
+        await expect(store.list({ limit: 1, cursor: firstPage.nextCursor })).rejects.toMatchObject({
+            code: 'HISTORY_CURSOR_FILTER_MISMATCH'
+        });
+    });
+
+    test('rejects a cursor when its archive snapshot has changed', async () => {
+        const store = createStore();
+        await store.append({ eventId: 'stale-1', eventType: 'download_created', record: createRecord() });
+        await store.append({ eventId: 'stale-2', eventType: 'download_completed', record: createRecord() });
+        const firstPage = await store.list({ limit: 1 });
+
+        const remainingLine = fs.readFileSync(historyPath, 'utf8').trim().split(/\r?\n/)[0];
+        fs.writeFileSync(historyPath, `${remainingLine}\n`, 'utf8');
+        const reloaded = createStore();
+        await expect(reloaded.list({ limit: 1, cursor: firstPage.nextCursor })).rejects.toMatchObject({
+            code: 'STALE_HISTORY_CURSOR'
         });
     });
 });

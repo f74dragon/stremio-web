@@ -47,7 +47,7 @@ const getEligibleMovieSyncs = ({ downloads, progressRecords, ledger = {} }) => {
     });
 };
 
-const syncEligibleMovies = ({ core, downloads, progressRecords, storage, sessionKeys = new Set() }) => {
+const syncEligibleMovies = async ({ core, downloads, progressRecords, storage, sessionKeys = new Set() }) => {
     if (!core?.transport || typeof core.transport.dispatch !== 'function') {
         return { synced: [], failed: [] };
     }
@@ -57,14 +57,14 @@ const syncEligibleMovies = ({ core, downloads, progressRecords, storage, session
     const synced = [];
     const failed = [];
 
-    candidates.forEach(({ contentKey, metaItem }) => {
+    for (const { contentKey, metaItem } of candidates) {
         sessionKeys.add(contentKey);
         try {
-            core.transport.dispatch({
+            await core.transport.dispatch({
                 action: 'Ctx',
                 args: { action: 'AddToLibrary', args: metaItem }
             });
-            core.transport.dispatch({
+            await core.transport.dispatch({
                 action: 'Ctx',
                 args: {
                     action: 'MetaItemMarkAsWatched',
@@ -77,7 +77,7 @@ const syncEligibleMovies = ({ core, downloads, progressRecords, storage, session
             sessionKeys.delete(contentKey);
             failed.push({ contentKey, error });
         }
-    });
+    }
 
     if (synced.length > 0) {
         writeLedger(storage, ledger);
@@ -97,7 +97,7 @@ const useMpcHcWatchedSync = ({ core, downloads, progressRecords, enabled }) => {
             progressRecords,
             storage: typeof window !== 'undefined' ? window.localStorage : null,
             sessionKeys: sessionKeysRef.current
-        });
+        }).catch(() => undefined);
     }, [core, downloads, enabled, progressRecords]);
 };
 

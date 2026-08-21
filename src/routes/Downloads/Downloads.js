@@ -39,6 +39,8 @@ const Downloads = () => {
     const [activeView, setActiveView] = React.useState('downloads');
     const [downloadSearch, setDownloadSearch] = React.useState('');
     const [historySearch, setHistorySearch] = React.useState('');
+    const [historyFrom, setHistoryFrom] = React.useState('');
+    const [historyTo, setHistoryTo] = React.useState('');
     const [downloadSort, setDownloadSort] = useLibrarySortPreference('customStremio.downloads.sort', DOWNLOAD_LIBRARY_SORTS.RECENT, DOWNLOAD_SORT_VALUES);
     const [historySort, setHistorySort] = useLibrarySortPreference('customStremio.downloadHistory.sort', HISTORY_LIBRARY_SORTS.RECENT, HISTORY_SORT_VALUES);
     const [selectedMediaKey, setSelectedMediaKey] = React.useState(null);
@@ -95,7 +97,7 @@ const Downloads = () => {
         refreshing: historyRefreshing,
         error: historyError,
         refresh: refreshHistory
-    } = useDownloadHistory({ enabled: activeView === 'history' });
+    } = useDownloadHistory({ enabled: activeView === 'history', from: historyFrom, to: historyTo });
     const groups = React.useMemo(() => groupDownloadRecords(items), [items]);
     const mediaGroups = React.useMemo(() => groupDownloadRecordsByMedia(items), [items]);
     const visibleMediaGroups = React.useMemo(() => filterAndSortDownloadMediaGroups(mediaGroups, {
@@ -303,6 +305,8 @@ const Downloads = () => {
                         <DownloadHistoryBrowser
                             groups={historyGroups}
                             searchValue={historySearch}
+                            fromValue={historyFrom}
+                            toValue={historyTo}
                             sortValue={historySort}
                             eventCount={historyEvents.length}
                             total={historyTotal}
@@ -312,6 +316,8 @@ const Downloads = () => {
                             error={historyError}
                             onRefresh={refreshHistory}
                             onSearchChange={setHistorySearch}
+                            onFromChange={setHistoryFrom}
+                            onToChange={setHistoryTo}
                             onSortChange={setHistorySort}
                             onNavigate={() => updateScrollPosition(0)}
                         />

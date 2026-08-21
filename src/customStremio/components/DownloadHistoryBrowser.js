@@ -251,6 +251,8 @@ HistoryDetails.propTypes = {
 const DownloadHistoryBrowser = ({
     groups,
     searchValue,
+    fromValue,
+    toValue,
     sortValue,
     eventCount,
     total,
@@ -260,6 +262,8 @@ const DownloadHistoryBrowser = ({
     error,
     onRefresh,
     onSearchChange,
+    onFromChange,
+    onToChange,
     onSortChange,
     onNavigate
 }) => {
@@ -352,6 +356,20 @@ const DownloadHistoryBrowser = ({
                                 onClear={() => onSearchChange('')}
                                 onSortChange={onSortChange}
                             />
+                            <div className={styles['date-range']} aria-label={t('CUSTOM_HISTORY_DATE_RANGE', { defaultValue: 'History date range' })}>
+                                <label>
+                                    <span>{t('CUSTOM_HISTORY_FROM_DATE', { defaultValue: 'From' })}</span>
+                                    <input type={'date'} value={fromValue} max={toValue || undefined} onChange={(event) => onFromChange(event.target.value)} />
+                                </label>
+                                <label>
+                                    <span>{t('CUSTOM_HISTORY_TO_DATE', { defaultValue: 'To' })}</span>
+                                    <input type={'date'} value={toValue} min={fromValue || undefined} onChange={(event) => onToChange(event.target.value)} />
+                                </label>
+                                {fromValue || toValue ? <Button onClick={() => {
+                                    onFromChange('');
+                                    onToChange('');
+                                }}>{t('CUSTOM_HISTORY_CLEAR_DATES', { defaultValue: 'Clear dates' })}</Button> : null}
+                            </div>
                             <div className={styles['filter-bar']} role={'tablist'} aria-label={t('CUSTOM_HISTORY_FILTERS', { defaultValue: 'History filters' })}>
                                 {filters.filter(({ key }) => key === HISTORY_FILTERS.ALL || filterCounts[key] > 0).map(({ key, label }) => (
                                     <button
@@ -413,6 +431,8 @@ const DownloadHistoryBrowser = ({
 DownloadHistoryBrowser.propTypes = {
     groups: PropTypes.arrayOf(PropTypes.object).isRequired,
     searchValue: PropTypes.string.isRequired,
+    fromValue: PropTypes.string.isRequired,
+    toValue: PropTypes.string.isRequired,
     sortValue: PropTypes.string.isRequired,
     eventCount: PropTypes.number.isRequired,
     total: PropTypes.number.isRequired,
@@ -422,6 +442,8 @@ DownloadHistoryBrowser.propTypes = {
     error: PropTypes.string,
     onRefresh: PropTypes.func,
     onSearchChange: PropTypes.func.isRequired,
+    onFromChange: PropTypes.func.isRequired,
+    onToChange: PropTypes.func.isRequired,
     onSortChange: PropTypes.func.isRequired,
     onNavigate: PropTypes.func
 };

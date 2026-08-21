@@ -19,6 +19,20 @@ const formatPlaybackTime = (value) => {
         `${minutes}:${String(remainingSeconds).padStart(2, '0')}`;
 };
 
+const formatRemainingPlaybackTime = (positionMs, durationMs) => {
+    if (positionMs === null || durationMs === null) {
+        return null;
+    }
+
+    const position = Number(positionMs);
+    const duration = Number(durationMs);
+    if (!Number.isFinite(position) || !Number.isFinite(duration) || position < 0 || duration < position) {
+        return null;
+    }
+
+    return formatPlaybackTime(duration - position);
+};
+
 const getPlaybackProgressForRecord = (record, progressByDownloadId) => {
     if (record?.status !== 'completed') {
         return null;
@@ -35,7 +49,8 @@ const getPlaybackProgressForRecord = (record, progressByDownloadId) => {
         value,
         percent: Math.round(value * 100),
         positionLabel: formatPlaybackTime(progress.positionMs),
-        durationLabel: formatPlaybackTime(progress.durationMs)
+        durationLabel: formatPlaybackTime(progress.durationMs),
+        remainingLabel: formatRemainingPlaybackTime(progress.positionMs, progress.durationMs)
     };
 };
 
@@ -53,6 +68,7 @@ const findMostRecentPlaybackRecord = (records, progressByDownloadId) => {
 
 module.exports = {
     formatPlaybackTime,
+    formatRemainingPlaybackTime,
     getPlaybackProgressForRecord,
     findMostRecentPlaybackRecord
 };

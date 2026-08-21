@@ -112,6 +112,17 @@ describe('localBackendClient settings', () => {
         expect(global.fetch).toHaveBeenCalledWith(`${LOCAL_BACKEND_BASE_URL}/downloads/history?limit=50`, {
             headers: {}
         });
+        global.fetch.mockResolvedValue(createJsonResponse(responseBody));
+        await listDownloadHistory({
+            limit: 25,
+            cursor: 'next cursor',
+            from: '2026-08-01T00:00:00.000Z',
+            to: '2026-08-20T23:59:59.999Z'
+        });
+        expect(global.fetch).toHaveBeenLastCalledWith(
+            `${LOCAL_BACKEND_BASE_URL}/downloads/history?limit=25&cursor=next+cursor&from=2026-08-01T00%3A00%3A00.000Z&to=2026-08-20T23%3A59%3A59.999Z`,
+            { headers: {} }
+        );
         await expect(listDownloadHistory(0)).rejects.toThrow('listDownloadHistory limit must be a positive integer');
     });
 

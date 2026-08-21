@@ -50,10 +50,10 @@ describe('MPC-HC watched synchronization', () => {
         expect(getEligibleMovieSyncs({ downloads: [{ ...download, stremioMetaItem: { ...metaItem, id: 'wrong' } }], progressRecords: [progress] })).toHaveLength(0);
     });
 
-    test('uses native Stremio actions once and persists a deduplication ledger', () => {
-        const dispatch = jest.fn();
+    test('uses native Stremio actions once and persists a deduplication ledger', async () => {
+        const dispatch = jest.fn().mockResolvedValue(undefined);
         const storage = createStorage();
-        const first = syncEligibleMovies({
+        const first = await syncEligibleMovies({
             core: { transport: { dispatch } },
             downloads: [download],
             progressRecords: [progress],
@@ -74,12 +74,33 @@ describe('MPC-HC watched synchronization', () => {
         });
         expect(JSON.parse(storage.getItem(WATCHED_SYNC_LEDGER_KEY))).toHaveProperty('movie:tt123');
 
-        syncEligibleMovies({
+        await syncEligibleMovies({
             core: { transport: { dispatch } },
             downloads: [download],
             progressRecords: [progress],
             storage
         });
         expect(dispatch).toHaveBeenCalledTimes(2);
+    });
+
+    test('does not commit the ledger when a bridge action rejects and remains retryable', async () => {
+        const storage = createStorage();
+        const sessionKeys = new Set();
+        const dispatch = jest.fn()
+            .mockResolvedValueOnce(undefined)
+            .mockRejectedValueOnce(new Error('bridge failed'));
+
+        const result = await syncEligibleMovies({
+            core: { transport: { dispatch } },
+            downloads: [download],
+            progressRecords: [progress],
+            storage,
+            sessionKeys
+        });
+
+        expect(result.synced).toEqual([]);
+        expect(result.failed).toHaveLength(1);
+        expect(storage.getItem(WATCHED_SYNC_LEDGER_KEY)).toBeNull();
+        expect(sessionKeys.has(progress.contentKey)).toBe(false);
     });
 });

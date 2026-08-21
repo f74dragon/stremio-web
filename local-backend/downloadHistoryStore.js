@@ -7,7 +7,10 @@ const HISTORY_SCHEMA_VERSION = 1;
 const HISTORY_FILE_NAME = 'download-history.ndjson';
 const DEFAULT_HISTORY_LIMIT = 200;
 const MAX_HISTORY_LIMIT = 1000;
+const HISTORY_CURSOR_VERSION = 1;
+const MAX_HISTORY_CURSOR_LENGTH = 1024;
 const MAX_TEXT_LENGTH = 512;
+const ISO_DATE_TIME_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?(Z|[+-]\d{2}:\d{2})$/;
 const VALID_EVENT_TYPES = new Set([
     'download_created',
     'download_started',
@@ -31,6 +34,14 @@ const STATUS_EVENT_TYPES = Object.freeze({
     failed: 'download_failed',
     canceled: 'download_canceled'
 });
+
+class DownloadHistoryQueryError extends Error {
+    constructor(message, code = 'INVALID_DOWNLOAD_HISTORY_QUERY') {
+        super(message);
+        this.name = 'DownloadHistoryQueryError';
+        this.code = code;
+    }
+}
 
 const getDefaultHistoryPath = () => path.join(getDefaultDataDirectory(), HISTORY_FILE_NAME);
 
@@ -131,6 +142,121 @@ const normalizeIsoDate = (value, fallback = null) => {
     return Number.isFinite(parsed) ? new Date(parsed).toISOString() : fallback;
 };
 
+const isLeapYear = (year) => year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+
+const getDaysInMonth = (year, month) => {
+    const days = [31, isLeapYear(year) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    return days[month - 1] || 0;
+};
+
+const normalizeHistoryDateFilter = (value, fieldName) => {
+    if (value === undefined || value === null) {
+        return null;
+    }
+    if (typeof value !== 'string') {
+        throw new DownloadHistoryQueryError(`${fieldName} must be a valid ISO-8601 date-time`, 'INVALID_HISTORY_DATE');
+    }
+
+    const match = ISO_DATE_TIME_PATTERN.exec(value);
+    if (!match) {
+        throw new DownloadHistoryQueryError(`${fieldName} must be a valid ISO-8601 date-time`, 'INVALID_HISTORY_DATE');
+    }
+
+    const [, yearText, monthText, dayText, hourText, minuteText, secondText, , timezone] = match;
+    const year = Number(yearText);
+    const month = Number(monthText);
+    const day = Number(dayText);
+    const hour = Number(hourText);
+    const minute = Number(minuteText);
+    const second = Number(secondText);
+    if (
+        month < 1 || month > 12 ||
+        day < 1 || day > getDaysInMonth(year, month) ||
+        hour > 23 || minute > 59 || second > 59
+    ) {
+        throw new DownloadHistoryQueryError(`${fieldName} must be a valid ISO-8601 date-time`, 'INVALID_HISTORY_DATE');
+    }
+    if (timezone !== 'Z') {
+        const timezoneHour = Number(timezone.slice(1, 3));
+        const timezoneMinute = Number(timezone.slice(4, 6));
+        if (timezoneHour > 14 || timezoneMinute > 59 || (timezoneHour === 14 && timezoneMinute !== 0)) {
+            throw new DownloadHistoryQueryError(`${fieldName} must be a valid ISO-8601 date-time`, 'INVALID_HISTORY_DATE');
+        }
+    }
+
+    const timestamp = Date.parse(value);
+    if (!Number.isFinite(timestamp)) {
+        throw new DownloadHistoryQueryError(`${fieldName} must be a valid ISO-8601 date-time`, 'INVALID_HISTORY_DATE');
+    }
+    return new Date(timestamp).toISOString();
+};
+
+const normalizeHistoryRange = ({ from, to } = {}) => {
+    const normalizedFrom = normalizeHistoryDateFilter(from, 'from');
+    const normalizedTo = normalizeHistoryDateFilter(to, 'to');
+    const fromTimestamp = normalizedFrom === null ? null : Date.parse(normalizedFrom);
+    const toTimestamp = normalizedTo === null ? null : Date.parse(normalizedTo);
+    if (fromTimestamp !== null && toTimestamp !== null && fromTimestamp > toTimestamp) {
+        throw new DownloadHistoryQueryError('from must be earlier than or equal to to', 'INVALID_HISTORY_DATE_RANGE');
+    }
+    return {
+        from: normalizedFrom,
+        to: normalizedTo,
+        fromTimestamp,
+        toTimestamp
+    };
+};
+
+const encodeHistoryCursor = ({ nextIndex, nextEventId, snapshotIndex, snapshotEventId, from, to }) => Buffer.from(JSON.stringify({
+    v: HISTORY_CURSOR_VERSION,
+    n: nextIndex,
+    e: nextEventId,
+    s: snapshotIndex,
+    a: snapshotEventId,
+    f: from,
+    t: to
+}), 'utf8').toString('base64url');
+
+const decodeHistoryCursor = (value) => {
+    if (
+        typeof value !== 'string' ||
+        value.length < 1 ||
+        value.length > MAX_HISTORY_CURSOR_LENGTH ||
+        !/^[a-zA-Z0-9_-]+$/.test(value)
+    ) {
+        throw new DownloadHistoryQueryError('cursor is invalid', 'INVALID_HISTORY_CURSOR');
+    }
+
+    let parsed;
+    try {
+        const decoded = Buffer.from(value, 'base64url');
+        if (decoded.toString('base64url') !== value) {
+            throw new Error('non-canonical cursor');
+        }
+        parsed = JSON.parse(decoded.toString('utf8'));
+    } catch {
+        throw new DownloadHistoryQueryError('cursor is invalid', 'INVALID_HISTORY_CURSOR');
+    }
+
+    if (
+        parsed?.v !== HISTORY_CURSOR_VERSION ||
+        !Number.isSafeInteger(parsed?.n) || parsed.n < 0 ||
+        typeof parsed?.e !== 'string' || !parsed.e || parsed.e.length > 256 ||
+        !Number.isSafeInteger(parsed?.s) || parsed.s < parsed.n ||
+        typeof parsed?.a !== 'string' || !parsed.a || parsed.a.length > 256 ||
+        !Object.prototype.hasOwnProperty.call(parsed, 'f') || (parsed.f !== null && typeof parsed.f !== 'string') ||
+        !Object.prototype.hasOwnProperty.call(parsed, 't') || (parsed.t !== null && typeof parsed.t !== 'string')
+    ) {
+        throw new DownloadHistoryQueryError('cursor is invalid', 'INVALID_HISTORY_CURSOR');
+    }
+    return parsed;
+};
+
+const isTimestampInHistoryRange = (timestamp, range) => (
+    (range.fromTimestamp === null || timestamp >= range.fromTimestamp) &&
+    (range.toTimestamp === null || timestamp <= range.toTimestamp)
+);
+
 const createHistoryDetails = (details) => ({
     previousStatus: sanitizeIdentifier(details?.previousStatus, 32),
     status: sanitizeIdentifier(details?.status, 32),
@@ -195,6 +321,7 @@ class DownloadHistoryStore {
         this.idFactory = idFactory;
         this.onWarning = onWarning;
         this.events = [];
+        this.eventTimestamps = [];
         this.eventKeys = new Set();
         this.invalidEntryCount = 0;
         this.initializationPromise = null;
@@ -213,6 +340,7 @@ class DownloadHistoryStore {
 
         const parsed = parseHistoryContents(contents, { onWarning: this.onWarning });
         this.events = parsed.events;
+        this.eventTimestamps = parsed.events.map(({ occurredAt }) => Date.parse(occurredAt));
         this.eventKeys = new Set(parsed.events.map(({ eventKey }) => eventKey).filter(Boolean));
         this.invalidEntryCount = parsed.invalidEntryCount;
 
@@ -246,6 +374,7 @@ class DownloadHistoryStore {
             await fs.promises.mkdir(path.dirname(this.filePath), { recursive: true });
             await fs.promises.appendFile(this.filePath, `${JSON.stringify(event)}\n`, 'utf8');
             this.events.push(event);
+            this.eventTimestamps.push(Date.parse(event.occurredAt));
             if (event.eventKey) {
                 this.eventKeys.add(event.eventKey);
             }
@@ -274,15 +403,68 @@ class DownloadHistoryStore {
         return added;
     }
 
-    async list({ limit = DEFAULT_HISTORY_LIMIT } = {}) {
+    async list({ limit = DEFAULT_HISTORY_LIMIT, cursor, from, to } = {}) {
         await this.initialize();
         await this.operationQueue;
         const normalizedLimit = Math.min(MAX_HISTORY_LIMIT, Math.max(1, Number.isSafeInteger(Number(limit)) ? Number(limit) : DEFAULT_HISTORY_LIMIT));
+        const range = normalizeHistoryRange({ from, to });
+        let snapshotIndex = this.events.length - 1;
+        let nextIndex = snapshotIndex;
+
+        if (cursor !== undefined && cursor !== null) {
+            const decodedCursor = decodeHistoryCursor(cursor);
+            if (decodedCursor.f !== range.from || decodedCursor.t !== range.to) {
+                throw new DownloadHistoryQueryError('cursor does not match the requested date range', 'HISTORY_CURSOR_FILTER_MISMATCH');
+            }
+            if (
+                decodedCursor.s >= this.events.length ||
+                this.events[decodedCursor.s]?.eventId !== decodedCursor.a ||
+                this.events[decodedCursor.n]?.eventId !== decodedCursor.e
+            ) {
+                throw new DownloadHistoryQueryError('cursor no longer matches the download history archive', 'STALE_HISTORY_CURSOR');
+            }
+            snapshotIndex = decodedCursor.s;
+            nextIndex = decodedCursor.n;
+        }
+
+        let filteredTotal = 0;
+        for (let index = 0; index <= snapshotIndex; index += 1) {
+            if (isTimestampInHistoryRange(this.eventTimestamps[index], range)) {
+                filteredTotal += 1;
+            }
+        }
+
+        const items = [];
+        let followingIndex = null;
+        for (let index = nextIndex; index >= 0; index -= 1) {
+            if (!isTimestampInHistoryRange(this.eventTimestamps[index], range)) {
+                continue;
+            }
+            if (items.length === normalizedLimit) {
+                followingIndex = index;
+                break;
+            }
+            items.push(JSON.parse(JSON.stringify(this.events[index])));
+        }
+
+        // Cursors use immutable append indexes and retain the first page's archive
+        // boundary. New events can be appended safely without reshuffling later pages.
+        const nextCursor = followingIndex === null ? null : encodeHistoryCursor({
+            nextIndex: followingIndex,
+            nextEventId: this.events[followingIndex].eventId,
+            snapshotIndex,
+            snapshotEventId: this.events[snapshotIndex].eventId,
+            from: range.from,
+            to: range.to
+        });
         return {
             version: HISTORY_SCHEMA_VERSION,
-            total: this.events.length,
+            total: snapshotIndex + 1,
+            filteredTotal,
             invalidEntryCount: this.invalidEntryCount,
-            items: this.events.slice(-normalizedLimit).reverse().map((event) => JSON.parse(JSON.stringify(event)))
+            items,
+            hasMore: nextCursor !== null,
+            nextCursor
         };
     }
 
@@ -297,6 +479,7 @@ module.exports = {
     HISTORY_FILE_NAME,
     DEFAULT_HISTORY_LIMIT,
     MAX_HISTORY_LIMIT,
+    HISTORY_CURSOR_VERSION,
     VALID_EVENT_TYPES,
     STATUS_EVENT_TYPES,
     getDefaultHistoryPath,
@@ -306,6 +489,11 @@ module.exports = {
     createHistoryRecordSnapshot,
     createHistoryDetails,
     normalizeHistoryEvent,
+    normalizeHistoryDateFilter,
+    normalizeHistoryRange,
+    encodeHistoryCursor,
+    decodeHistoryCursor,
     parseHistoryContents,
+    DownloadHistoryQueryError,
     DownloadHistoryStore
 };

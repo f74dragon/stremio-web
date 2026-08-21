@@ -185,6 +185,85 @@
     }
 }
 
+.poster-resume {
+    position: absolute;
+    z-index: 2;
+    right: 0.55rem;
+    bottom: 0.55rem;
+    left: 0.55rem;
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 0.28rem;
+    padding: 0.55rem 0.6rem;
+    border: 1px solid rgba(255, 206, 129, 0.38);
+    border-radius: 0.65rem;
+    color: rgba(255, 250, 240, 0.98);
+    background: linear-gradient(145deg, rgba(43, 31, 26, 0.95), rgba(18, 16, 29, 0.94));
+    box-shadow: 0 0.45rem 1.2rem rgba(0, 0, 0, 0.38);
+    backdrop-filter: blur(0.55rem);
+    pointer-events: none;
+}
+
+.poster-resume-heading {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    min-width: 0;
+    gap: 0.4rem;
+
+    > strong {
+        overflow: hidden;
+        font-size: 0.7rem;
+        font-weight: 750;
+        line-height: 1.2;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    > span {
+        flex: none;
+        color: rgba(255, 211, 143, 0.94);
+        font-size: 0.6rem;
+        font-weight: 700;
+        line-height: 1.2;
+    }
+}
+
+.poster-resume-episode,
+.poster-resume-time {
+    overflow: hidden;
+    font-size: 0.6rem;
+    line-height: 1.25;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.poster-resume-episode {
+    font-weight: 650;
+}
+
+.poster-resume-time {
+    color: rgba(255, 255, 255, 0.7);
+    font-variant-numeric: tabular-nums;
+}
+
+.poster-resume-track {
+    height: 0.22rem;
+    margin-top: 0.08rem;
+    overflow: hidden;
+    border-radius: 999px;
+    background-color: rgba(255, 255, 255, 0.16);
+}
+
+.poster-resume-value {
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, #e99b45, #ffd38f);
+    box-shadow: 0 0 0.65rem rgba(255, 185, 89, 0.5);
+    transition: width 0.3s ease;
+}
+
 .episode-count-badge {
     min-width: 2.75rem;
     height: 2.75rem;

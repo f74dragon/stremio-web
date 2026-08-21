@@ -8,6 +8,22 @@ const { getDownloadActivitySummary } = require('../downloadRecordPresentation');
 const { findMostRecentPlaybackRecord, getPlaybackProgressForRecord } = require('../playbackProgressPresentation');
 const styles = require('./DownloadMediaGroup.less');
 
+const getEpisodeResumeLabel = (record, mediaType, t) => {
+    if (mediaType !== 'series') {
+        return null;
+    }
+
+    if (Number.isFinite(record.season) && Number.isFinite(record.episode)) {
+        return t('CUSTOM_DOWNLOADS_RESUME_EPISODE', {
+            defaultValue: 'S{{season}}E{{episode}}',
+            season: record.season,
+            episode: record.episode
+        });
+    }
+
+    return record?.videoTitle || null;
+};
+
 const DownloadMediaGroup = ({
     group,
     actionStates,
@@ -32,6 +48,19 @@ const DownloadMediaGroup = ({
     const playActionInProgress = typeof playAction === 'string';
     const playError = playableRecordId ? actionErrors[playableRecordId] : null;
     const groupArtwork = group.poster || group.background || group.records[0]?.videoThumbnail || null;
+    const resumeEpisodeLabel = getEpisodeResumeLabel(playableRecord, group.type, t);
+    const resumeTimeLabel = playbackProgress?.positionLabel && playbackProgress?.remainingLabel ?
+        t('CUSTOM_DOWNLOADS_RESUME_TIME_CONTEXT', {
+            defaultValue: '{{elapsed}} elapsed · {{remaining}} left',
+            elapsed: playbackProgress.positionLabel,
+            remaining: playbackProgress.remainingLabel
+        })
+        : playbackProgress?.positionLabel ?
+            t('CUSTOM_DOWNLOADS_RESUME_ELAPSED', {
+                defaultValue: '{{elapsed}} elapsed',
+                elapsed: playbackProgress.positionLabel
+            })
+            : null;
     const activity = React.useMemo(() => getDownloadActivitySummary(group.records), [group.records]);
     const progressValue = activity.progress === null ? 0 : Math.round(activity.progress);
     const episodeCountLabel = t('CUSTOM_DOWNLOADS_EPISODE_COUNT', {
@@ -122,6 +151,21 @@ const DownloadMediaGroup = ({
                                 <span>{t('CUSTOM_DOWNLOADS_EPISODES_SHORT', { defaultValue: 'EP' })}</span>
                             </div>
                             : null
+                }
+                {
+                    !selectionMode && playbackProgress ?
+                        <div className={styles['poster-resume']}>
+                            <div className={styles['poster-resume-heading']}>
+                                <strong>{t('CUSTOM_DOWNLOADS_CONTINUE_WATCHING', { defaultValue: 'Continue watching' })}</strong>
+                                <span>{t('CUSTOM_DOWNLOADS_WATCHED_PERCENT', { defaultValue: '{{progress}}% watched', progress: playbackProgress.percent })}</span>
+                            </div>
+                            {resumeEpisodeLabel ? <div className={styles['poster-resume-episode']} title={playableRecord?.videoTitle || resumeEpisodeLabel}>{resumeEpisodeLabel}{playableRecord?.videoTitle ? ` · ${playableRecord.videoTitle}` : ''}</div> : null}
+                            {resumeTimeLabel ? <div className={styles['poster-resume-time']}>{resumeTimeLabel}</div> : null}
+                            <div className={styles['poster-resume-track']} aria-hidden={'true'}>
+                                <div className={styles['poster-resume-value']} style={{ width: `${playbackProgress.percent}%` }} />
+                            </div>
+                        </div>
+                        : null
                 }
             </div>
             <div className={styles['media-info']}>
