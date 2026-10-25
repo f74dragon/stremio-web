@@ -14,7 +14,7 @@ const resolveAppFile = (value, buildDirectory, desktopDirectory) => {
     let pathname;
     try { pathname = decodeURIComponent(new URL(value).pathname); } catch { return null; }
     if (/[\\\0:]/.test(pathname)) return null;
-    const statusFiles = new Set(['/desktop-status.html', '/desktop-status.js', '/desktop-status.css']);
+    const statusFiles = new Set(['/desktop-status.html', '/desktop-status.js', '/desktop-status.css', '/desktop-updates.html', '/desktop-updates.js', '/desktop-updates.css']);
     const root = statusFiles.has(pathname) ? path.join(desktopDirectory, 'ui') : buildDirectory;
     const filename = pathname === '/' ? 'index.html' : pathname.slice(1);
     const resolved = path.resolve(root, filename);

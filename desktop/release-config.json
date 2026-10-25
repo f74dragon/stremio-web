@@ -9,5 +9,7 @@
         "owner": "f74dragon",
         "repo": "stremio-web"
     },
-    "automaticUpdatesEnabled": false
+    "automaticUpdatesEnabled": false,
+    "personalUseOnly": true,
+    "updateMode": "local-signed-bundle"
 }

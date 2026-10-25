@@ -83,6 +83,17 @@ app.whenReady().then(async () => {
         const direct = await fetch(`${state.backend}/health`);
         assert.equal(direct.status, 401, 'Untrusted local client cannot use the service');
         assert.equal(await window.webContents.executeJavaScript('navigator.serviceWorker.getRegistrations().then(x => x.length).catch(() => 0)'), 0);
+        assert.equal(await window.webContents.executeJavaScript('window.customStremioDesktop.getUpdateStatus().then(() => false, () => true)'), true, 'Main renderer cannot invoke updater privileges');
+        await window.webContents.executeJavaScript('window.customStremioDesktop.openUpdates()');
+        const updatesWindow = BrowserWindow.getAllWindows().find((item) => item !== window);
+        assert(updatesWindow, 'Dedicated update window opens');
+        if (updatesWindow.webContents.isLoadingMainFrame()) await new Promise((resolve) => updatesWindow.webContents.once('did-finish-load', resolve));
+        assert.equal(await updatesWindow.webContents.executeJavaScript('typeof require'), 'undefined');
+        assert.equal(await updatesWindow.webContents.executeJavaScript('window.customStremioDesktop.getStatus().then(() => false, () => true)'), true, 'Update page cannot access backend lifecycle IPC');
+        assert.equal(await updatesWindow.webContents.executeJavaScript('window.customStremioDesktop.getUpdateStatus().then(s => s.currentVersion)'), require(path.join(packaged, 'desktop/package.json')).version);
+        fs.writeFileSync(path.join(qa, 'native-updates.png'), (await updatesWindow.webContents.capturePage()).toPNG());
+        updatesWindow.close();
+        report.updatesBoundary = true;
         await window.webContents.executeJavaScript('localStorage.setItem(\'desktop-runtime-fixture\', \'retained\')');
         await window.webContents.reload();
         await new Promise((resolve) => window.webContents.once('did-finish-load', resolve));

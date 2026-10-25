@@ -63,7 +63,7 @@ Notes:
 - `8. Add global downloads page`: In progress (`Milestones 8A-8C.3` implemented, including archive-wide cursor pagination and date filtering)
 - `9. Add MPC-HC launch support`: Completed for the planned scope (`Milestones 9A-9C`; panel playback, stream-row playback, and persistent in-app player selection implemented)
 - `10. Add watched/unwatched integration`: Completed for the planned scope through `Milestone 10E`; automated checks pass and the user reported the live playback/sync flow working after the UI/crash fixes. Detailed clean-install and recovery checks remain part of packaging acceptance.
-- `11. Package as Windows app`: In progress (Phases 1-3 local implementation/checks complete; updater, fresh-machine validation, signing/public-release gates, and installed-account acceptance remain)
+- `11. Package as Windows app`: In progress (Phases 1-4 personal-use implementation/checks complete; installed-account acceptance remains)
 
 ## Agent Rules
 
@@ -78,7 +78,7 @@ Notes:
 
 ## Next Recommended Step
 
-Phase 4: implement reviewed update delivery from this fork's GitHub Releases, with explicit check/download/restart states, safe backend shutdown, artifact verification, and an actual installed A-to-B upgrade test preserving profile/settings/records/history/progress/media. Keep automatic delivery disabled until acceptance passes. Before public distribution, also complete a fresh Windows VM/default-location test, publisher signing/access decisions, live installed-account/MPC-HC sync acceptance, and the upstream source/security review gate.
+Phase 5: use the installed personal app for live account/addon playback, movie/episode MPC-HC and second-client sync, plus ordinary close/tray/Quit and download interruption/resume acceptance. Phase 4 local signed updates and actual A-to-B/recovery checks pass. The app is only for the user's personal use: public distribution, publishing, publisher certificates, and release feeds are outside scope. Keep unattended installation disabled. Source maintenance remains a separate reviewed workflow.
 
 ## October 25: Windows Release Foundation (Phase 1)
 
@@ -94,8 +94,8 @@ Phase 4: implement reviewed update delivery from this fork's GitHub Releases, wi
 | --- | --- |
 | 1. Release foundation and upstream audit | Completed |
 | 2. Desktop launcher and backend lifecycle | Completed |
-| 3. Windows installer and isolated-profile checks | Completed locally; fresh Windows VM gate remains |
-| 4. Packaged-app update delivery and A -> B upgrade test | Not started |
+| 3. Windows installer and isolated-profile checks | Completed locally; VM validation is optional for personal use |
+| 4. Personal app updates and A -> B upgrade test | Completed locally |
 | 5. Installed-app playback/sync/recovery acceptance | Not started |
 
 ### Git Backup and CI
@@ -104,6 +104,18 @@ Phase 4: implement reviewed update delivery from this fork's GitHub Releases, wi
 - The push includes the completed playback/Core, UI/source-control, test-dependency, and Windows Phase 1 work. Local build output, temporary checkpoints, development TLS keys, and installed dependencies remain ignored.
 - Completed: implementation commit `5a78392c05bc655bcd212ba3bc6e83988068193d` was pushed to `origin/development`. `pnpm verify:release --require-clean` passes on the committed source. The earlier 50-suite / 390-test, lint, and production-build results remain the local validation baseline; remote CI results are not yet verified.
 - Fixed the Build workflow to install the backend's locked dependencies before its new integration test, use a frozen frontend lockfile, and run the clean-source release-foundation check. A normal source push does not create a Windows installer release; Phase 2 remains next.
+
+## October 25: Personal App Updates (Phase 4)
+
+- Scope: user authorized safe app updates, ongoing tracker updates, and tested commit/push, explicitly for personal use only. No public release, GitHub token, commercial certificate, or distribution work is required.
+- Planned files: focused updater/verification modules and Windows handoff helper under `desktop/`; a separate update window and narrow preload IPC; personal bundle/key build scripts; updater unit and actual installed A-to-B/recovery checks; release documentation and Windows CI. Frontend/Core and store schemas stay unchanged.
+- Design: locally selected signed metadata plus adjacent installer, an Ed25519 public key in the app and private key outside the checkout under `%LOCALAPPDATA%\Custom Stremio Build\update-signing-key.pem`, streamed SHA-256 verification into a private cache, explicit restart after graceful backend shutdown, and retained app/data backups for recovery. No background polling or installation on ordinary Quit.
+- Implemented: personal Ed25519-signed local bundles, a separate sandboxed update window, native file selection with narrow IPC, streaming hash/cancel/ready states, downgrade/schema rejection, cached-artifact revalidation, explicit restart confirmation, and a Windows helper with readiness handshake, per-installation mutex, app/profile/store backups, installed-file verification, and restore/relaunch.
+- Personal scope: disabled Windows CI artifact uploads and inherited GitHub Pages/release publishing for this fork. CI uses a disposable test signer, never the personal private key. Current bootstrap desktop version is `0.1.0-alpha.2`; it must be installed manually once to add updater support.
+- Verified: all 53 suites / 409 tests pass. Focused verification exercises tampering, another signer, downgrades, unsupported schemas, cancellation, cache changes, and interrupted handoffs. The actual installed `0.1.0-alpha.2 -> failed alpha.3/restore -> verified alpha.3` flow passes, including restored registration, graceful backend exit, localStorage/profile sentinel, settings, records/history, playback position, opaque personal state, and media retention. A real active transfer pauses at restart, retains identical partial bytes across restore and upgrade, then resumes using HTTP Range and completes byte-for-byte.
+- Verified: native helper survives its Electron parent; packaged Core/WASM/sandbox, distinct update/backend IPC permissions, update window, tray, crash/retry, and graceful Quit pass. The ready-to-restart UI capture was visually reviewed. A Windows helper startup/lifetime failure was caught before installation and fixed with a windowless compiled bridge plus readiness handshake. No personal profile/media is used by tests; synthetic installations clean up their registration/shortcuts.
+- Build/run: `pnpm desktop:update` requires a clean commit, builds setup and signed `.stremio-update.json`, and publishes nothing. The native bridge uses the existing Windows .NET Framework compiler only at build time; no SDK/Node is needed to run the installed app. Installed executable, ASAR, and unpacked bridge digests are signed and checked after setup. Manual first install of alpha.2 adds the updater; subsequent versions use App > App updates. Backups stay local until deliberately removed, and no automatic downgrade occurs after a new version starts writing data. Remote CI results remain unverified.
+- Final quality checks: full 53-suite / 409-test regression pass, frontend/native ESLint, frozen offline install, Windows workflow YAML parsing, actual personal-key bootstrap installer/packaged-file audit, per-user shortcut/registration, no external Node/npm, running-app refusal, reinstall/uninstall retention, and packaged runtime acceptance pass. Release preflight also checks the update contract against the actual store schema constants. The private key was verified against the pinned public key and moved outside disposable build storage; no private key is tracked or packaged.
 
 ## October 25: Windows Installer (Phase 3)
 

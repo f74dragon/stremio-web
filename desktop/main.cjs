@@ -1,6 +1,8 @@
 const { app, BrowserWindow, Menu, Tray, ipcMain, net, protocol, session, shell, utilityProcess, dialog } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
+const { spawn } = require('node:child_process');
+const { PersonalUpdater } = require('./personal-update.cjs');
 const { getDesktopDataPaths } = require('./data-paths.cjs');
 const { BackendController } = require('./backend-controller.cjs');
 const { isAppUrl, safeExternalUrl, createAppProtocolHandler } = require('./app-protocol.cjs');
@@ -21,6 +23,7 @@ app.setPath('logs', dataPaths.logs);
 
 let window;
 let tray;
+let updatesWindow;
 let quitting = false;
 let quitComplete = false;
 let starting = false;
@@ -30,6 +33,18 @@ const root = path.resolve(__dirname, '..');
 const buildDirectory = app.isPackaged ? path.join(root, 'build') : path.join(root, '.core-build', 'desktop-ui');
 const statusUrl = `${release.rendererOrigin}/desktop-status.html`;
 const icon = path.join(__dirname, 'assets', 'icon.ico');
+const updatesUrl = `${release.rendererOrigin}/desktop-updates.html`;
+const updater = new PersonalUpdater({
+    directory: path.join(dataPaths.backendData, 'updates'), currentVersion: version, appId: release.appId,
+    publicKey: fs.readFileSync(path.join(__dirname, 'update-public-key.pem'), 'utf8')
+});
+const installation = path.dirname(process.execPath);
+const canInstallUpdate = () => app.isPackaged && process.platform === 'win32' &&
+    fs.existsSync(path.join(installation, `Uninstall ${release.executableName}.exe`));
+const updateStatus = () => ({ ...updater.state, installable: canInstallUpdate() });
+updater.on('status', () => {
+    if (updatesWindow && !updatesWindow.isDestroyed()) updatesWindow.webContents.send('custom-stremio:update-status', updateStatus());
+});
 const backend = new BackendController({
     dataDirectory: dataPaths.backendData,
     fork: (entry, options) => utilityProcess.fork(entry, [], { ...options, serviceName: `${productName} local service` })
@@ -87,6 +102,7 @@ const start = async () => {
 
 const quit = async () => {
     if (quitting) return;
+    updater.cancel();
     quitting = true;
     setStatus({ phase: 'stopping', message: 'Pausing downloads and saving your progress…', code: null });
     await showStatus().catch(() => { /* The window may already be closing. */ });
@@ -101,6 +117,76 @@ const quit = async () => {
         setStatus({ phase: 'error', message: 'The local service has not finished stopping. Please retry Quit.', code: 'SHUTDOWN_FAILED' });
         showWindow();
     }
+};
+
+const openUpdates = () => {
+    if (quitting) return;
+    if (updatesWindow && !updatesWindow.isDestroyed()) { updatesWindow.show(); updatesWindow.focus(); return; }
+    updatesWindow = new BrowserWindow({
+        title: 'App updates', parent: window, width: 640, height: 650, minWidth: 560, minHeight: 580,
+        backgroundColor: '#101016', autoHideMenuBar: true, icon, show: false,
+        webPreferences: { preload: path.join(__dirname, 'preload.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true, webviewTag: false }
+    });
+    updatesWindow.setMenu(null);
+    updatesWindow.once('ready-to-show', () => updatesWindow.show());
+    updatesWindow.webContents.on('will-navigate', (event, url) => { if (url !== updatesUrl) event.preventDefault(); });
+    updatesWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    updatesWindow.webContents.on('will-attach-webview', (event) => event.preventDefault());
+    updatesWindow.on('closed', () => { updatesWindow = null; });
+    updatesWindow.loadURL(updatesUrl).catch(() => log('updates-window-failed'));
+};
+
+const installUpdate = async () => {
+    if (quitting || updater.busy || updater.state.phase !== 'ready') return updateStatus();
+    if (!canInstallUpdate()) return updater.setState({ phase: 'error', code: 'INSTALLED_APP_REQUIRED' });
+    if (starting || status.phase !== 'ready') return updateStatus();
+    const selected = updater.pending.id;
+    const { response } = await dialog.showMessageBox(updatesWindow, {
+        type: 'question', title: 'Restart to update', message: `Install version ${updater.state.version}?`,
+        detail: 'This pauses downloads, saves your progress, and closes in-app playback. Custom Stremio reopens after the update. Settings, login, and media stay on this PC.',
+        buttons: ['Restart and update', 'Cancel'], defaultId: 1, cancelId: 1
+    });
+    if (response !== 0 || quitting || updater.state.phase !== 'ready' || updater.pending.id !== selected) return updateStatus();
+    quitting = true;
+    updater.setState({ phase: 'installing', version: updater.pending.manifest.version });
+    try {
+        const handoff = await updater.createHandoff({
+            installation, dataDirectory: dataPaths.backendData, executable: process.execPath,
+            // Preserve only explicit local diagnostics flags; never carry URLs or file arguments.
+            restartArgs: process.argv.slice(1).filter((argument) => /^(--disable-gpu|--remote-debugging-port=\d+|--remote-debugging-address=127\.0\.0\.1|--inspect=\d+)$/.test(argument))
+        });
+        setStatus({ phase: 'stopping', message: 'Pausing downloads and saving before the update…', code: null });
+        const result = await backend.stop();
+        if (result.forced) throw Object.assign(new Error('SHUTDOWN_NOT_CLEAN'), { code: 'SHUTDOWN_NOT_CLEAN' });
+        const diagnostic = fs.openSync(path.join(path.dirname(handoff.job), 'helper.log'), 'a');
+        let helper;
+        try {
+            // A windowless native bridge survives our exit; PowerShell cannot directly
+            // use DETACHED_PROCESS, and a normal libuv child is killed with its parent.
+            helper = spawn(handoff.launcher, [], { detached: true, windowsHide: true, stdio: ['ignore', diagnostic, diagnostic], cwd: dataPaths.backendData });
+            await new Promise((resolve, reject) => { helper.once('spawn', resolve); helper.once('error', reject); });
+        } finally { fs.closeSync(diagnostic); }
+        await new Promise((resolve, reject) => {
+            const finish = (error) => { clearInterval(poll); clearTimeout(timeout); helper.removeListener('exit', exited); if (error) reject(error); else resolve(); };
+            const exited = () => finish(new Error('UPDATE_HELPER_EXITED'));
+            const poll = setInterval(() => {
+                try { if (JSON.parse(fs.readFileSync(handoff.ready, 'utf8')).launcherPid === helper.pid) finish(); } catch { /* Helper is still initializing. */ }
+            }, 100);
+            const timeout = setTimeout(() => finish(new Error('UPDATE_HELPER_NOT_READY')), 10000);
+            helper.once('exit', exited);
+        });
+        helper.unref();
+        log('update-handoff');
+        quitComplete = true;
+        tray?.destroy();
+        app.quit();
+    } catch (error) {
+        quitting = false;
+        updater.setState({ phase: 'error', code: error.code === 'ARTIFACT_MISMATCH' ? error.code : 'UPDATE_NOT_STARTED' });
+        log('update-not-started', error.code || 'UPDATE_NOT_STARTED');
+        if (backend.phase !== 'ready') await start();
+    }
+    return updateStatus();
 };
 
 if (!app.requestSingleInstanceLock()) {
@@ -141,6 +227,21 @@ if (!app.requestSingleInstanceLock()) {
         handle('retry', () => { start(); });
         handle('quit', () => { quit(); });
         handle('diagnostics', () => shell.openPath(dataPaths.logs));
+        handle('open-updates', openUpdates);
+        const updateHandle = (name, action) => ipcMain.handle(`custom-stremio:update-${name}`, (event) => {
+            if (!updatesWindow || event.sender !== updatesWindow.webContents || event.senderFrame !== updatesWindow.webContents.mainFrame || event.senderFrame.url !== updatesUrl) throw new Error('Untrusted update request');
+            return action();
+        });
+        updateHandle('status', updateStatus);
+        updateHandle('choose', async () => {
+            if (updater.busy || quitting) return updateStatus();
+            const selection = await dialog.showOpenDialog(updatesWindow, { title: 'Choose your personal update bundle', properties: ['openFile'], filters: [{ name: 'Custom Stremio update', extensions: ['json'] }] });
+            if (!selection.canceled && selection.filePaths.length === 1) await updater.prepare(selection.filePaths[0]);
+            return updateStatus();
+        });
+        updateHandle('cancel', () => { updater.cancel(); return updateStatus(); });
+        updateHandle('install', installUpdate);
+        updateHandle('close', () => updatesWindow.close());
         window = new BrowserWindow({
             title: productName, width: 1280, height: 840, minWidth: 820, minHeight: 600,
             backgroundColor: '#101016', show: false, autoHideMenuBar: true, icon,
@@ -181,11 +282,12 @@ if (!app.requestSingleInstanceLock()) {
         tray.on('click', showWindow);
         tray.setContextMenu(Menu.buildFromTemplate([
             { label: `Open ${productName}`, click: showWindow },
+            { label: 'App updates…', click: openUpdates },
             { label: 'Open diagnostics folder', click: () => shell.openPath(dataPaths.logs) },
             { type: 'separator' }, { label: 'Quit', click: quit }
         ]));
         Menu.setApplicationMenu(Menu.buildFromTemplate([
-            { label: 'App', submenu: [{ label: 'Show window', click: showWindow }, { label: 'Quit', accelerator: 'Control+Q', click: quit }] },
+            { label: 'App', submenu: [{ label: 'Show window', click: showWindow }, { label: 'App updates…', click: openUpdates }, { label: 'Quit', accelerator: 'Control+Q', click: quit }] },
             { label: 'View', submenu: [{ role: 'reload' }, { role: 'togglefullscreen' }] },
             { label: 'Help', submenu: [
                 { label: 'Playback requirements', click: async () => {
@@ -209,6 +311,7 @@ if (!app.requestSingleInstanceLock()) {
             showStatus().catch(() => { /* A final Quit may already have closed the window. */ });
         });
         log('starting');
+        await updater.initialize();
         await showStatus();
         showWindow();
         await start();

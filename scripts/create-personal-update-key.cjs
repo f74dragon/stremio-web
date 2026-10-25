@@ -1,0 +1,12 @@
+const fs = require('node:fs');
+const path = require('node:path');
+const crypto = require('node:crypto');
+const root = path.resolve(__dirname, '..');
+const privateFile = process.env.CUSTOM_STREMIO_SIGNING_KEY || path.join(process.env.LOCALAPPDATA || require('node:os').homedir(), 'Custom Stremio Build/update-signing-key.pem');
+const publicFile = path.join(root, 'desktop/update-public-key.pem');
+if (fs.existsSync(publicFile) || fs.existsSync(privateFile)) throw new Error('A personal update identity already exists. Keep its private key; do not silently replace it.');
+const pair = crypto.generateKeyPairSync('ed25519');
+fs.mkdirSync(path.dirname(privateFile), { recursive: true });
+fs.writeFileSync(privateFile, pair.privateKey.export({ type: 'pkcs8', format: 'pem' }), { flag: 'wx', mode: 0o600 });
+fs.writeFileSync(publicFile, pair.publicKey.export({ type: 'spki', format: 'pem' }), { flag: 'wx' });
+process.stdout.write('Personal update key created outside the checkout. Commit only desktop/update-public-key.pem. Keep a private backup of your signing key; losing it requires a manual reinstall to establish a new identity.\n');

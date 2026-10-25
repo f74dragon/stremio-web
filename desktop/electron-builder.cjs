@@ -11,6 +11,7 @@ module.exports = {
     directories: { app: '.core-build/desktop-app', output: 'dist/windows-launcher', buildResources: 'desktop/assets' },
     files: ['desktop/**/*', 'build/**/*', 'local-backend/**/*', 'src/customStremio/*.js', 'licenses/**/*', 'LICENSE.md', 'build-info.json', 'package.json'],
     asar: true,
+    asarUnpack: ['desktop/update-launcher.exe'],
     npmRebuild: false,
     win: {
         target: 'nsis', icon: 'desktop/assets/icon.ico',

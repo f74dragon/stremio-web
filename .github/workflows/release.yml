@@ -6,6 +6,8 @@ on:
 
 jobs:
   release:
+    # Retained upstream workflow, disabled for the personal fork.
+    if: github.repository == 'Stremio/stremio-web'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

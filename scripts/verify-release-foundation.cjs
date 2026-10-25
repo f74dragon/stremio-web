@@ -26,7 +26,18 @@ try {
     assert.equal(release.releaseRepository.provider, 'github');
     assert.equal(release.releaseRepository.owner, 'f74dragon');
     assert.equal(release.releaseRepository.repo, 'stremio-web');
-    assert.equal(release.automaticUpdatesEnabled, false, 'Automatic updates require Phase 4 delivery and upgrade acceptance');
+    assert.equal(release.automaticUpdatesEnabled, false, 'Personal updates must remain explicitly initiated');
+    assert.equal(release.personalUseOnly, true);
+    assert.equal(release.updateMode, 'local-signed-bundle');
+    const updateKey = fs.readFileSync(path.join(root, 'desktop/update-public-key.pem'), 'utf8');
+    assert(updateKey.startsWith('-----BEGIN PUBLIC KEY-----') && !updateKey.includes('PRIVATE KEY'));
+    assert.equal(crypto.createPublicKey(updateKey).asymmetricKeyType, 'ed25519');
+    assert.deepEqual(require('../desktop/personal-update.cjs').SCHEMAS, {
+        records: require('../local-backend/downloadRecordStore').STORE_VERSION,
+        settings: require('../local-backend/backendSettingsStore').SETTINGS_STORE_VERSION,
+        history: require('../local-backend/downloadHistoryStore').HISTORY_SCHEMA_VERSION,
+        progress: require('../local-backend/playbackProgressStore').PLAYBACK_PROGRESS_STORE_VERSION
+    }, 'Update compatibility must track the real persistent-store schemas');
 
     const identity = createBackendIdentity(backend.version);
     assert.equal(checkDesktopBackendCompatibility({ ok: true, ...identity }).compatible, true);

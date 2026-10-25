@@ -23,8 +23,11 @@ fs.rmSync(stage, { recursive: true, force: true });
 fs.mkdirSync(stage, { recursive: true });
 
 for (const entry of fs.readdirSync(path.join(root, 'desktop'))) {
-    if (entry.endsWith('.cjs') || entry.endsWith('.json') || entry === 'ui' || entry === 'assets') copy(`desktop/${entry}`);
+    if (entry.endsWith('.cjs') || entry.endsWith('.json') || entry === 'update-public-key.pem' || entry === 'update-handoff.ps1' || entry === 'ui' || entry === 'assets') copy(`desktop/${entry}`);
 }
+// Windows ships this .NET Framework compiler; it is only a build-time dependency.
+const compiler = path.join(process.env.SystemRoot || 'C:\\Windows', 'Microsoft.NET/Framework64/v4.0.30319/csc.exe');
+execFileSync(compiler, ['/nologo', '/target:winexe', '/platform:x64', '/optimize+', `/out:${path.join(stage, 'desktop/update-launcher.exe')}`, path.join(root, 'desktop/update-launcher.cs')], { cwd: root, windowsHide: true, stdio: 'inherit' });
 for (const entry of fs.readdirSync(path.join(root, 'local-backend'))) {
     if (entry.endsWith('.js') || entry === 'package.json') copy(`local-backend/${entry}`);
 }

@@ -10,6 +10,7 @@ permissions:
 
 jobs:
   cleanup:
+    if: github.repository == 'Stremio/stremio-web'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

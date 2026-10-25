@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>App updates</title><link rel="stylesheet" href="desktop-updates.css"></head>
+<body>
+    <main>
+        <header><span class="mark" aria-hidden="true">↗</span><div><p class="eyebrow">YOUR PERSONAL APP</p><h1>App updates</h1></div></header>
+        <p class="intro">Keep your custom build up to date. Choose a bundle you built on this PC; your app checks its signature before preparing it.</p>
+        <section aria-labelledby="status-title">
+            <div class="status-row"><h2 id="status-title">Ready when you are</h2><span id="badge">Personal</span></div>
+            <p id="message" role="status" aria-live="polite">Choose the update file and keep its installer beside it.</p>
+            <progress id="progress" max="100" hidden aria-label="Preparing update"></progress>
+            <p id="version"></p>
+        </section>
+        <p class="note">Updates run only when you choose Restart. Your login, settings, and downloads stay on this PC.</p>
+        <div class="actions"><button id="choose" class="primary">Choose update bundle</button><button id="cancel" hidden>Cancel</button><button id="install" class="primary" hidden>Restart and update</button><button id="close">Done</button></div>
+        <p id="code" class="code"></p>
+        <footer>No background checks or automatic restarts.</footer>
+    </main>
+    <script src="desktop-updates.js"></script>
+</body></html>

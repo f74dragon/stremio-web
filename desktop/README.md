@@ -3,12 +3,13 @@
 The Windows x64 app bundles the production frontend, custom Core, download
 backend, and Electron 45.0.0. Node/npm and a development web server are not needed
 to run it. The per-user NSIS installer includes its own executable/shortcut icon
-and version metadata. This local alpha is unsigned; signing/public distribution
-and automatic update acceptance remain separate release gates.
+and version metadata. This is your personal app, with local signed update bundles.
+No public distribution, release feed, account token, or publisher certificate is
+required. Windows setup remains unsigned; bundle signatures use your own local key.
 
 ## Install and use
 
-Run `Custom-Stremio-0.1.0-alpha.1-windows-x64-setup.exe` from
+Run `Custom-Stremio-0.1.0-alpha.2-windows-x64-setup.exe` from
 `dist/windows-installer/`, then open **Custom Stremio** from the Start Menu or
 desktop shortcut. Setup installs for the current user without requesting
 administrator rights and does not auto-launch the app. Quit an already-running
@@ -29,7 +30,7 @@ Use Node 24.19.0 and the repository's pinned pnpm 10.33.2 from the repository ro
 pnpm install --frozen-lockfile
 npm ci --prefix local-backend --ignore-scripts
 pnpm desktop:installer
-& .\dist\windows-installer\Custom-Stremio-0.1.0-alpha.1-windows-x64-setup.exe
+& .\dist\windows-installer\Custom-Stremio-0.1.0-alpha.2-windows-x64-setup.exe
 ```
 
 The installer output includes a SHA-256 checksum, blockmap for future updater
@@ -69,6 +70,53 @@ web service worker and browser Cast sender SDK; casting is not supported here.
   formats need that separate service; browsing/direct downloads do not. Neither
   the Stremio streaming service nor MPC-HC is bundled.
 
+## Personal app updates
+
+Install `0.1.0-alpha.2` manually once to get the updater. Open **App > App updates**
+(press Alt to reveal the menu) or **App updates** in the tray. Select a
+`.stremio-update.json` file with its matching setup executable beside it.
+Preparation copies/verifies the installer while the main app remains usable.
+Choose **Restart and update** and confirm when you are ready to pause downloads
+and close in-app playback. Ordinary Quit never installs a prepared update.
+
+To make your next update, review/test source changes, increment only
+`desktop/package.json` (for example `0.1.0-alpha.2` to `0.1.0-alpha.3`), update the
+tracker, commit, then run:
+
+```powershell
+pnpm desktop:update
+```
+
+Building the windowless update bridge uses the Windows .NET Framework compiler
+already present on this machine; the installed app needs no compiler or SDK.
+This requires a clean source tree and creates the installer plus signed update
+JSON in `dist/windows-installer/`. Select that JSON in the installed app. There is
+no GitHub publishing, update server, background check, download, or automatic restart.
+Upstream source updates still follow the separate reviewed integration workflow;
+official Stremio binaries cannot update this custom build.
+
+The app pins `desktop/update-public-key.pem`. Its matching private key was created
+locally at `%LOCALAPPDATA%\Custom Stremio Build\update-signing-key.pem`, outside
+the checkout and disposable build storage, and is excluded from all app/CI
+artifacts. Keep a private backup. `CUSTOM_STREMIO_SIGNING_KEY` can select another
+local key file for builds. A fresh checkout can build/install the app with only
+the public key, but cannot sign updates without that private key. If the key is lost, replace the
+identity deliberately and manually reinstall; the app does not trust a new signer
+automatically. `desktop:update:key` only creates a new identity when neither key
+exists, and refuses to overwrite an existing identity. It is not a routine build step.
+
+Updates reject other identities/platforms/channels, same/older versions, changed
+installer bytes, and changed data schema versions. Before setup, the helper waits
+for the old app to exit, keeps its app files under `updates/<id>/previous-app`, and
+backs up profile/root JSON/NDJSON stores under `release-backups/<id>` in your data
+root. Media is not copied or moved. It verifies the resulting executable, ASAR,
+and unpacked update bridge before relaunching. A failed install/verification
+restores the previous app files and registration, then reopens it; user data is kept. If restore fails, manually
+reinstall the previous setup using the retained backups. An installer that times
+out is left running rather than killed or overlapped. These backups contain
+personal profile/state; keep them private. Old backups are retained until you
+choose to remove them; each includes a full copy of the previous app.
+
 ## Verification
 
 ```powershell
@@ -78,6 +126,7 @@ pnpm desktop:build
 pnpm desktop:test
 pnpm desktop:installer
 pnpm desktop:installer:test
+pnpm desktop:update:test
 ```
 
 `desktop:test` loads the actual packaged ASAR with Electron in an isolated profile,
@@ -107,10 +156,16 @@ pnpm desktop:test
 Remove-Item Env:CUSTOM_STREMIO_TEST_APP_DIRECTORY
 ```
 
-The Windows CI job builds/tests the installer and retains setup/checksum/manifest
-artifacts for seven days. No GitHub binary release or automatic update feed is
-published. A fresh Windows VM, live installed-account playback/sync, upstream
-source security review, signing, and A-to-B update acceptance remain release
-gates. See the
+`desktop:update:test` builds A/B fixtures with a separate disposable signer, runs
+the real installed updater through a failed post-install verification/restore and
+a successful A-to-B upgrade, and checks retained synthetic data. Native dialogs
+are adapted through the test process's local debugger; production IPC never
+accepts an arbitrary file path. Fixtures never contain your personal signing key.
+
+The Windows CI job builds/tests the installer and updater without uploading
+Windows binaries. No GitHub binary release or update feed is published, and CI
+cannot sign personal bundles. Live installed-account playback/sync remains
+Phase 5. A fresh VM is optional extra confidence for your own machine; public
+distribution/signing work is outside scope. See the
 [Windows release contract](../docs/CUSTOM_STREMIO_WINDOWS_RELEASE.md) and
 [upstream workflow](../docs/CUSTOM_STREMIO_UPSTREAM_UPDATES.md).

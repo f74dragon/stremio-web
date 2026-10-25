@@ -56,7 +56,7 @@ const connect = async (url) => {
     });
     return { command, close: () => socket.close(), evaluate: async (expression) => {
         const result = await command('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
-        if (result.exceptionDetails) throw new Error(result.exceptionDetails.text);
+        if (result.exceptionDetails) throw new Error(result.exceptionDetails.exception?.description || result.exceptionDetails.text);
         return result.result.value;
     } };
 };
@@ -73,7 +73,9 @@ const main = async () => {
     const archive = path.join(path.dirname(installer), 'win-unpacked/resources/app.asar');
     const files = asar.listPackage(archive).map((filename) => filename.replace(/\\/g, '/'));
     for (const filename of ['/LICENSE.md', '/licenses/core-LICENSE.md', '/licenses/core-provenance.json', '/build-info.json', '/desktop/assets/icon.ico']) assert(files.includes(filename), `Packaged attribution/provenance asset exists: ${filename}`);
-    assert(!files.some((filename) => /\/(\.git|\.codex|\.agents|\.core-build|desktop-profile|release-backups)(\/|$)|\.(pem|map)$|\/(download-records\.json|backend-settings\.json|download-history\.ndjson|playback-progress\.json|launcher\.log)$/.test(filename)), 'ASAR excludes development keys, profiles, stores, logs, backups and source maps');
+    assert(files.includes('/desktop/update-public-key.pem'), 'Public update verification key is packaged');
+    assert(fs.existsSync(path.join(path.dirname(installer), 'win-unpacked/resources/app.asar.unpacked/desktop/update-launcher.exe')), 'Windowless update bridge is packaged');
+    assert(!files.some((filename) => filename !== '/desktop/update-public-key.pem' && /\/(\.git|\.codex|\.agents|\.core-build|desktop-profile|release-backups)(\/|$)|\.(pem|map)$|\/(download-records\.json|backend-settings\.json|download-history\.ndjson|playback-progress\.json|launcher\.log)$/.test(filename)), 'ASAR excludes private/development keys, profiles, stores, logs, backups and source maps');
     const before = inspect();
     assert.equal(before.UserEntries.length + before.MachineEntries.length, 0, 'Refusing to overwrite an existing Custom Stremio installation');
     assert.equal(before.Shortcuts.length, 0, 'Refusing to overwrite existing user shortcuts');
@@ -211,4 +213,5 @@ const main = async () => {
     assert(!report.cleanupError, report.cleanupError);
     process.stdout.write('Windows installer passed: branding, per-user shortcuts, installed launch without Node/npm on PATH, running-app protection, reinstall, uninstall/data retention.\n');
 };
-main().catch((error) => { process.stderr.write(`${error.stack}\n`); process.exitCode = 1; });
+if (require.main === module) main().catch((error) => { process.stderr.write(`${error.stack}\n`); process.exitCode = 1; });
+module.exports = { inspect, runSetup, connect, waitFor, snapshot };
