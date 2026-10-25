@@ -2,12 +2,14 @@
 
 ## Scope and current state
 
-Phases 1–2 establish the release foundation and an unpacked Windows x64 launcher.
+Phases 1–3 establish the release foundation, Windows x64 launcher, and per-user installer.
 The launcher runs the packaged frontend/Core and owns a private authenticated
 backend with exclusive data-root access, graceful IPC shutdown, recovery, and a
 persistent desktop profile. See [build/run instructions](../desktop/README.md).
-Installer, signing/PE branding, update delivery, and installed-app acceptance
-remain later phases. Automatic updates remain disabled; the fork's updater feed
+The local alpha includes PE branding and install/reinstall/uninstall retention
+checks with isolated profiles. Fresh-machine verification, publisher signing,
+update delivery, and installed-account acceptance remain release gates.
+Automatic updates remain disabled; the fork's updater feed
 must never point at official Stremio binaries.
 
 The target is an Electron host for the production frontend and a bundled Node
@@ -170,11 +172,21 @@ of a fully self-contained torrent engine or bundled MPC-HC is made.
 
 ## Remaining acceptance gates
 
+- Phase 3 local checks: the actual per-user installer and installed executable
+  have passed shortcut/registration, numeric PE version and prerelease display
+  version, custom icon, no Node/npm on PATH, running-app protection, graceful
+  Quit, reinstall, uninstall data/media retention, and reinstall after uninstall.
+  `desktop/installer.nsh` uses supported NSIS customization hooks to refuse
+  replacement/removal until the user quits; it does not force-kill the app.
+  Setup/checksum/blockmap/component manifest are generated locally without
+  publishing or enabling updates. The alpha is unsigned. Tests use an isolated
+  profile on the existing Windows machine, not a freshly provisioned VM.
+
 - Phase 2: real packaged-origin worker/WASM/addon/login/media behavior, backend
   ownership/port conflict handling, data-root lock, offline startup, graceful
   quit, tray behavior, and crash recovery.
-- Phase 3: clean Windows profile with no Node/npm, install/relaunch/reinstall,
-  per-user shortcuts, and uninstall retention.
+- Fresh-machine gate: repeat setup and playback on a clean Windows VM with no
+  development tooling, with the installer's normal default install location.
 - Before public release: upstream trust/URL fixes reviewed/backported or adopted
   with the larger migration; packaged API/security boundary; secret-free artifact
   allowlist (exclude dev TLS keys, `.git`, `.codex`, local state/logs, and backups);

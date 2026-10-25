@@ -1,9 +1,25 @@
-# Custom Stremio Windows launcher
+# Custom Stremio for Windows
 
-Phase 2 bundles the production frontend, custom Core, local download backend, and
-Electron 45.0.0 in an unpacked Windows x64 application. Node/npm and a development
-web server are not needed to run it. Installer, signing, executable branding, and
-automatic update delivery follow in Phases 3-4.
+The Windows x64 app bundles the production frontend, custom Core, download
+backend, and Electron 45.0.0. Node/npm and a development web server are not needed
+to run it. The per-user NSIS installer includes its own executable/shortcut icon
+and version metadata. This local alpha is unsigned; signing/public distribution
+and automatic update acceptance remain separate release gates.
+
+## Install and use
+
+Run `Custom-Stremio-0.1.0-alpha.1-windows-x64-setup.exe` from
+`dist/windows-installer/`, then open **Custom Stremio** from the Start Menu or
+desktop shortcut. Setup installs for the current user without requesting
+administrator rights and does not auto-launch the app. Quit an already-running
+copy before installing, reinstalling, or uninstalling. Closing its window keeps
+the app running in the tray; use **App > Quit** or **Ctrl+Q**.
+
+Uninstall through Windows Installed Apps. Ordinary uninstall removes the app and
+shortcuts while keeping the desktop login/profile, backend settings, download
+records/history/progress, and downloaded media. Reinstall uses the same data root.
+The installer never copies or deletes the browser profile. Installed desktop login
+remains separate from Chrome/Edge login.
 
 ## Build and run
 
@@ -12,15 +28,21 @@ Use Node 24.19.0 and the repository's pinned pnpm 10.33.2 from the repository ro
 ```powershell
 pnpm install --frozen-lockfile
 npm ci --prefix local-backend --ignore-scripts
-pnpm desktop:build
-& .\dist\windows-launcher\win-unpacked\custom-stremio.exe
+pnpm desktop:installer
+& .\dist\windows-installer\Custom-Stremio-0.1.0-alpha.1-windows-x64-setup.exe
 ```
 
-Keep the entire `win-unpacked` folder together; the executable needs its resources
-and runtime files. This is an unsigned local alpha. Output is ignored by Git.
-`build-info.json` inside the ASAR records source commit/dirty state and Core digest.
-Build from a clean commit before distributing a release; use
-`pnpm verify:release --require-clean` for source preflight.
+The installer output includes a SHA-256 checksum, blockmap for future updater
+work, and `release-manifest.json` with component versions, source commit/dirty
+state, Core digest, and installer checksum. `build-info.json` is also included in
+the app ASAR. Automatic update delivery remains disabled; no release is published
+by these commands. Build from a clean commit and run
+`pnpm verify:release --require-clean` before preparing release artifacts.
+
+`pnpm desktop:build` still creates an unpacked app at
+`dist/windows-launcher/win-unpacked/custom-stremio.exe`. Keep that entire folder
+together. Installer builds use `dist/windows-installer/` so they can run without
+overwriting an open unpacked app. All generated output is ignored by Git.
 
 For launcher development, run `pnpm build:desktop-ui` and then `pnpm desktop`.
 Browser development remains separate on port 5577. The desktop build disables the
@@ -54,6 +76,8 @@ pnpm test -- --runInBand
 pnpm lint
 pnpm desktop:build
 pnpm desktop:test
+pnpm desktop:installer
+pnpm desktop:installer:test
 ```
 
 `desktop:test` loads the actual packaged ASAR with Electron in an isolated profile,
@@ -65,9 +89,28 @@ that probe. The probe and exclusive data-root ownership have independent tests.
 Synthetic transfers use temporary data/media folders, without user credentials or
 media. Reports and captures are under `.core-build/desktop-qa/`.
 
-The Windows CI job builds/tests the same app and uploads a short-lived CI artifact.
-It does not publish an installer or enable updates. Installed-app playback/account
-sync, upgrade/uninstall retention, source security review, signing, and A-to-B
-update acceptance remain release gates. See the
+`desktop:installer:test` runs the actual setup and installed executable in a new
+workspace fixture, without Node/npm on its PATH. It checks checksums, the ASAR
+allowlist/licenses, PE branding, per-user registration/shortcuts, Core/backend
+readiness, running-app install/uninstall refusal, graceful Quit, reinstall,
+uninstall retention of every profile/store byte, media retention, and reinstall
+after uninstall. The test cleans up its registration/shortcuts and retains only
+synthetic diagnostics under `.core-build/installer-qa/`. It refuses to overwrite
+an existing real installation or user shortcuts. Run it before installing for
+daily use, or in the fresh Windows CI environment.
+
+To run packaged runtime checks against the installer payload:
+
+```powershell
+$env:CUSTOM_STREMIO_TEST_APP_DIRECTORY = '.\dist\windows-installer\win-unpacked'
+pnpm desktop:test
+Remove-Item Env:CUSTOM_STREMIO_TEST_APP_DIRECTORY
+```
+
+The Windows CI job builds/tests the installer and retains setup/checksum/manifest
+artifacts for seven days. No GitHub binary release or automatic update feed is
+published. A fresh Windows VM, live installed-account playback/sync, upstream
+source security review, signing, and A-to-B update acceptance remain release
+gates. See the
 [Windows release contract](../docs/CUSTOM_STREMIO_WINDOWS_RELEASE.md) and
 [upstream workflow](../docs/CUSTOM_STREMIO_UPSTREAM_UPDATES.md).

@@ -29,8 +29,7 @@ let status = { phase: 'starting', message: 'Starting your local service…', ver
 const root = path.resolve(__dirname, '..');
 const buildDirectory = app.isPackaged ? path.join(root, 'build') : path.join(root, '.core-build', 'desktop-ui');
 const statusUrl = `${release.rendererOrigin}/desktop-status.html`;
-const builtIcon = path.join(buildDirectory, 'favicons', 'favicon.ico');
-const icon = fs.existsSync(builtIcon) ? builtIcon : path.join(root, 'assets', 'favicons', 'favicon.ico');
+const icon = path.join(__dirname, 'assets', 'icon.ico');
 const backend = new BackendController({
     dataDirectory: dataPaths.backendData,
     fork: (entry, options) => utilityProcess.fork(entry, [], { ...options, serviceName: `${productName} local service` })

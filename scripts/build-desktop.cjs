@@ -13,7 +13,7 @@ const copy = (source, target = source) => {
     fs.cpSync(path.join(root, source), path.join(stage, target), { recursive: true, filter: (filename) => !filename.endsWith('.map') });
 };
 
-if (process.argv.slice(2).some((arg) => arg !== '--skip-ui')) throw new Error('Only --skip-ui is supported');
+if (process.argv.slice(2).some((arg) => !['--skip-ui', '--installer'].includes(arg))) throw new Error('Only --skip-ui and --installer are supported');
 if (!process.argv.includes('--skip-ui')) run('webpack-cli/bin/cli.js', ['--mode', 'production', '--env', 'desktop']);
 if (!fs.existsSync(path.join(root, '.core-build/desktop-ui/index.html'))) throw new Error('Build the desktop frontend first');
 if (!fs.existsSync(path.join(root, 'local-backend/node_modules/express'))) throw new Error('Run npm ci --prefix local-backend before building the launcher');
@@ -23,7 +23,7 @@ fs.rmSync(stage, { recursive: true, force: true });
 fs.mkdirSync(stage, { recursive: true });
 
 for (const entry of fs.readdirSync(path.join(root, 'desktop'))) {
-    if (entry.endsWith('.cjs') || entry.endsWith('.json') || entry === 'ui') copy(`desktop/${entry}`);
+    if (entry.endsWith('.cjs') || entry.endsWith('.json') || entry === 'ui' || entry === 'assets') copy(`desktop/${entry}`);
 }
 for (const entry of fs.readdirSync(path.join(root, 'local-backend'))) {
     if (entry.endsWith('.js') || entry === 'package.json') copy(`local-backend/${entry}`);
@@ -50,4 +50,17 @@ fs.writeFileSync(path.join(stage, 'build-info.json'), `${JSON.stringify({
     upstreamAuthor: frontend.author,
     coreArchiveSha256: crypto.createHash('sha256').update(fs.readFileSync(path.join(root, frontend.dependencies['@stremio/stremio-core-web'].slice(5)))).digest('hex')
 }, null, 2)}\n`);
-run('electron-builder/cli.js', ['--dir', '--win', '--x64', '--publish', 'never', '--config', 'desktop/electron-builder.cjs']);
+run('electron-builder/cli.js', [...(process.argv.includes('--installer') ? ['--config.directories.output=dist/windows-installer'] : ['--dir']), '--win', '--x64', '--publish', 'never', '--config', 'desktop/electron-builder.cjs']);
+if (process.argv.includes('--installer')) {
+    const output = path.join(root, 'dist/windows-installer');
+    const filename = `Custom-Stremio-${desktop.version}-windows-x64-setup.exe`;
+    const installer = fs.readFileSync(path.join(output, filename));
+    const sha256 = crypto.createHash('sha256').update(installer).digest('hex');
+    fs.writeFileSync(path.join(output, `${filename}.sha256`), `${sha256}  ${filename}\n`);
+    fs.writeFileSync(path.join(output, 'release-manifest.json'), `${JSON.stringify({
+        schemaVersion: 1, channel: require('../desktop/release-config.json').channel,
+        automaticUpdatesEnabled: false, signed: false,
+        installer: { filename, size: installer.length, sha256 },
+        components: JSON.parse(fs.readFileSync(path.join(stage, 'build-info.json'), 'utf8'))
+    }, null, 2)}\n`);
+}

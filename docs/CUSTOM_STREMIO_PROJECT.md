@@ -63,7 +63,7 @@ Notes:
 - `8. Add global downloads page`: In progress (`Milestones 8A-8C.3` implemented, including archive-wide cursor pagination and date filtering)
 - `9. Add MPC-HC launch support`: Completed for the planned scope (`Milestones 9A-9C`; panel playback, stream-row playback, and persistent in-app player selection implemented)
 - `10. Add watched/unwatched integration`: Completed for the planned scope through `Milestone 10E`; automated checks pass and the user reported the live playback/sync flow working after the UI/crash fixes. Detailed clean-install and recovery checks remain part of packaging acceptance.
-- `11. Package as Windows app`: In progress (Phases 1-2 complete; Windows installer, updater, and installed-app acceptance remain)
+- `11. Package as Windows app`: In progress (Phases 1-3 local implementation/checks complete; updater, fresh-machine validation, signing/public-release gates, and installed-account acceptance remain)
 
 ## Agent Rules
 
@@ -78,7 +78,7 @@ Notes:
 
 ## Next Recommended Step
 
-Phase 3: create the Windows x64 per-user installer using the tested launcher in `desktop/`. Finish executable branding, install/launch/uninstall and data-retention checks on a clean profile, and signing/release preparation. Phase 4 adds the fork's own update feed and an A-to-B upgrade test; do not enable automatic updates before that acceptance passes. Keep upstream source maintenance separate from binary update delivery and retain the pre-distribution source/security review gate.
+Phase 4: implement reviewed update delivery from this fork's GitHub Releases, with explicit check/download/restart states, safe backend shutdown, artifact verification, and an actual installed A-to-B upgrade test preserving profile/settings/records/history/progress/media. Keep automatic delivery disabled until acceptance passes. Before public distribution, also complete a fresh Windows VM/default-location test, publisher signing/access decisions, live installed-account/MPC-HC sync acceptance, and the upstream source/security review gate.
 
 ## October 25: Windows Release Foundation (Phase 1)
 
@@ -94,7 +94,7 @@ Phase 3: create the Windows x64 per-user installer using the tested launcher in 
 | --- | --- |
 | 1. Release foundation and upstream audit | Completed |
 | 2. Desktop launcher and backend lifecycle | Completed |
-| 3. Windows installer and clean-profile checks | Not started |
+| 3. Windows installer and isolated-profile checks | Completed locally; fresh Windows VM gate remains |
 | 4. Packaged-app update delivery and A -> B upgrade test | Not started |
 | 5. Installed-app playback/sync/recovery acceptance | Not started |
 
@@ -104,6 +104,16 @@ Phase 3: create the Windows x64 per-user installer using the tested launcher in 
 - The push includes the completed playback/Core, UI/source-control, test-dependency, and Windows Phase 1 work. Local build output, temporary checkpoints, development TLS keys, and installed dependencies remain ignored.
 - Completed: implementation commit `5a78392c05bc655bcd212ba3bc6e83988068193d` was pushed to `origin/development`. `pnpm verify:release --require-clean` passes on the committed source. The earlier 50-suite / 390-test, lint, and production-build results remain the local validation baseline; remote CI results are not yet verified.
 - Fixed the Build workflow to install the backend's locked dependencies before its new integration test, use a frozen frontend lockfile, and run the clean-source release-foundation check. A normal source push does not create a Windows installer release; Phase 2 remains next.
+
+## October 25: Windows Installer (Phase 3)
+
+- Status: Local Phase 3 implementation and acceptance complete. User authorized the per-user installer, branding, install/reinstall/uninstall validation, tracker updates, and tested commit/push. Automatic update delivery remains Phase 4.
+- Implemented: pinned NSIS installer, distinct checked-in SVG/PNG/multi-resolution ICO branding, executable product/version metadata, current-user shortcuts, InstallLocation registration, and retention of all user data on uninstall. The normal setup does not auto-launch the app or request elevation.
+- Safety: custom installer/uninstaller checks ask for explicit application Quit instead of using the builder's process-termination path. A running-app refusal returns exit code 1618. The user's existing launcher was quit through Ctrl+Q and logged `quit-saved` before isolated installer checks.
+- Verified: actual silent install into an isolated folder (including spaces), current-user registration and both shortcuts, branded PE/icon resources, actual installed executable launching Core and its private backend without Node/npm on PATH, live-app install/uninstall refusal, graceful Quit, reinstall, uninstall retention, and reinstall after uninstall all pass. All profile/store bytes and synthetic media were preserved across installer operations. The test cleans up its own installation/shortcuts and retains its synthetic report/data under `.core-build/installer-qa/`. An actual installed-app Downloads capture was visually inspected.
+- Verified: all 52 suites / 402 tests, frontend and new/changed native-code ESLint, frozen offline lockfile install, and packaged Core/WASM/sandbox/tray/crash-retry/quit acceptance pass. The installer payload is audited for GPL/Core attribution/provenance and exclusion of development TLS keys, profiles, stores, logs, backups, and source maps. Setup matches its generated SHA-256/component manifest; automatic updates remain disabled.
+- Output: `dist/windows-installer/Custom-Stremio-0.1.0-alpha.1-windows-x64-setup.exe`, checksum, blockmap, and `release-manifest.json`. The Windows CI job builds/tests the installer and retains those artifacts for seven days; it does not publish a GitHub release. Build/run/verification instructions are updated in `desktop/README.md`. The existing unpacked-build command remains available in its separate output directory.
+- Release limits: local alpha is unsigned; no publisher certificate or update feed was configured. These tests use isolated profiles on the current Windows machine, not a freshly provisioned VM. Fresh-machine/default-location verification, signing/release access, live installed-account playback/sync, upstream source/security review, and A-to-B update acceptance remain distribution gates. Remote CI results are not yet verified.
 
 ## October 25: Windows Launcher (Phase 2)
 

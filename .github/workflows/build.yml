@@ -35,14 +35,22 @@ jobs:
       - run: pnpm verify:release --require-clean
       - name: Test desktop lifecycle and protocol boundaries
         run: pnpm test -- --runInBand tests/desktopLifecycle.integration.spec.js tests/desktopProtocol.spec.js tests/desktopReleaseFoundation.spec.js
-      - name: Build unpacked Windows launcher
-        run: pnpm desktop:build
+      - name: Build branded Windows installer
+        run: pnpm desktop:installer
       - name: Verify packaged Electron runtime
         run: pnpm desktop:test
+        env:
+          CUSTOM_STREMIO_TEST_APP_DIRECTORY: dist/windows-installer/win-unpacked
+      - name: Verify installed app and data retention
+        run: pnpm desktop:installer:test
       - uses: actions/upload-artifact@v4
         with:
-          name: custom-stremio-windows-launcher
-          path: dist/windows-launcher/win-unpacked/
+          name: custom-stremio-windows-installer
+          path: |
+            dist/windows-installer/*-setup.exe
+            dist/windows-installer/*.sha256
+            dist/windows-installer/*.blockmap
+            dist/windows-installer/release-manifest.json
           retention-days: 7
   build:
     runs-on: ubuntu-latest

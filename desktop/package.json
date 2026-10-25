@@ -5,5 +5,7 @@
     "private": true,
     "main": "main.cjs",
     "description": "Windows desktop host for the Custom Stremio fork",
+    "author": "Custom Stremio contributors",
+    "homepage": "https://github.com/f74dragon/stremio-web",
     "license": "GPL-2.0"
 }

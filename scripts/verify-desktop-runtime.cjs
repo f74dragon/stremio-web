@@ -9,7 +9,9 @@ app.whenReady().then(() => session.defaultSession.webRequest.onBeforeRequest({ u
     callback({ cancel: !details.url.startsWith('http://127.0.0.1:') });
 }));
 const qa = path.join(root, '.core-build', 'desktop-qa');
-const packaged = path.join(root, 'dist/windows-launcher/win-unpacked/resources/app.asar');
+const application = path.resolve(process.env.CUSTOM_STREMIO_TEST_APP_DIRECTORY || path.join(root, 'dist/windows-launcher/win-unpacked'));
+assert(!path.relative(root, application).startsWith('..') && !path.isAbsolute(path.relative(root, application)), 'Runtime fixture stays in this workspace');
+const packaged = path.join(application, 'resources/app.asar');
 fs.mkdirSync(qa, { recursive: true });
 process.env.CUSTOM_STREMIO_DATA_DIR = path.join(qa, 'runtime-profile');
 process.env.CUSTOM_STREMIO_DOWNLOAD_DIR = path.join(qa, 'downloads');
