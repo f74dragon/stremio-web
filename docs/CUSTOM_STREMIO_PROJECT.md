@@ -63,7 +63,7 @@ Notes:
 - `8. Add global downloads page`: In progress (`Milestones 8A-8C.3` implemented, including archive-wide cursor pagination and date filtering)
 - `9. Add MPC-HC launch support`: Completed for the planned scope (`Milestones 9A-9C`; panel playback, stream-row playback, and persistent in-app player selection implemented)
 - `10. Add watched/unwatched integration`: Completed for the planned scope through `Milestone 10E`; automated checks pass and the user reported the live playback/sync flow working after the UI/crash fixes. Detailed clean-install and recovery checks remain part of packaging acceptance.
-- `11. Package as Windows app`: In progress (Phase 1 release foundation completed October 25; desktop launcher is next, followed by installer, updater, and installed-app acceptance)
+- `11. Package as Windows app`: In progress (Phases 1-2 complete; Windows installer, updater, and installed-app acceptance remain)
 
 ## Agent Rules
 
@@ -78,7 +78,7 @@ Notes:
 
 ## Next Recommended Step
 
-Phase 2: build the Windows desktop launcher using the completed release foundation in `desktop/` and `docs/CUSTOM_STREMIO_WINDOWS_RELEASE.md`. Register/test the stable packaged origin, persist the desktop profile, manage the bundled backend with exclusive data-root ownership, handle legacy/occupied-port conflicts, and implement explicit Windows shutdown/recovery. Installer, updater, and clean-profile acceptance follow. Keep upstream source maintenance separate from binary update delivery; the detailed upstream audit identifies pre-distribution migration/review work.
+Phase 3: create the Windows x64 per-user installer using the tested launcher in `desktop/`. Finish executable branding, install/launch/uninstall and data-retention checks on a clean profile, and signing/release preparation. Phase 4 adds the fork's own update feed and an A-to-B upgrade test; do not enable automatic updates before that acceptance passes. Keep upstream source maintenance separate from binary update delivery and retain the pre-distribution source/security review gate.
 
 ## October 25: Windows Release Foundation (Phase 1)
 
@@ -93,7 +93,7 @@ Phase 2: build the Windows desktop launcher using the completed release foundati
 | Windows phase | Status |
 | --- | --- |
 | 1. Release foundation and upstream audit | Completed |
-| 2. Desktop launcher and backend lifecycle | Not started |
+| 2. Desktop launcher and backend lifecycle | Completed |
 | 3. Windows installer and clean-profile checks | Not started |
 | 4. Packaged-app update delivery and A -> B upgrade test | Not started |
 | 5. Installed-app playback/sync/recovery acceptance | Not started |
@@ -104,6 +104,19 @@ Phase 2: build the Windows desktop launcher using the completed release foundati
 - The push includes the completed playback/Core, UI/source-control, test-dependency, and Windows Phase 1 work. Local build output, temporary checkpoints, development TLS keys, and installed dependencies remain ignored.
 - Completed: implementation commit `5a78392c05bc655bcd212ba3bc6e83988068193d` was pushed to `origin/development`. `pnpm verify:release --require-clean` passes on the committed source. The earlier 50-suite / 390-test, lint, and production-build results remain the local validation baseline; remote CI results are not yet verified.
 - Fixed the Build workflow to install the backend's locked dependencies before its new integration test, use a frozen frontend lockfile, and run the clean-source release-foundation check. A normal source push does not create a Windows installer release; Phase 2 remains next.
+
+## October 25: Windows Launcher (Phase 2)
+
+- Implemented: sandboxed Electron host, private managed backend IPC and per-launch authentication, OS-owned exclusive data-root lock, local readiness and recovery, graceful Quit, close-to-tray, restricted packaged asset protocol, and an unpacked Windows x64 build.
+- Verified: all 52 suites / 402 tests pass. New lifecycle checks exercise exclusive ownership, unauthorized/wrong-origin requests, restart/crash recovery, unsupported-store preservation, Quit during startup, bounded owned-child termination, real partial-transfer pause/resume with byte-for-byte completion, and readiness while a synthetic provider is offline. Health now returns HTTP 503 until local recovery completes.
+- Verified: the actual packaged ASAR runs in an isolated Electron test host with external network requests blocked. Core worker/WASM initialization, Downloads loading, sandbox/context isolation, private renderer authentication, stable localStorage, close-to-tray, second-instance restoration, crash/retry, and graceful Quit with no owned child left running pass. Runtime captures were visually inspected. The native UI automation helper timed out awaiting app approval; these checks use Electron's own runtime and capture APIs.
+- Build/quality checks: frozen offline lockfile install, frontend lint, ESLint for all new/changed launcher/backend/test code, production web build, unpacked Windows x64 build, and packaged runtime acceptance pass. Builds retain the three existing bundle-size warnings. The Windows CI job now performs lifecycle tests, builds the launcher, runs runtime acceptance, and retains a seven-day unpacked artifact; remote CI status is not yet verified.
+- Existing terminal backend on port 5577 was detected and left running; isolated test adapters exclude that unrelated legacy listener. The release launcher displays an actionable conflict rather than sharing or terminating it.
+
+- User authorized implementation, testing, tracker updates, and commit/push after verification. Installer and update delivery remain later phases.
+- Status: Phase 2 complete. Output: `dist/windows-launcher/win-unpacked/custom-stremio.exe` (keep the whole folder). Run/build/recovery instructions are in `desktop/README.md`. No installer, signing/PE branding, binary release publication, or automatic updates are included. The optional Stremio streaming service and MPC-HC remain external dependencies; Help checks streaming-service reachability.
+- Desktop-specific integration: secure stable asset origin with safe path resolution/CSP, no Node integration or raw IPC/credential exposure in the renderer, no web service worker, and no browser Cast sender SDK. Browser development behavior remains available separately.
+- Dependency baseline verified against the official npm registry: Electron `45.0.0` and stable electron-builder `26.18.0` (the v27 prerelease is excluded). Tests used isolated synthetic data rather than the user's credentials, account, or media.
 
 ## October 24 Follow-up: Test Baseline and Playback Synchronization
 

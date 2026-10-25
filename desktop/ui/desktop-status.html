@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Custom Stremio</title><link rel="stylesheet" href="desktop-status.css"></head>
+<body>
+    <main>
+        <div class="mark" aria-hidden="true">▶</div>
+        <p class="eyebrow">CUSTOM STREMIO</p>
+        <h1 id="title">Getting things ready</h1>
+        <p id="message" role="status" aria-live="polite">Starting your local service…</p>
+        <div id="progress" class="progress" aria-hidden="true"></div>
+        <div id="actions" hidden>
+            <button id="retry" class="primary">Try again</button>
+            <button id="diagnostics">Open diagnostics</button>
+            <button id="quit">Quit</button>
+        </div>
+        <p id="code" class="code"></p>
+        <footer id="version"></footer>
+    </main>
+    <script src="desktop-status.js"></script>
+</body>
+</html>

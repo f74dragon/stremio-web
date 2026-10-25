@@ -1,8 +1,15 @@
-const { DEFAULT_LOCAL_BACKEND_URL } = require('./localBackendProtocol');
+const { DEFAULT_LOCAL_BACKEND_URL, isLocalBackendUrl } = require('./localBackendProtocol');
 
 const LOCAL_BACKEND_BASE_URL = DEFAULT_LOCAL_BACKEND_URL;
 const ALLDEBRID_AVAILABILITY_BATCH_SIZE = 100;
 const REALDEBRID_AVAILABILITY_BATCH_SIZE = 50;
+
+const getLocalBackendBaseUrl = () => {
+    const desktop = typeof window !== 'undefined' ? window.customStremioDesktop : null;
+    if (!desktop) return LOCAL_BACKEND_BASE_URL;
+    if (!isLocalBackendUrl(desktop.backendBaseUrl)) throw new Error('The desktop service is not ready. Reopen the app or use Try again.');
+    return desktop.backendBaseUrl.replace(/\/$/, '');
+};
 
 const getJsonBody = async (response) => {
     const text = await response.text();
@@ -18,7 +25,7 @@ const getJsonBody = async (response) => {
 };
 
 const requestJson = async (path, options = {}) => {
-    const url = `${LOCAL_BACKEND_BASE_URL}${path}`;
+    const url = `${getLocalBackendBaseUrl()}${path}`;
     const headers = {
         ...(options.headers || {})
     };
@@ -321,6 +328,7 @@ const openDownloadLocation = async (id) => requestJson(`/downloads/${requireDown
 
 module.exports = {
     LOCAL_BACKEND_BASE_URL,
+    getLocalBackendBaseUrl,
     requestJson,
     getBackendHealth,
     getBackendSettings,

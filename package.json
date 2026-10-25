@@ -15,6 +15,10 @@
         "start-prod": "webpack serve --mode production",
         "build": "webpack --mode production",
         "build:core": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-custom-core.ps1",
+        "desktop": "electron desktop",
+        "desktop:build": "node scripts/build-desktop.cjs",
+        "desktop:test": "node scripts/test-desktop-runtime.cjs",
+        "build:desktop-ui": "webpack --mode production --env desktop",
         "verify:release": "node scripts/verify-release-foundation.cjs",
         "test": "jest",
         "lint": "eslint src",
@@ -71,6 +75,8 @@
         "css-loader": "6.11.0",
         "cssnano": "7.1.9",
         "cssnano-preset-advanced": "7.0.16",
+        "electron": "45.0.0",
+        "electron-builder": "26.18.0",
         "eslint": "^9.39.4",
         "eslint-plugin-react": "^7.37.5",
         "globals": "^15.15.0",
@@ -92,5 +98,10 @@
         "webpack-dev-server": "^5.2.3",
         "workbox-webpack-plugin": "^7.4.1"
     },
-    "packageManager": "pnpm@10.33.2+sha512.a90faf6feeab71ad6c6e57f94e0fe1a12f5dcc22cd754db40ae9593eb6a3e0b6b12e3540218bb37ae083404b1f2ce6db2a4121e979829b4aff94b99f49da1cf8"
+    "packageManager": "pnpm@10.33.2+sha512.a90faf6feeab71ad6c6e57f94e0fe1a12f5dcc22cd754db40ae9593eb6a3e0b6b12e3540218bb37ae083404b1f2ce6db2a4121e979829b4aff94b99f49da1cf8",
+    "pnpm": {
+        "onlyBuiltDependencies": [
+            "electron"
+        ]
+    }
 }

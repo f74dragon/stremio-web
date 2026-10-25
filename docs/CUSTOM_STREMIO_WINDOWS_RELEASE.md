@@ -2,11 +2,13 @@
 
 ## Scope and current state
 
-The user approved Phase 1 on October 25, 2026. This phase establishes a recoverable
-source baseline, source-maintenance decisions, application identity, persistent
-paths, and a tested backend health contract. Electron launcher implementation is
-Phase 2; installer, update delivery, and installed-app acceptance follow. The
-configuration below is preparatory, not a claim that those later features exist.
+Phases 1–2 establish the release foundation and an unpacked Windows x64 launcher.
+The launcher runs the packaged frontend/Core and owns a private authenticated
+backend with exclusive data-root access, graceful IPC shutdown, recovery, and a
+persistent desktop profile. See [build/run instructions](../desktop/README.md).
+Installer, signing/PE branding, update delivery, and installed-app acceptance
+remain later phases. Automatic updates remain disabled; the fork's updater feed
+must never point at official Stremio binaries.
 
 The target is an Electron host for the production frontend and a bundled Node
 backend process, followed by a Windows x64 per-user NSIS installer. Electron

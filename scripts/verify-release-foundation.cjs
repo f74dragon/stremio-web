@@ -26,7 +26,7 @@ try {
     assert.equal(release.releaseRepository.provider, 'github');
     assert.equal(release.releaseRepository.owner, 'f74dragon');
     assert.equal(release.releaseRepository.repo, 'stremio-web');
-    assert.equal(release.automaticUpdatesEnabled, false, 'Updater delivery is not implemented in Phase 1');
+    assert.equal(release.automaticUpdatesEnabled, false, 'Automatic updates require Phase 4 delivery and upgrade acceptance');
 
     const identity = createBackendIdentity(backend.version);
     assert.equal(checkDesktopBackendCompatibility({ ok: true, ...identity }).compatible, true);

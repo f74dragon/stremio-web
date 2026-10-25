@@ -1,6 +1,13 @@
 const LOCAL_BACKEND_SERVICE_NAME = 'custom-stremio-local-backend';
 const LOCAL_BACKEND_PROTOCOL_VERSION = 1;
 const DEFAULT_LOCAL_BACKEND_URL = 'http://127.0.0.1:5577';
+const isLocalBackendUrl = (value) => {
+    try {
+        const url = new URL(value);
+        return url.protocol === 'http:' && url.hostname === '127.0.0.1' && /^\d+$/.test(url.port) &&
+            Number(url.port) > 0 && !url.username && !url.password && url.pathname === '/' && !url.search && !url.hash;
+    } catch { return false; }
+};
 const LOCAL_BACKEND_CAPABILITIES = Object.freeze([
     'download-records-v1',
     'download-history-v1',
@@ -44,6 +51,7 @@ module.exports = {
     LOCAL_BACKEND_PROTOCOL_VERSION,
     LOCAL_BACKEND_CAPABILITIES,
     DEFAULT_LOCAL_BACKEND_URL,
+    isLocalBackendUrl,
     createBackendIdentity,
     checkBackendCompatibility
 };

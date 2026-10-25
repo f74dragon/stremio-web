@@ -46,7 +46,7 @@ threadLoader.warmup(
     ],
 );
 
-module.exports = (env, argv) => ({
+module.exports = (env = {}, argv) => ({
     mode: argv.mode,
     devtool: argv.mode === 'production' ? 'source-map' : 'eval-source-map',
     entry: {
@@ -54,7 +54,7 @@ module.exports = (env, argv) => ({
         worker: './node_modules/@stremio/stremio-core-web/worker.js'
     },
     output: {
-        path: path.join(__dirname, 'build'),
+        path: path.join(__dirname, env.desktop ? '.core-build/desktop-ui' : 'build'),
         filename: `${COMMIT_HASH}/scripts/[name].js`,
         clean: true,
     },
@@ -225,7 +225,7 @@ module.exports = (env, argv) => ({
         new webpack.EnvironmentPlugin({
             SENTRY_DSN: null,
             ...env,
-            SERVICE_WORKER_DISABLED: false,
+            SERVICE_WORKER_DISABLED: Boolean(env.desktop),
             DEBUG: argv.mode !== 'production',
             VERSION: packageJson.version,
             COMMIT_HASH
@@ -233,7 +233,7 @@ module.exports = (env, argv) => ({
         new webpack.ProvidePlugin({
             Buffer: ['buffer', 'Buffer']
         }),
-        argv.mode === 'production' &&
+        argv.mode === 'production' && !env.desktop &&
             new WorkboxPlugin.GenerateSW({
                 maximumFileSizeToCacheInBytes: 20000000,
                 clientsClaim: true,
@@ -253,6 +253,7 @@ module.exports = (env, argv) => ({
         }),
         new HtmlWebPackPlugin({
             template: './src/index.html',
+            desktop: Boolean(env.desktop),
             inject: false,
             scriptLoading: 'blocking',
             faviconsPath: 'favicons',

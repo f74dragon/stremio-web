@@ -3,6 +3,11 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const crypto = require('crypto');
+const { getDefaultDataDirectory } = require('./dataDirectory');
+const { acquireDataRootLock } = require('./dataRootLock');
+const { TOKEN_HEADER, DESKTOP_ORIGIN, createManagedAccess, assertNoLegacyBackend } = require('./managedAccess');
+const { createWorkTracker, createTrackedApi } = require('./workTracker');
 const { version: SERVICE_VERSION } = require('./package.json');
 const { LOCAL_BACKEND_SERVICE_NAME, createBackendIdentity } = require('../src/customStremio/localBackendProtocol');
 const {
@@ -65,7 +70,9 @@ const {
 } = require('./downloadHistoryStore');
 
 const HOST = '127.0.0.1';
-const PORT = Number(process.env.PORT) || 5577;
+const PORT = process.env.PORT === undefined ? 5577 : Number(process.env.PORT);
+const MANAGED = process.env.CUSTOM_STREMIO_DESKTOP_MANAGED === '1';
+const INSTANCE_ID = process.env.CUSTOM_STREMIO_BACKEND_INSTANCE_ID || crypto.randomUUID();
 const SERVICE_NAME = LOCAL_BACKEND_SERVICE_NAME;
 const ACTIVE_DUPLICATE_STATUSES = new Set(['queued', 'downloading', 'paused', 'completed']);
 const DEFAULT_TRUSTED_DEBRID_ORIGINS = new Set([
@@ -79,6 +86,7 @@ const DEFAULT_TRUSTED_DEBRID_ORIGINS = new Set([
     'https://127.0.0.1:8081'
 ]);
 const TRUSTED_DEBRID_ORIGINS = new Set([
+    ...(MANAGED ? [DESKTOP_ORIGIN] : []),
     ...DEFAULT_TRUSTED_DEBRID_ORIGINS,
     ...String(process.env.CUSTOM_STREMIO_ALLOWED_ORIGINS || '').split(',').map((origin) => origin.trim()).filter(Boolean)
 ]);
@@ -94,6 +102,8 @@ const DEBRID_PROVIDER = Object.freeze({
 const BLOCKED_SOURCE_READINESS = new Set(['requires_caching', 'unavailable']);
 
 const app = express();
+const workTracker = createWorkTracker();
+const api = createTrackedApi(app, workTracker);
 const downloads = new Map();
 const downloadMutationIds = new Set();
 const deletingArtifactPathKeys = new Set();
@@ -144,6 +154,11 @@ let realDebridPendingCleanupCount = 0;
 let downloadCounter = 0;
 let httpServer = null;
 let shuttingDown = false;
+let ready = false;
+let canPersist = false;
+let dataRootLock = null;
+let startupPromise = null;
+let shutdownPromise = null;
 
 const getNowIso = () => new Date().toISOString();
 
@@ -755,7 +770,8 @@ const requireTrustedLocalOrigin = (request, response, next) => {
     next();
 };
 
-app.use(cors());
+app.use(MANAGED ? cors({ origin: DESKTOP_ORIGIN, allowedHeaders: ['Content-Type', TOKEN_HEADER] }) : cors());
+if (MANAGED) app.use(createManagedAccess({ token: process.env.CUSTOM_STREMIO_BACKEND_TOKEN }));
 app.use(express.json());
 
 app.use((request, response, next) => {
@@ -764,12 +780,20 @@ app.use((request, response, next) => {
 });
 
 app.use('/debrid', requireTrustedLocalOrigin);
+app.use((request, response, next) => {
+    if (request.path !== '/health' && (!ready || shuttingDown)) {
+        response.status(503).json({ ok: false, error: 'The local service is starting or saving its work. Please retry shortly.' });
+        return;
+    }
+    next();
+});
 
-app.get('/health', (request, response) => {
+api.get('/health', (request, response) => {
     const scheduler = downloadScheduler.getSnapshot();
-    response.json({
-        ok: true,
+    response.status(ready && !shuttingDown ? 200 : 503).json({
+        ok: ready && !shuttingDown,
         ...createBackendIdentity(SERVICE_VERSION),
+        instanceId: INSTANCE_ID,
         time: getNowIso(),
         downloads: {
             maxConcurrent: scheduler.maxConcurrentDownloads,
@@ -779,11 +803,11 @@ app.get('/health', (request, response) => {
     });
 });
 
-app.get('/settings', requireTrustedLocalOrigin, (request, response) => {
+api.get('/settings', requireTrustedLocalOrigin, (request, response) => {
     response.json(getBackendSettingsResponse());
 });
 
-app.patch('/settings', requireTrustedLocalOrigin, async (request, response) => {
+api.patch('/settings', requireTrustedLocalOrigin, async (request, response) => {
     const hasDownloadsUpdate = Object.prototype.hasOwnProperty.call(request.body?.downloads || {}, 'maxConcurrentDownloads');
     const hasProgressUpdate = Object.prototype.hasOwnProperty.call(request.body?.player || {}, 'progressTracking');
     if (!hasDownloadsUpdate && !hasProgressUpdate) {
@@ -829,7 +853,7 @@ app.patch('/settings', requireTrustedLocalOrigin, async (request, response) => {
     response.json(getBackendSettingsResponse());
 });
 
-app.post('/settings/player/select', requireTrustedLocalOrigin, async (request, response) => {
+api.post('/settings/player/select', requireTrustedLocalOrigin, async (request, response) => {
     try {
         const executablePath = await selectPlayerExecutable({
             currentExecutablePath: backendSettings.player.executablePath
@@ -861,7 +885,7 @@ app.post('/settings/player/select', requireTrustedLocalOrigin, async (request, r
     }
 });
 
-app.post('/settings/player/progress/test', requireTrustedLocalOrigin, async (request, response) => {
+api.post('/settings/player/progress/test', requireTrustedLocalOrigin, async (request, response) => {
     const port = request.body?.port ?? backendSettings.player.progressTracking.port;
     try {
         const status = await mpcHcStatusClient.getStatus(port);
@@ -885,7 +909,7 @@ app.post('/settings/player/progress/test', requireTrustedLocalOrigin, async (req
     }
 });
 
-app.post('/debrid/alldebrid/auth/pin', async (request, response) => {
+api.post('/debrid/alldebrid/auth/pin', async (request, response) => {
     try {
         const pin = await allDebridClient.getPin();
         const expiresIn = Number(pin?.expires_in);
@@ -906,7 +930,7 @@ app.post('/debrid/alldebrid/auth/pin', async (request, response) => {
     }
 });
 
-app.post('/debrid/alldebrid/auth/pin/check', async (request, response) => {
+api.post('/debrid/alldebrid/auth/pin/check', async (request, response) => {
     if (!allDebridPinSession) {
         response.status(409).json({ ok: false, error: 'No AllDebrid PIN connection is in progress' });
         return;
@@ -945,7 +969,7 @@ app.post('/debrid/alldebrid/auth/pin/check', async (request, response) => {
     }
 });
 
-app.delete('/debrid/alldebrid/auth', async (request, response) => {
+api.delete('/debrid/alldebrid/auth', async (request, response) => {
     const apiKey = backendSettings.debrid.allDebrid?.apiKey;
     try {
         if (apiKey) {
@@ -971,7 +995,7 @@ app.delete('/debrid/alldebrid/auth', async (request, response) => {
     }
 });
 
-app.post('/debrid/alldebrid/availability', async (request, response) => {
+api.post('/debrid/alldebrid/availability', async (request, response) => {
     const apiKey = backendSettings.debrid.allDebrid?.apiKey;
     if (!apiKey) {
         response.json({
@@ -998,7 +1022,7 @@ app.post('/debrid/alldebrid/availability', async (request, response) => {
     }
 });
 
-app.post('/debrid/alldebrid/availability/history', async (request, response) => {
+api.post('/debrid/alldebrid/availability/history', async (request, response) => {
     try {
         const result = await allDebridAvailability.getHistory(request.body?.hashes);
         response.json({
@@ -1011,7 +1035,7 @@ app.post('/debrid/alldebrid/availability/history', async (request, response) => 
     }
 });
 
-app.post('/debrid/realdebrid/auth/device', async (request, response) => {
+api.post('/debrid/realdebrid/auth/device', async (request, response) => {
     try {
         const device = await realDebridClient.getDeviceCode(REALDEBRID_OPEN_SOURCE_CLIENT_ID);
         const expiresIn = Number(device?.expires_in);
@@ -1039,7 +1063,7 @@ app.post('/debrid/realdebrid/auth/device', async (request, response) => {
     }
 });
 
-app.post('/debrid/realdebrid/auth/device/check', async (request, response) => {
+api.post('/debrid/realdebrid/auth/device/check', async (request, response) => {
     if (!realDebridDeviceSession) {
         response.status(409).json({ ok: false, error: 'No Real-Debrid device connection is in progress' });
         return;
@@ -1068,7 +1092,7 @@ app.post('/debrid/realdebrid/auth/device/check', async (request, response) => {
     }
 });
 
-app.delete('/debrid/realdebrid/auth', async (request, response) => {
+api.delete('/debrid/realdebrid/auth', async (request, response) => {
     try {
         if (backendSettings.debrid.realDebrid) {
             const accessToken = await getFreshRealDebridAccessToken();
@@ -1094,7 +1118,7 @@ app.delete('/debrid/realdebrid/auth', async (request, response) => {
     }
 });
 
-app.post('/debrid/realdebrid/availability', async (request, response) => {
+api.post('/debrid/realdebrid/availability', async (request, response) => {
     try {
         const accessToken = await getFreshRealDebridAccessToken();
         const result = await realDebridAvailability.check(accessToken, request.body?.sources);
@@ -1110,7 +1134,7 @@ app.post('/debrid/realdebrid/availability', async (request, response) => {
     }
 });
 
-app.post('/debrid/realdebrid/availability/head', async (request, response) => {
+api.post('/debrid/realdebrid/availability/head', async (request, response) => {
     try {
         const accessToken = await getFreshRealDebridAccessToken();
         const result = await realDebridAvailability.probe(accessToken, request.body?.source);
@@ -1126,7 +1150,7 @@ app.post('/debrid/realdebrid/availability/head', async (request, response) => {
     }
 });
 
-app.post('/debrid/realdebrid/availability/history', async (request, response) => {
+api.post('/debrid/realdebrid/availability/history', async (request, response) => {
     try {
         const result = await realDebridAvailability.getHistory(request.body?.sources);
         response.json({
@@ -1139,7 +1163,7 @@ app.post('/debrid/realdebrid/availability/history', async (request, response) =>
     }
 });
 
-app.post('/downloads', async (request, response) => {
+api.post('/downloads', async (request, response) => {
     const payload = request.body;
 
     if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
@@ -1271,7 +1295,7 @@ app.post('/downloads', async (request, response) => {
     });
 });
 
-app.get('/downloads', (request, response) => {
+api.get('/downloads', (request, response) => {
     const metaId = typeof request.query.metaId === 'string' ? request.query.metaId : null;
     const items = Array.from(downloads.values()).filter((record) => {
         if (record.status === 'deleted') {
@@ -1288,7 +1312,7 @@ app.get('/downloads', (request, response) => {
     response.json({ items: getDownloadRecordsResponse(items) });
 });
 
-app.get('/downloads/history', async (request, response) => {
+api.get('/downloads/history', async (request, response) => {
     const requestedLimit = request.query.limit === undefined ? undefined : Number(request.query.limit);
     if (requestedLimit !== undefined && (!Number.isSafeInteger(requestedLimit) || requestedLimit < 1)) {
         response.status(400).json({
@@ -1322,7 +1346,7 @@ app.get('/downloads/history', async (request, response) => {
     }
 });
 
-app.get('/downloads/:id', (request, response) => {
+api.get('/downloads/:id', (request, response) => {
     const record = getDownloadRecordOrSend404(request.params.id, response);
     if (!record) {
         return;
@@ -1331,7 +1355,7 @@ app.get('/downloads/:id', (request, response) => {
     response.json(getDownloadRecordResponse(record));
 });
 
-app.patch('/downloads/:id/queue', withExclusiveDownloadMutation(async (request, response) => {
+api.patch('/downloads/:id/queue', withExclusiveDownloadMutation(async (request, response) => {
     const record = getDownloadRecordOrSend404(request.params.id, response);
     if (!record) {
         return;
@@ -1391,7 +1415,7 @@ app.patch('/downloads/:id/queue', withExclusiveDownloadMutation(async (request, 
     response.json(getDownloadRecordResponse(downloads.get(record.id) || record));
 }));
 
-app.post('/downloads/:id/pause', withExclusiveDownloadMutation(async (request, response) => {
+api.post('/downloads/:id/pause', withExclusiveDownloadMutation(async (request, response) => {
     const record = getDownloadRecordOrSend404(request.params.id, response);
     if (!record) {
         return;
@@ -1443,7 +1467,7 @@ app.post('/downloads/:id/pause', withExclusiveDownloadMutation(async (request, r
     response.json(downloads.get(record.id) || record);
 }));
 
-app.post('/downloads/:id/resume', withExclusiveDownloadMutation(async (request, response) => {
+api.post('/downloads/:id/resume', withExclusiveDownloadMutation(async (request, response) => {
     const record = getDownloadRecordOrSend404(request.params.id, response);
     if (!record) {
         return;
@@ -1508,7 +1532,7 @@ app.post('/downloads/:id/resume', withExclusiveDownloadMutation(async (request, 
     response.status(202).json(getDownloadRecordResponse(downloads.get(record.id) || resumePreparation.record));
 }));
 
-app.post('/downloads/:id/retry', withExclusiveDownloadMutation(async (request, response) => {
+api.post('/downloads/:id/retry', withExclusiveDownloadMutation(async (request, response) => {
     const record = getDownloadRecordOrSend404(request.params.id, response);
     if (!record) {
         return;
@@ -1587,7 +1611,7 @@ app.post('/downloads/:id/retry', withExclusiveDownloadMutation(async (request, r
     response.status(202).json(getDownloadRecordResponse(downloads.get(record.id) || retriedRecord));
 }));
 
-app.post('/downloads/:id/cancel', withExclusiveDownloadMutation(async (request, response) => {
+api.post('/downloads/:id/cancel', withExclusiveDownloadMutation(async (request, response) => {
     const record = getDownloadRecordOrSend404(request.params.id, response);
     if (!record) {
         return;
@@ -1655,7 +1679,7 @@ app.post('/downloads/:id/cancel', withExclusiveDownloadMutation(async (request, 
     response.json(record);
 }));
 
-app.delete('/downloads/:id', withExclusiveDownloadMutation(async (request, response) => {
+api.delete('/downloads/:id', withExclusiveDownloadMutation(async (request, response) => {
     const record = getDownloadRecordOrSend404(request.params.id, response);
     if (!record) {
         return;
@@ -1724,7 +1748,7 @@ app.delete('/downloads/:id', withExclusiveDownloadMutation(async (request, respo
     });
 }));
 
-app.delete('/downloads/:id/media', withExclusiveDownloadMutation(async (request, response) => {
+api.delete('/downloads/:id/media', withExclusiveDownloadMutation(async (request, response) => {
     const record = getDownloadRecordOrSend404(request.params.id, response);
     if (!record) {
         return;
@@ -1873,7 +1897,7 @@ app.delete('/downloads/:id/media', withExclusiveDownloadMutation(async (request,
     }
 }));
 
-app.post('/downloads/:id/open-location', async (request, response) => {
+api.post('/downloads/:id/open-location', async (request, response) => {
     const record = getDownloadRecordOrSend404(request.params.id, response);
     if (!record) {
         return;
@@ -1905,7 +1929,7 @@ app.post('/downloads/:id/open-location', async (request, response) => {
     }
 });
 
-app.post('/play', async (request, response) => {
+api.post('/play', async (request, response) => {
     const downloadId = typeof request.body?.downloadId === 'string' ? request.body.downloadId.trim() : '';
     if (!downloadId) {
         response.status(400).json({
@@ -1971,7 +1995,7 @@ app.post('/play', async (request, response) => {
     }
 });
 
-app.get('/playback/progress', requireTrustedLocalOrigin, (request, response) => {
+api.get('/playback/progress', requireTrustedLocalOrigin, (request, response) => {
     const metaId = typeof request.query.metaId === 'string' && request.query.metaId.trim() ? request.query.metaId.trim() : null;
     const records = playbackProgressStore.list({ metaId }).map((record) => ({
         version: record.version,
@@ -1998,7 +2022,7 @@ app.get('/playback/progress', requireTrustedLocalOrigin, (request, response) => 
     response.json({ records });
 });
 
-app.delete('/playback/progress', requireTrustedLocalOrigin, async (_request, response) => {
+api.delete('/playback/progress', requireTrustedLocalOrigin, async (_request, response) => {
     try {
         mpcHcPlaybackTracker.stopAll('progress_cleared');
         await playbackProgressStore.clear();
@@ -2012,42 +2036,34 @@ app.delete('/playback/progress', requireTrustedLocalOrigin, async (_request, res
     }
 });
 
-const shutdown = async (signal) => {
-    if (shuttingDown) {
-        return;
-    }
+const flushStores = () => canPersist ? Promise.all([
+    persistDownloadRecordsNow(), historyStore.flush(), playbackProgressStore.flush()
+]) : Promise.resolve();
 
+const shutdown = (reason = 'quit') => {
+    if (shutdownPromise) return shutdownPromise;
     shuttingDown = true;
+    ready = false;
     downloadScheduler.stop();
-    mpcHcPlaybackTracker.stopAll('backend_shutdown');
-    console.log(`${signal} received; saving download records before shutdown.`);
-
-    if (httpServer !== null) {
-        await new Promise((resolve) => httpServer.close(resolve));
-    }
-
-    try {
-        await Promise.all([
-            persistDownloadRecordsNow(),
-            historyStore.flush(),
-            playbackProgressStore.flush()
-        ]);
-        process.exit(0);
-    } catch (error) {
-        console.error('Could not persist download records during shutdown:', error);
-        process.exit(1);
-    }
+    shutdownPromise = (async () => {
+        if (startupPromise) await startupPromise.catch(() => { /* Failed startup still needs lock/HTTP cleanup. */ });
+        const closed = httpServer ? new Promise((resolve) => httpServer.close(resolve)) : Promise.resolve();
+        await Promise.all([...downloads.keys()].filter(isDownloadActive).map(pauseDownload));
+        mpcHcPlaybackTracker.stopAll('backend_shutdown');
+        await flushStores();
+        // Keep work tracked even if its browser request has already disconnected.
+        await workTracker.waitForIdle();
+        await Promise.all([...downloads.keys()].filter(isDownloadActive).map(pauseDownload));
+        await flushStores();
+        httpServer?.closeAllConnections();
+        await closed;
+        await dataRootLock?.release();
+        console.log(`Local backend saved its work (${reason}).`);
+    })();
+    return shutdownPromise;
 };
 
-const startServer = async () => {
-    backendSettings = await settingsStore.load(createBackendSettings(
-        getConfiguredMaxConcurrentDownloads(),
-        null,
-        getConfiguredPlayerPath()
-    ));
-    downloadScheduler.setMaxConcurrentDownloads(backendSettings.downloads.maxConcurrentDownloads);
-    await playbackProgressStore.initialize();
-
+const retryStartupCleanup = async () => {
     const allDebridApiKey = backendSettings.debrid.allDebrid?.apiKey;
     if (allDebridApiKey) {
         try {
@@ -2079,6 +2095,25 @@ const startServer = async () => {
     } else {
         realDebridPendingCleanupCount = await realDebridAvailability.getPendingCleanupCount();
     }
+};
+
+const initializeServer = async () => {
+    if (!Number.isInteger(PORT) || PORT < 0 || PORT > 65535) throw new Error('PORT must be an integer from 0 to 65535');
+    if (MANAGED && String(process.env.CUSTOM_STREMIO_BACKEND_TOKEN || '').length < 32) throw new Error('Desktop backend requires a private connection token');
+    dataRootLock = await acquireDataRootLock(getDefaultDataDirectory());
+    if (MANAGED) await assertNoLegacyBackend();
+    // Reserve the HTTP port before reading or recovering mutable stores.
+    await new Promise((resolve, reject) => {
+        httpServer = app.listen(PORT, HOST, resolve);
+        httpServer.once('error', reject);
+    });
+    backendSettings = await settingsStore.load(createBackendSettings(
+        getConfiguredMaxConcurrentDownloads(),
+        null,
+        getConfiguredPlayerPath()
+    ));
+    downloadScheduler.setMaxConcurrentDownloads(backendSettings.downloads.maxConcurrentDownloads);
+    await playbackProgressStore.initialize();
 
     const storedRecords = await recordStore.load();
     const recovery = recoverInterruptedDownloadRecords(storedRecords);
@@ -2092,6 +2127,7 @@ const startServer = async () => {
         });
     }
     recovery.records.forEach((record) => downloads.set(record.id, record));
+    canPersist = true;
 
     const queuedRecords = sortQueuedDownloadRecords(recovery.records.filter((record) => record.status === 'queued'));
     let restoredQueuedCount = 0;
@@ -2138,24 +2174,29 @@ const startServer = async () => {
         console.log(`Backfilled permanent history for ${backfilledHistoryCount} existing download record(s).`);
     }
 
-    httpServer = app.listen(PORT, HOST, () => {
-        console.log(`${SERVICE_NAME} listening on http://${HOST}:${PORT}`);
-        console.log(`Download records: ${recordStore.filePath}`);
-        console.log(`Download history: ${historyStore.filePath}`);
-        console.log(`Backend settings: ${settingsStore.filePath}`);
-        console.log(`Playback progress: ${playbackProgressStore.filePath}`);
-        console.log(`Maximum concurrent downloads: ${downloadScheduler.maxConcurrentDownloads}`);
+    ready = !shuttingDown;
+    const baseUrl = `http://${HOST}:${httpServer.address().port}`;
+    console.log(`${SERVICE_NAME} listening on ${baseUrl}`);
+    if (!shuttingDown) setImmediate(() => {
+        if (!shuttingDown) workTracker.run(retryStartupCleanup).catch(() => console.warn('Provider cleanup will retry on the next launch.'));
     });
-
-    process.once('SIGINT', () => {
-        shutdown('SIGINT');
-    });
-    process.once('SIGTERM', () => {
-        shutdown('SIGTERM');
-    });
+    return { baseUrl, instanceId: INSTANCE_ID, ...createBackendIdentity(SERVICE_VERSION) };
 };
 
-startServer().catch((error) => {
-    console.error('Could not start the local backend:', error);
-    process.exitCode = 1;
-});
+const startServer = () => {
+    if (!startupPromise) startupPromise = initializeServer();
+    return startupPromise;
+};
+
+if (require.main === module) {
+    for (const signal of ['SIGINT', 'SIGTERM']) {
+        process.once(signal, () => shutdown(signal).then(() => process.exit(0), () => process.exit(1)));
+    }
+    startServer().catch(async (error) => {
+        console.error('Could not start the local backend:', error.message);
+        await shutdown('startup-failed').catch(() => { /* The original startup error is already reported. */ });
+        process.exitCode = 1;
+    });
+}
+
+module.exports = { startServer, shutdown };

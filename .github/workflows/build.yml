@@ -16,6 +16,34 @@ permissions:
   contents: write
 
 jobs:
+  windows-launcher:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+          run_install: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: npm ci --prefix local-backend --ignore-scripts
+      - run: pnpm verify:release --require-clean
+      - name: Test desktop lifecycle and protocol boundaries
+        run: pnpm test -- --runInBand tests/desktopLifecycle.integration.spec.js tests/desktopProtocol.spec.js tests/desktopReleaseFoundation.spec.js
+      - name: Build unpacked Windows launcher
+        run: pnpm desktop:build
+      - name: Verify packaged Electron runtime
+        run: pnpm desktop:test
+      - uses: actions/upload-artifact@v4
+        with:
+          name: custom-stremio-windows-launcher
+          path: dist/windows-launcher/win-unpacked/
+          retention-days: 7
   build:
     runs-on: ubuntu-latest
     steps:
