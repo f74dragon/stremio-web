@@ -98,10 +98,11 @@ Phase 2: build the Windows desktop launcher using the completed release foundati
 | 4. Packaged-app update delivery and A -> B upgrade test | Not started |
 | 5. Installed-app playback/sync/recovery acceptance | Not started |
 
-### Git Backup and CI Preparation
+### Git Backup and CI
 
 - The user requested committing/pushing the current work to the existing fork, `https://github.com/f74dragon/stremio-web.git`, on `development`. Origin was fetched and matched the audited local HEAD before preparing the commit. The local checkpoint/archive remains an additional recovery option.
 - The push includes the completed playback/Core, UI/source-control, test-dependency, and Windows Phase 1 work. Local build output, temporary checkpoints, development TLS keys, and installed dependencies remain ignored.
+- Completed: implementation commit `5a78392c05bc655bcd212ba3bc6e83988068193d` was pushed to `origin/development`. `pnpm verify:release --require-clean` passes on the committed source. The earlier 50-suite / 390-test, lint, and production-build results remain the local validation baseline; remote CI results are not yet verified.
 - Fixed the Build workflow to install the backend's locked dependencies before its new integration test, use a frozen frontend lockfile, and run the clean-source release-foundation check. A normal source push does not create a Windows installer release; Phase 2 remains next.
 
 ## October 24 Follow-up: Test Baseline and Playback Synchronization
