@@ -35,6 +35,7 @@ BoardContinueWatchingItem.propTypes = {
 
 const Board = () => {
     const t = useTranslate();
+    const profile = useProfile();
     const streamingServer = useStreamingServer();
     const nativeContinueWatchingPreview = useContinueWatchingPreview();
     const [localProgressEnabled, setLocalProgressEnabled] = React.useState(false);
@@ -52,16 +53,15 @@ const Board = () => {
             canceled = true;
         };
     }, []);
-    const continueWatchingPreview = React.useMemo(() => localProgressEnabled ?
+    const continueWatchingPreview = React.useMemo(() => localProgressEnabled && !profile.auth ?
         mergeLocalContinueWatching(nativeContinueWatchingPreview, downloadRecords, playbackProgressRecords) :
         nativeContinueWatchingPreview,
-    [downloadRecords, localProgressEnabled, nativeContinueWatchingPreview, playbackProgressRecords]);
+    [downloadRecords, localProgressEnabled, nativeContinueWatchingPreview, playbackProgressRecords, profile.auth]);
     const continueWatchingItemComponent = React.useCallback((props) => (
         <BoardContinueWatchingItem {...props} onPlayLocal={playDownload} />
     ), [playDownload]);
     const [board, loadBoardRows] = useBoard();
     const notifications = useNotifications();
-    const profile = useProfile();
     const boardCatalogsOffset = continueWatchingPreview.items.length > 0 ? 1 : 0;
     const scrollContainerRef = React.useRef();
     const showStreamingServerWarning = React.useMemo(() => {

@@ -344,6 +344,19 @@ const getDownloadDetailsHref = (record) => {
     return type === 'series' && videoId ? `${baseHref}/${encodeURIComponent(videoId)}` : baseHref;
 };
 
+const getDownloadActionError = (error, fallback) => {
+    switch (error?.responseBody?.errorCode) {
+        case 'MEDIA_FILE_NOT_FOUND':
+            return 'This file is no longer at its saved location. Restore it or download it again.';
+        case 'DOWNLOAD_DIRECTORY_NOT_FOUND':
+            return 'The download folder is unavailable. Reconnect the drive or download this title again.';
+        case 'DOWNLOAD_PATH_UNAVAILABLE':
+            return 'The download folder cannot be accessed. Check the drive and folder permissions.';
+        default:
+            return error?.backendError || fallback;
+    }
+};
+
 module.exports = {
     ACTIVE_DOWNLOAD_STATUSES,
     POLLING_DOWNLOAD_STATUSES,
@@ -359,6 +372,7 @@ module.exports = {
     getDownloadActivitySummary,
     getDownloadTitleHref,
     getDownloadDetailsHref,
+    getDownloadActionError,
     DOWNLOAD_LIBRARY_SORTS,
     getDownloadRecordStoredArtifact,
     getDownloadMediaGroupStoredBytes,

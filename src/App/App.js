@@ -17,12 +17,14 @@ const { default: GamepadModal } = require('./GamepadModal');
 const withProtectedRoutes = require('./withProtectedRoutes');
 const routerViewsConfig = require('./routerViewsConfig');
 const styles = require('./styles');
+const useExternalPlaybackSync = require('stremio/customStremio/useExternalPlaybackSync');
 
 const RouterWithProtectedRoutes = withProtectedRoutes(Router);
 
 const App = () => {
     const core = useCore();
     const profile = useProfile();
+    useExternalPlaybackSync({ core, accountId: profile.auth?.user?._id || null });
     const { i18n } = useTranslation();
     const { shell } = usePlatform();
     const [gamepadSupportEnabled, setGamepadSupportEnabled] = React.useState(false);

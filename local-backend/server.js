@@ -3,6 +3,8 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const { version: SERVICE_VERSION } = require('./package.json');
+const { LOCAL_BACKEND_SERVICE_NAME, createBackendIdentity } = require('../src/customStremio/localBackendProtocol');
 const {
     startDownload,
     pauseDownload,
@@ -64,8 +66,7 @@ const {
 
 const HOST = '127.0.0.1';
 const PORT = Number(process.env.PORT) || 5577;
-const SERVICE_NAME = 'custom-stremio-local-backend';
-const SERVICE_VERSION = 'dev';
+const SERVICE_NAME = LOCAL_BACKEND_SERVICE_NAME;
 const ACTIVE_DUPLICATE_STATUSES = new Set(['queued', 'downloading', 'paused', 'completed']);
 const DEFAULT_TRUSTED_DEBRID_ORIGINS = new Set([
     'http://localhost:8080',
@@ -768,8 +769,7 @@ app.get('/health', (request, response) => {
     const scheduler = downloadScheduler.getSnapshot();
     response.json({
         ok: true,
-        service: SERVICE_NAME,
-        version: SERVICE_VERSION,
+        ...createBackendIdentity(SERVICE_VERSION),
         time: getNowIso(),
         downloads: {
             maxConcurrent: scheduler.maxConcurrentDownloads,

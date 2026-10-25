@@ -9,13 +9,13 @@ const { findMostRecentPlaybackRecord, getPlaybackProgressForRecord } = require('
 const styles = require('./DownloadMediaGroup.less');
 
 const getEpisodeResumeLabel = (record, mediaType, t) => {
-    if (mediaType !== 'series') {
+    if (!record || mediaType !== 'series') {
         return null;
     }
 
     if (Number.isFinite(record.season) && Number.isFinite(record.episode)) {
         return t('CUSTOM_DOWNLOADS_RESUME_EPISODE', {
-            defaultValue: 'S{{season}}E{{episode}}',
+            defaultValue: 'S{{season}} · E{{episode}}',
             season: record.season,
             episode: record.episode
         });
@@ -61,6 +61,9 @@ const DownloadMediaGroup = ({
                 elapsed: playbackProgress.positionLabel
             })
             : null;
+    const remainingLabel = playbackProgress?.remainingLabel ?
+        t('CUSTOM_DOWNLOADS_RESUME_REMAINING', { defaultValue: '{{remaining}} left', remaining: playbackProgress.remainingLabel })
+        : playbackProgress?.positionLabel;
     const activity = React.useMemo(() => getDownloadActivitySummary(group.records), [group.records]);
     const progressValue = activity.progress === null ? 0 : Math.round(activity.progress);
     const episodeCountLabel = t('CUSTOM_DOWNLOADS_EPISODE_COUNT', {
@@ -152,24 +155,31 @@ const DownloadMediaGroup = ({
                             </div>
                             : null
                 }
+            </div>
+            <div className={styles['media-info']}>
+                <h2 className={styles['media-title']} title={group.title}>{group.title}</h2>
                 {
                     !selectionMode && playbackProgress ?
-                        <div className={styles['poster-resume']}>
-                            <div className={styles['poster-resume-heading']}>
-                                <strong>{t('CUSTOM_DOWNLOADS_CONTINUE_WATCHING', { defaultValue: 'Continue watching' })}</strong>
-                                <span>{t('CUSTOM_DOWNLOADS_WATCHED_PERCENT', { defaultValue: '{{progress}}% watched', progress: playbackProgress.percent })}</span>
+                        <div className={styles['playback-summary']}>
+                            <div className={styles['playback-summary-label']} title={playableRecord?.videoTitle || undefined}>
+                                <span>{resumeEpisodeLabel || t('CUSTOM_DOWNLOADS_RESUME', { defaultValue: 'Resume' })}</span>
+                                <span>{remainingLabel}</span>
                             </div>
-                            {resumeEpisodeLabel ? <div className={styles['poster-resume-episode']} title={playableRecord?.videoTitle || resumeEpisodeLabel}>{resumeEpisodeLabel}{playableRecord?.videoTitle ? ` · ${playableRecord.videoTitle}` : ''}</div> : null}
-                            {resumeTimeLabel ? <div className={styles['poster-resume-time']}>{resumeTimeLabel}</div> : null}
-                            <div className={styles['poster-resume-track']} aria-hidden={'true'}>
-                                <div className={styles['poster-resume-value']} style={{ width: `${playbackProgress.percent}%` }} />
+                            <div
+                                className={styles['playback-summary-track']}
+                                role={'progressbar'}
+                                aria-label={t('CUSTOM_DOWNLOADS_PLAYBACK_PROGRESS_TITLE', { defaultValue: 'Playback progress for {{title}}', title: group.title })}
+                                aria-valuemin={0}
+                                aria-valuemax={100}
+                                aria-valuenow={playbackProgress.percent}
+                                aria-valuetext={resumeTimeLabel || undefined}
+                                title={resumeTimeLabel || undefined}
+                            >
+                                <div className={styles['playback-summary-value']} style={{ width: `${playbackProgress.percent}%` }} />
                             </div>
                         </div>
                         : null
                 }
-            </div>
-            <div className={styles['media-info']}>
-                <h2 className={styles['media-title']} title={group.title}>{group.title}</h2>
                 {
                     selectionMode ?
                         <div className={styles['selection-meta']}>
@@ -183,7 +193,7 @@ const DownloadMediaGroup = ({
                         </div>
                         : null
                 }
-                {playError ? <div className={styles['action-error']} role={'alert'}>{playError}</div> : null}
+                {playError ? <div className={styles['action-error']} role={'alert'}><Icon name={'warning'} /><span>{playError}</span></div> : null}
             </div>
         </article>
     );

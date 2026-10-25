@@ -15,12 +15,14 @@ const {
     testMpcHcProgressConnection
 } = require('../localBackendClient');
 const styles = require('./DownloadManagerSettingsPanel.less');
+const { subscribeStatus, getStatus } = require('../externalPlaybackSync');
 
 const PRIMARY_CONCURRENCY_OPTIONS = [1, 2, 3, 4];
 const UNLIMITED_CONCURRENT_DOWNLOADS = 'unlimited';
 
 const DownloadManagerSettingsPanel = ({ onSettingsChange }) => {
     const { t } = useTranslation();
+    const syncStatus = React.useSyncExternalStore(subscribeStatus, getStatus, getStatus);
     const mountedRef = React.useRef(false);
     const requestSequenceRef = React.useRef(0);
     const [settings, setSettings] = React.useState(null);
@@ -648,7 +650,7 @@ const DownloadManagerSettingsPanel = ({ onSettingsChange }) => {
                     </div>
                     <p>
                         {t('CUSTOM_DOWNLOAD_MANAGER_PLAYER_DESCRIPTION', {
-                            defaultValue: 'Choose the Windows .exe used to play completed downloads. The path is stored only by the local backend.'
+                            defaultValue: 'Choose the Windows player used to open downloaded movies and episodes.'
                         })}
                     </p>
                 </div>
@@ -698,14 +700,17 @@ const DownloadManagerSettingsPanel = ({ onSettingsChange }) => {
                     </div>
                     <p>
                         {t('CUSTOM_DOWNLOAD_MANAGER_MPC_PROGRESS_DESCRIPTION', {
-                            defaultValue: 'Observe local playback for future watched and Continue Watching features. MPC-HC still controls resume position.'
+                            defaultValue: 'Resume where you left off and keep your Stremio account up to date while the app is open.'
                         })}
                     </p>
-                    <ol className={styles['progress-setup']}>
-                        <li>{t('CUSTOM_DOWNLOAD_MANAGER_MPC_SETUP_WEB', { defaultValue: 'In MPC-HC, open Options → Player → Web Interface and enable Listen on port.' })}</li>
-                        <li><strong>{t('CUSTOM_DOWNLOAD_MANAGER_MPC_SETUP_LOCAL', { defaultValue: 'Enable Allow access from localhost only.' })}</strong></li>
-                        <li>{t('CUSTOM_DOWNLOAD_MANAGER_MPC_SETUP_HISTORY', { defaultValue: 'Under Player → History, enable Keep history and Remember File position.' })}</li>
-                    </ol>
+                    <details className={styles['setup-disclosure']}>
+                        <summary>{t('CUSTOM_DOWNLOAD_MANAGER_MPC_SETUP', { defaultValue: 'MPC-HC setup instructions' })}</summary>
+                        <ol className={styles['progress-setup']}>
+                            <li>{t('CUSTOM_DOWNLOAD_MANAGER_MPC_SETUP_WEB', { defaultValue: 'In MPC-HC, open Options → Player → Web Interface and enable Listen on port.' })}</li>
+                            <li><strong>{t('CUSTOM_DOWNLOAD_MANAGER_MPC_SETUP_LOCAL', { defaultValue: 'Enable Allow access from localhost only.' })}</strong></li>
+                            <li>{t('CUSTOM_DOWNLOAD_MANAGER_MPC_SETUP_HISTORY', { defaultValue: 'Under Player → History, enable Keep history and Remember File position.' })}</li>
+                        </ol>
+                    </details>
                 </div>
                 <div className={styles['progress-controls']}>
                     <label className={styles['progress-toggle']}>
@@ -764,9 +769,17 @@ const DownloadManagerSettingsPanel = ({ onSettingsChange }) => {
                         />
                         <span className={styles['progress-checkbox']} aria-hidden={'true'} />
                         <span>{t('CUSTOM_DOWNLOAD_MANAGER_MPC_WATCH_SYNC', {
-                            defaultValue: 'Show verified MPC-HC resume progress on Home and sync completed movies after verified 90% playback'
+                            defaultValue: 'Sync playback to my Stremio account. Mark titles watched at 90% and continue to the next episode.'
                         })}</span>
                     </label>
+                    {progressDraft.watchedSyncEnabled ? <p role={'status'}>
+                        {syncStatus.message || (syncStatus.state === 'synced' ? t('CUSTOM_DOWNLOAD_MANAGER_MPC_SYNC_ACTIVE', {
+                            defaultValue: 'Playback sync is active. Last update: {{time}}.',
+                            time: new Date(syncStatus.lastSyncedAt).toLocaleTimeString()
+                        }) : t('CUSTOM_DOWNLOAD_MANAGER_MPC_SYNC_ACCOUNT', {
+                            defaultValue: 'Sign in to Stremio and keep this app open for account sync. Episodes require metadata from an installed addon.'
+                        }))}
+                    </p> : null}
                     <div className={styles['progress-actions']}>
                         <button
                             className={styles['progress-test-button']}
@@ -825,7 +838,7 @@ const DownloadManagerSettingsPanel = ({ onSettingsChange }) => {
                     </div>
                     <p>
                         {t('CUSTOM_DOWNLOAD_MANAGER_ALLDEBRID_DESCRIPTION', {
-                            defaultValue: 'Connect your account for future explicit debrid actions. Browsing sources uses local provider labels and never creates an AllDebrid magnet.'
+                            defaultValue: 'Connect AllDebrid to check source availability and download with your account.'
                         })}
                     </p>
                 </div>
@@ -916,7 +929,7 @@ const DownloadManagerSettingsPanel = ({ onSettingsChange }) => {
                     </div>
                     <p>
                         {t('CUSTOM_DOWNLOAD_MANAGER_REALDEBRID_DESCRIPTION', {
-                            defaultValue: 'Connect through Real-Debrid device authorization. Browsing stays read-only; an explicit source check briefly creates and removes a temporary torrent.'
+                            defaultValue: 'Connect Real-Debrid to check source availability and download with your account.'
                         })}
                     </p>
                 </div>

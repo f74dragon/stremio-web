@@ -32,7 +32,11 @@ jobs:
           node-version-file: .nvmrc
           cache: "pnpm"
       - name: Install NPM dependencies
-        run: pnpm install
+        run: pnpm install --frozen-lockfile
+      - name: Install local backend dependencies
+        run: npm ci --prefix local-backend --ignore-scripts
+      - name: Verify release foundation
+        run: pnpm verify:release --require-clean
       - name: Build
         run: pnpm build
       - name: Test

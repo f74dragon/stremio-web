@@ -1,6 +1,7 @@
 const React = require('react');
 const PropTypes = require('prop-types');
 const { default: Icon } = require('@stremio/stremio-icons/react');
+const SelectMenu = require('./SelectMenu');
 const styles = require('./DownloadLibraryToolbar.less');
 
 const DownloadLibraryToolbar = ({
@@ -37,12 +38,7 @@ const DownloadLibraryToolbar = ({
                     </button>
                     : null}
             </div>
-            <label className={styles['sort-field']}>
-                <span>{sortLabel}</span>
-                <select value={sortValue} disabled={disabled} onChange={(event) => onSortChange(event.target.value)}>
-                    {sortOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                </select>
-            </label>
+            <SelectMenu className={styles['sort-field']} label={sortLabel} value={sortValue} options={sortOptions} disabled={disabled} onSelect={onSortChange} />
             <div className={styles['result-count']} aria-live={'polite'}>
                 <span>{resultSummary}</span>
             </div>

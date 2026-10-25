@@ -269,6 +269,46 @@ describe('localBackendClient settings', () => {
         });
     });
 
+    test.each([
+        ['AllDebrid', checkAllDebridAvailability, ['hash-one', 'hash-two']],
+        ['Real-Debrid', checkRealDebridAvailability, [{ key: 'one' }, { key: 'two' }]]
+    ])('canceling %s keeps the active result and cleanup warning, without starting another request', async (_provider, check, sources) => {
+        const controller = new AbortController();
+        const onBatchComplete = jest.fn();
+        let finishCurrentRequest;
+        global.fetch.mockImplementationOnce(() => new Promise((resolve) => { finishCurrentRequest = resolve; }));
+        const checking = check(sources, { batchSize: 1, signal: controller.signal, onBatchComplete });
+
+        controller.abort();
+        expect(global.fetch).toHaveBeenCalledTimes(1);
+        expect(global.fetch.mock.calls[0][1].signal).toBeUndefined();
+        expect(onBatchComplete).not.toHaveBeenCalled();
+        const result = { connected: true, items: [{ status: 'cached' }], cleanupWarning: 'Cleanup will retry.' };
+        finishCurrentRequest(createJsonResponse(result));
+
+        await expect(checking).resolves.toMatchObject({ ...result, canceled: true });
+        expect(global.fetch).toHaveBeenCalledTimes(1);
+        expect(onBatchComplete).toHaveBeenCalledWith(expect.objectContaining({ result }));
+    });
+
+    test('a check canceled before it starts does not contact the backend or claim a connection', async () => {
+        const controller = new AbortController();
+        controller.abort();
+        await expect(checkAllDebridAvailability(['one'], { signal: controller.signal })).resolves.toMatchObject({
+            canceled: true, connected: undefined, items: []
+        });
+        expect(global.fetch).not.toHaveBeenCalled();
+    });
+
+    test('canceling from the progress callback prevents that next batch from being sent', async () => {
+        const controller = new AbortController();
+        await expect(checkAllDebridAvailability(['one'], {
+            signal: controller.signal,
+            onBatchStart: () => controller.abort()
+        })).resolves.toMatchObject({ canceled: true, items: [] });
+        expect(global.fetch).not.toHaveBeenCalled();
+    });
+
     test('opens the backend-owned native player selector', async () => {
         const responseBody = {
             downloads: { maxConcurrentDownloads: 2 },

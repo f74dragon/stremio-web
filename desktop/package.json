@@ -1,0 +1,8 @@
+{
+    "name": "custom-stremio-desktop",
+    "productName": "Custom Stremio",
+    "version": "0.1.0-alpha.1",
+    "private": true,
+    "description": "Windows desktop host for the Custom Stremio fork",
+    "license": "GPL-2.0"
+}

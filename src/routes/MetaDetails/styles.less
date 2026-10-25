@@ -8,6 +8,24 @@
     title-modal-container: title-container;
 }
 
+:import('~stremio/components/MetaPreview/styles.less') {
+    preview-info: meta-info-container;
+    preview-logo: logo;
+    preview-title: logo-placeholder;
+    preview-background: background-image-layer;
+    preview-runtime: runtime-release-info-container;
+    preview-description: description-container;
+    preview-links: meta-links;
+    preview-footer: footer-content-container;
+    preview-actions: action-buttons-container;
+    preview-action: action-button;
+    preview-group: group-container;
+}
+
+:import('~stremio/components/ActionsGroup/ActionsGroup.less') {
+    group-icon: icon-container;
+}
+
 .metadetails-container {
     display: flex;
     flex-direction: column;
@@ -27,13 +45,13 @@
         background-color: var(--modal-background-color);
 
         .background-image {
+            display: none;
             pointer-events: none; 
-            display: block;
             width: 100%;
             height: 100%;
             object-fit: cover;
             object-position: right;
-            opacity: 0.3;
+            opacity: 0.07;
         }
     }
 
@@ -88,15 +106,54 @@
         }
 
         .meta-preview {
-            flex: 0 1 auto;
+            flex: 1 1 28rem;
             align-self: stretch;
-            padding: 0 4rem 2rem 4rem;
+            min-width: 0;
+            padding: 1.5rem 3rem 2rem;
+            overflow-y: auto;
 
-            padding-left: max(1rem, calc(4rem - var(--safe-area-inset-left)));
+            .preview-background { display: none; }
+            .preview-info { display: contents; }
+            .preview-logo {
+                flex: none;
+                width: min(100%, 32rem);
+                height: 7rem;
+                margin: 0 0 1.5rem;
+                object-position: left center;
+            }
+            .preview-title {
+                flex: none;
+                margin: 0 0 1.25rem;
+                font-size: clamp(1.8rem, 3vw, 3rem);
+                font-weight: 650;
+                line-height: 1.15;
+            }
+            .preview-runtime, .preview-description, .preview-links { flex: none; }
+            .preview-description { font-size: 0.95rem; line-height: 1.65; }
+            .preview-actions {
+                order: 1;
+                flex: none;
+                align-items: center;
+                gap: 0.65rem;
+                margin-top: 1.5rem;
+                padding: 0;
+
+                .preview-action, .preview-group {
+                    height: 3.2rem;
+                    margin: 0;
+                    border: 1px solid rgba(255, 255, 255, 0.1);
+                    border-radius: 0.7rem;
+                    background: rgba(255, 255, 255, 0.04);
+                }
+                .preview-action { width: 3.2rem; }
+                .preview-action:global(.wide) { width: auto; padding: 0 1.1rem; }
+                .group-icon { width: 3.2rem; height: 3.2rem; padding: 0 0.75rem; }
+            }
+            .preview-footer { order: 2; flex: none; margin-top: 1.75rem; }
         }
 
         .spacing {
-            flex: 1;
+            display: none;
         }
 
         .videos-list {
@@ -149,8 +206,8 @@
                 width: 100%;
                 height: 100%;
                 border-radius: var(--border-radius) 0 0 var(--border-radius);
-                background-color: rgba(0, 0, 0, 0.4);
-                backdrop-filter: blur(15px);
+                border-left: 1px solid rgba(255, 255, 255, 0.07);
+                background-color: #0e0d16;
             }
         }
     }

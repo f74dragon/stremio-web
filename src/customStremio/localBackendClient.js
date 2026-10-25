@@ -1,4 +1,6 @@
-const LOCAL_BACKEND_BASE_URL = 'http://127.0.0.1:5577';
+const { DEFAULT_LOCAL_BACKEND_URL } = require('./localBackendProtocol');
+
+const LOCAL_BACKEND_BASE_URL = DEFAULT_LOCAL_BACKEND_URL;
 const ALLDEBRID_AVAILABILITY_BATCH_SIZE = 100;
 const REALDEBRID_AVAILABILITY_BATCH_SIZE = 50;
 
@@ -61,11 +63,19 @@ const requestAvailabilityBatches = async (path, fieldName, items, maxBatchSize, 
 
     const results = [];
     for (let batchIndex = 0; batchIndex < batches.length; batchIndex += 1) {
+        if (options.signal?.aborted) {
+            break;
+        }
         const batch = batches[batchIndex];
         const progress = { batch, batchIndex, totalBatches: batches.length };
         if (typeof options.onBatchStart === 'function') {
             options.onBatchStart(progress);
         }
+        if (options.signal?.aborted) {
+            break;
+        }
+        // Let an active request finish so its temporary provider entries can be
+        // cleaned up and its observations returned. Cancellation stops the queue.
         const result = await requestJson(path, {
             method: 'POST',
             body: { [fieldName]: batch }
@@ -75,7 +85,7 @@ const requestAvailabilityBatches = async (path, fieldName, items, maxBatchSize, 
             options.onBatchComplete({ ...progress, result });
         }
     }
-    if (results.length === 1) {
+    if (results.length === 1 && !options.signal?.aborted) {
         return results[0];
     }
 
@@ -84,9 +94,10 @@ const requestAvailabilityBatches = async (path, fieldName, items, maxBatchSize, 
         .filter((warning) => typeof warning === 'string' && warning.length > 0)));
     return {
         ...results[results.length - 1],
-        connected: results.every((result) => result?.connected !== false),
+        connected: results.length > 0 ? results.every((result) => result?.connected !== false) : undefined,
         items: results.flatMap((result) => Array.isArray(result?.items) ? result.items : []),
-        cleanupWarning: cleanupWarnings.length > 0 ? cleanupWarnings.join(' ') : null
+        cleanupWarning: cleanupWarnings.length > 0 ? cleanupWarnings.join(' ') : null,
+        ...(options.signal?.aborted ? { canceled: true } : {})
     };
 };
 

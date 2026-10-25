@@ -106,12 +106,6 @@ const DownloadMediaDetails = ({
     return (
         <section className={styles['details-page']} aria-label={group.title}>
             <div className={styles['hero']}>
-                {
-                    heroArtwork ?
-                        <Image className={styles['hero-background']} src={heroArtwork} alt={' '} />
-                        :
-                        null
-                }
                 <div className={styles['hero-shade']} />
                 <div className={styles['details-toolbar']}>
                     <button type={'button'} className={styles['back-button']} onClick={onBack}>
@@ -140,15 +134,7 @@ const DownloadMediaDetails = ({
                     </div>
                     <div className={styles['hero-info']}>
                         <div className={styles['media-type']}>{group.type === 'series' ? t('CUSTOM_DOWNLOADS_SERIES', { defaultValue: 'Series' }) : t('CUSTOM_DOWNLOADS_MOVIE', { defaultValue: 'Movie' })}</div>
-                        {
-                            group.logo ?
-                                <React.Fragment>
-                                    <Image className={styles['title-logo']} src={group.logo} alt={group.title} title={group.title} />
-                                    <h1 className={styles['visually-hidden']}>{group.title}</h1>
-                                </React.Fragment>
-                                :
-                                <h1 className={styles['title']} title={group.title}>{group.title}</h1>
-                        }
+                        <h1 className={styles['title']} title={group.title}>{group.title}</h1>
                         {
                             releaseLabel || group.runtime || imdbScore ?
                                 <div className={styles['title-facts']}>
@@ -347,7 +333,7 @@ const DownloadMediaDetails = ({
                             : episodeGroup.title;
                         return (
                             <section className={styles['episode-group']} key={episodeGroup.key}>
-                                <div className={styles['episode-heading']}>
+                                {selectionMode || episodeGroup.records.length > 1 ? <div className={styles['episode-heading']}>
                                     <div>
                                         <strong>{episodeLabel}</strong>
                                         {episodeGroup.title !== episodeLabel ? <span>{episodeGroup.title}</span> : null}
@@ -368,7 +354,7 @@ const DownloadMediaDetails = ({
                                             </button>
                                             : null
                                     }
-                                </div>
+                                </div> : null}
                                 <div className={styles['episode-records']}>
                                     {episodeGroup.records.map((record) => {
                                         const artwork = getRecordArtwork(record, group);

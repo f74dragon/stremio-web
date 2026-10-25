@@ -1,3 +1,5 @@
+@import (reference) './custom-ui.less';
+
 .workspace-overlay {
     position: fixed;
     inset: 0;
@@ -6,7 +8,7 @@
     place-items: center;
     padding: 1.5rem;
     overflow-y: auto;
-    background: radial-gradient(circle at 50% 18%, rgba(115, 75, 195, 0.35), transparent 42%), rgba(9, 7, 18, 0.93);
+    background: rgba(9, 8, 16, 0.85);
     backdrop-filter: blur(1rem);
 }
 
@@ -16,11 +18,11 @@
     width: min(64rem, 100%);
     max-height: calc(100vh - 3rem);
     overflow: hidden;
-    border: 1px solid rgba(183, 151, 255, 0.34);
+    border: 1px solid rgba(255, 255, 255, 0.12);
     border-radius: 1.1rem;
-    background: linear-gradient(145deg, rgba(42, 33, 66, 0.99), rgba(17, 14, 29, 0.99));
+    background: #191824;
     color: var(--primary-foreground-color);
-    box-shadow: 0 1.6rem 5rem rgba(0, 0, 0, 0.52), 0 0 3rem rgba(125, 80, 216, 0.16);
+    box-shadow: 0 1.6rem 5rem rgba(0, 0, 0, 0.45);
 }
 
 .workspace-header {
@@ -426,6 +428,14 @@
     }
 }
 
+.workspace-review-episode > span {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
 .workspace-review-source {
     gap: 0.15rem;
 
@@ -437,6 +447,7 @@
 .workspace-change,
 .workspace-primary,
 .workspace-secondary {
+    .custom-control();
     display: flex;
     align-items: center;
     justify-content: center;
@@ -459,7 +470,7 @@
 }
 
 .workspace-primary {
-    background: var(--primary-accent-color);
+    .custom-primary();
 
     svg {
         width: 0.9rem;

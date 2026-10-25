@@ -1,4 +1,5 @@
 const React = require('react');
+const { createPortal } = require('react-dom');
 const PropTypes = require('prop-types');
 const classnames = require('classnames');
 const { useTranslation } = require('react-i18next');
@@ -133,6 +134,12 @@ const DownloadRecordCard = ({
     const { t } = useTranslation();
     const recordId = record?.id;
     const [confirmingMediaDelete, setConfirmingMediaDelete] = React.useState(false);
+    const [moreActionsOpen, setMoreActionsOpen] = React.useState(false);
+    const [menuPosition, setMenuPosition] = React.useState(null);
+    const moreActionsRef = React.useRef(null);
+    const menuRef = React.useRef(null);
+    const keepDownloadRef = React.useRef(null);
+    const menuId = React.useId();
     const status = record?.status || 'unknown';
     const labels = getRecordLabels(record, variant, t('CUSTOM_DOWNLOAD_UNTITLED', { defaultValue: 'Untitled download' }));
     const detailsHref = variant === 'library' ? getDownloadDetailsHref(record) : null;
@@ -158,7 +165,69 @@ const DownloadRecordCard = ({
 
     React.useEffect(() => {
         setConfirmingMediaDelete(false);
+        setMoreActionsOpen(false);
     }, [recordId, selectionMode]);
+
+    React.useEffect(() => {
+        if (!moreActionsOpen) {
+            setMenuPosition(null);
+            return undefined;
+        }
+        const trigger = moreActionsRef.current;
+        const menu = menuRef.current;
+        const anchor = trigger.getBoundingClientRect();
+        const { width, height } = menu.getBoundingClientRect();
+        const gap = 8;
+        setMenuPosition({
+            left: Math.max(gap, Math.min(anchor.right - width, window.innerWidth - width - gap)),
+            top: Math.max(gap, Math.min(
+                anchor.top >= height + gap * 2 ? anchor.top - height - gap : anchor.bottom + gap,
+                window.innerHeight - height - gap
+            ))
+        });
+        const closeOutside = (event) => {
+            if (!trigger.contains(event.target) && !menu.contains(event.target)) {
+                setMoreActionsOpen(false);
+            }
+        };
+        const closeOnViewportChange = (event) => {
+            if (!menu.contains(event.target)) {
+                setMoreActionsOpen(false);
+            }
+        };
+        const closeOnEscape = (event) => {
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                event.stopPropagation();
+                setMoreActionsOpen(false);
+                trigger.focus();
+            }
+        };
+        document.addEventListener('pointerdown', closeOutside);
+        document.addEventListener('focusin', closeOutside);
+        document.addEventListener('keydown', closeOnEscape, true);
+        window.addEventListener('resize', closeOnViewportChange);
+        window.addEventListener('scroll', closeOnViewportChange, true);
+        return () => {
+            document.removeEventListener('pointerdown', closeOutside);
+            document.removeEventListener('focusin', closeOutside);
+            document.removeEventListener('keydown', closeOnEscape, true);
+            window.removeEventListener('resize', closeOnViewportChange);
+            window.removeEventListener('scroll', closeOnViewportChange, true);
+        };
+    }, [moreActionsOpen]);
+
+    React.useEffect(() => {
+        if (moreActionsOpen && menuPosition) {
+            menuRef.current?.querySelector('button:not(:disabled)')?.focus();
+        }
+    }, [moreActionsOpen, menuPosition]);
+
+    React.useEffect(() => {
+        if (confirmingMediaDelete) {
+            keepDownloadRef.current?.focus();
+        }
+    }, [confirmingMediaDelete]);
 
     return (
         <article
@@ -179,29 +248,14 @@ const DownloadRecordCard = ({
                 </div>
                 <div className={classnames(styles['record-status'], styles[`record-status-${status}`])}>{queueLabels.status}</div>
             </div>
-            {
-                variant === 'library' ?
-                    <div className={styles['record-essential-meta']}>
-                        {queueLabels.detail ? <span className={styles['queue-meta']}>{queueLabels.detail}</span> : null}
-                        <span>{fileSize || t('CUSTOM_DOWNLOAD_SIZE_UNKNOWN', { defaultValue: 'Size unavailable' })}</span>
-                        <span>{progress.label}</span>
-                    </div>
-                    :
-                    <div className={styles['record-meta']}>
-                        {queueLabels.detail ? <span className={styles['queue-meta']}>{queueLabels.detail}</span> : null}
-                        <span>{record?.addonName || t('CUSTOM_DOWNLOAD_UNKNOWN_ADDON', { defaultValue: 'Unknown addon' })}</span>
-                        <span>{record?.streamName || t('CUSTOM_DOWNLOAD_UNKNOWN_STREAM', { defaultValue: 'Unknown stream' })}</span>
-                        <span>
-                            {t('CUSTOM_DOWNLOAD_PROGRESS', {
-                                defaultValue: 'Progress: {{progress}}',
-                                progress: progress.label
-                            })}
-                        </span>
-                    </div>
-            }
-            <div className={styles['progress-track']} aria-hidden={'true'}>
-                <div className={styles['progress-value']} style={{ width: `${progress.value}%` }} />
+            <div className={styles['record-essential-meta']}>
+                {queueLabels.detail ? <span className={styles['queue-meta']}>{queueLabels.detail}</span> : null}
+                <span>{fileSize || t('CUSTOM_DOWNLOAD_SIZE_UNKNOWN', { defaultValue: 'Size unavailable' })}</span>
+                {status !== 'completed' ? <span>{progress.label}</span> : null}
             </div>
+            {status !== 'completed' ? <div className={styles['progress-track']} aria-hidden={'true'}>
+                <div className={styles['progress-value']} style={{ width: `${progress.value}%` }} />
+            </div> : null}
             {
                 playbackProgress ?
                     <div className={styles['playback-progress']}>
@@ -216,34 +270,16 @@ const DownloadRecordCard = ({
                     : null
             }
             {record?.error ? <div className={styles['record-error']}>{record.error}</div> : null}
-            {
-                variant === 'library' ?
-                    <details className={styles['download-info']}>
-                        <summary>{t('CUSTOM_DOWNLOAD_INFO', { defaultValue: 'Download info' })}</summary>
-                        <div className={styles['download-info-content']}>
-                            <div><span>{t('CUSTOM_DOWNLOAD_ADDON_LABEL', { defaultValue: 'Addon' })}</span><strong>{record?.addonName || t('CUSTOM_DOWNLOAD_UNKNOWN_ADDON', { defaultValue: 'Unknown addon' })}</strong></div>
-                            <div><span>{t('CUSTOM_DOWNLOAD_STREAM_LABEL', { defaultValue: 'Stream' })}</span><strong>{record?.streamName || t('CUSTOM_DOWNLOAD_UNKNOWN_STREAM', { defaultValue: 'Unknown stream' })}</strong></div>
-                            {queueLabels.detail ? <div><span>{t('CUSTOM_DOWNLOAD_QUEUE_LABEL', { defaultValue: 'Queue' })}</span><strong>{queueLabels.detail}</strong></div> : null}
-                            {record?.createdAt ? <div><span>{t('CUSTOM_DOWNLOAD_CREATED_LABEL', { defaultValue: 'Added' })}</span><strong>{formatCreatedAt(record.createdAt)}</strong></div> : null}
-                            {record?.localPath ? <div className={styles['record-path']} title={record.localPath}><span>{t('CUSTOM_DOWNLOAD_PATH_LABEL', { defaultValue: 'File' })}</span><strong>{record.localPath}</strong></div> : null}
-                        </div>
-                    </details>
-                    :
-                    <React.Fragment>
-                        {record?.localPath ? <div className={styles['record-path']} title={record.localPath}>{record.localPath}</div> : null}
-                        {
-                            record?.createdAt ?
-                                <div className={styles['record-created']}>
-                                    {t('CUSTOM_DOWNLOAD_CREATED', {
-                                        defaultValue: 'Created: {{createdAt}}',
-                                        createdAt: formatCreatedAt(record.createdAt)
-                                    })}
-                                </div>
-                                :
-                                null
-                        }
-                    </React.Fragment>
-            }
+            <details className={styles['download-info']}>
+                <summary>{t('CUSTOM_DOWNLOAD_INFO', { defaultValue: 'Download info' })}</summary>
+                <div className={styles['download-info-content']}>
+                    <div><span>{t('CUSTOM_DOWNLOAD_ADDON_LABEL', { defaultValue: 'Addon' })}</span><strong>{record?.addonName || t('CUSTOM_DOWNLOAD_UNKNOWN_ADDON', { defaultValue: 'Unknown addon' })}</strong></div>
+                    <div><span>{t('CUSTOM_DOWNLOAD_STREAM_LABEL', { defaultValue: 'Stream' })}</span><strong>{record?.streamName || t('CUSTOM_DOWNLOAD_UNKNOWN_STREAM', { defaultValue: 'Unknown stream' })}</strong></div>
+                    {queueLabels.detail ? <div><span>{t('CUSTOM_DOWNLOAD_QUEUE_LABEL', { defaultValue: 'Queue' })}</span><strong>{queueLabels.detail}</strong></div> : null}
+                    {record?.createdAt ? <div><span>{t('CUSTOM_DOWNLOAD_CREATED_LABEL', { defaultValue: 'Added' })}</span><strong>{formatCreatedAt(record.createdAt)}</strong></div> : null}
+                    {record?.localPath ? <div className={styles['record-path']} title={record.localPath}><span>{t('CUSTOM_DOWNLOAD_PATH_LABEL', { defaultValue: 'File' })}</span><strong>{record.localPath}</strong></div> : null}
+                </div>
+            </details>
             {actionError ? <div className={styles['record-action-error']} role={'alert'}>{actionError}</div> : null}
             {
                 !selectionMode && confirmingMediaDelete && canDeleteMedia ?
@@ -266,9 +302,15 @@ const DownloadRecordCard = ({
                         </span>
                         <div className={styles['delete-confirmation-actions']}>
                             <Button
+                                ref={keepDownloadRef}
                                 className={styles['keep-button']}
                                 disabled={actionInProgress}
-                                onClick={() => !actionInProgress && setConfirmingMediaDelete(false)}
+                                onClick={() => {
+                                    if (!actionInProgress) {
+                                        setConfirmingMediaDelete(false);
+                                        moreActionsRef.current?.focus();
+                                    }
+                                }}
                             >
                                 {t('CUSTOM_DOWNLOAD_KEEP', { defaultValue: 'Keep download' })}
                             </Button>
@@ -290,27 +332,6 @@ const DownloadRecordCard = ({
             {
                 !selectionMode && (canPause || canResume || canCancel || canRetry || canPlay || canOpenLocation || canRemove || canDeleteMedia) ?
                     <div className={styles['record-actions']}>
-                        {
-                            canOpenLocation ?
-                                <Button
-                                    className={styles['location-button']}
-                                    title={t('CUSTOM_DOWNLOAD_OPEN_LOCATION_TITLE', {
-                                        defaultValue: 'Open the location of {{title}} in File Explorer',
-                                        title: labels.title
-                                    })}
-                                    aria-disabled={actionInProgress}
-                                    disabled={actionInProgress}
-                                    tabIndex={actionInProgress ? -1 : 0}
-                                    onClick={() => !actionInProgress && onOpenLocation?.(recordId)}
-                                >
-                                    {action === 'location' ?
-                                        t('CUSTOM_DOWNLOAD_OPENING_LOCATION', { defaultValue: 'Opening folder...' })
-                                        :
-                                        t('CUSTOM_DOWNLOAD_OPEN_LOCATION', { defaultValue: 'Open location' })}
-                                </Button>
-                                :
-                                null
-                        }
                         {
                             canPause ?
                                 <Button
@@ -369,19 +390,6 @@ const DownloadRecordCard = ({
                                 null
                         }
                         {
-                            canRemove ?
-                                <div className={styles['record-action-note']}>
-                                    {record?.partialPath && hasSharedPartialOwner ?
-                                        t('CUSTOM_DOWNLOAD_REMOVE_SHARED_NOTE', {
-                                            defaultValue: 'Remove this duplicate record first. Its shared partial file stays protected for the remaining record.'
-                                        })
-                                        :
-                                        t('CUSTOM_DOWNLOAD_REMOVE_NOTE', { defaultValue: 'Remove record keeps any downloaded or partial file data on disk.' })}
-                                </div>
-                                :
-                                null
-                        }
-                        {
                             canPlay ?
                                 <Button
                                     className={styles['play-button']}
@@ -421,47 +429,116 @@ const DownloadRecordCard = ({
                                 :
                                 null
                         }
-                        {
-                            canRemove ?
-                                <Button
-                                    className={styles['remove-button']}
-                                    title={t('CUSTOM_DOWNLOAD_REMOVE_TITLE', {
-                                        defaultValue: 'Remove {{title}} from this list; any local file data will stay on disk',
-                                        title: labels.title
-                                    })}
-                                    aria-disabled={actionInProgress}
-                                    disabled={actionInProgress}
-                                    tabIndex={actionInProgress ? -1 : 0}
-                                    onClick={() => !actionInProgress && onRemove?.(recordId)}
+                        {canOpenLocation || canRemove || canDeleteMedia ?
+                            <React.Fragment>
+                                <button
+                                    type={'button'}
+                                    ref={moreActionsRef}
+                                    className={styles['more-actions']}
+                                    aria-haspopup={'menu'}
+                                    aria-expanded={moreActionsOpen}
+                                    aria-controls={moreActionsOpen ? menuId : undefined}
+                                    aria-label={t('CUSTOM_DOWNLOAD_MORE_ACTIONS_TITLE', { defaultValue: 'More actions for {{title}}', title: labels.title })}
+                                    title={t('CUSTOM_DOWNLOAD_MORE_ACTIONS', { defaultValue: 'More actions' })}
+                                    onClick={() => setMoreActionsOpen(!moreActionsOpen)}
                                 >
-                                    {action === 'remove' ?
-                                        t('CUSTOM_DOWNLOAD_REMOVING', { defaultValue: 'Removing...' })
-                                        :
-                                        t('CUSTOM_DOWNLOAD_REMOVE', { defaultValue: 'Remove record' })}
-                                </Button>
-                                :
-                                null
-                        }
-                        {
-                            canDeleteMedia ?
-                                <Button
-                                    className={styles['delete-media-button']}
-                                    title={isPartialMedia ?
-                                        t('CUSTOM_DOWNLOAD_DELETE_PARTIAL_TITLE', { defaultValue: 'Permanently delete partial data for {{title}}', title: labels.title })
-                                        : t('CUSTOM_DOWNLOAD_DELETE_FILE_TITLE', { defaultValue: 'Permanently delete {{title}} from disk', title: labels.title })}
-                                    aria-disabled={actionInProgress}
-                                    disabled={actionInProgress}
-                                    tabIndex={actionInProgress ? -1 : 0}
-                                    onClick={() => !actionInProgress && setConfirmingMediaDelete(true)}
+                                    <span aria-hidden={'true'}>⋯</span>
+                                </button>
+                                {moreActionsOpen ? createPortal(<div
+                                    ref={menuRef}
+                                    id={menuId}
+                                    role={'menu'}
+                                    aria-label={t('CUSTOM_DOWNLOAD_MORE_ACTIONS', { defaultValue: 'More actions' })}
+                                    className={styles['more-actions-content']}
+                                    style={menuPosition || { visibility: 'hidden' }}
+                                    onClick={() => setMoreActionsOpen(false)}
+                                    onKeyDown={(event) => {
+                                        if (event.key === 'Tab') {
+                                            setMoreActionsOpen(false);
+                                            moreActionsRef.current?.focus();
+                                        } else if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+                                            event.preventDefault();
+                                            const buttons = Array.from(menuRef.current.querySelectorAll('button:not(:disabled)'));
+                                            const current = buttons.indexOf(document.activeElement);
+                                            const next = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1 :
+                                                (current + (event.key === 'ArrowUp' ? -1 : 1) + buttons.length) % buttons.length;
+                                            buttons[next]?.focus();
+                                        }
+                                    }}
                                 >
-                                    {action === 'deleteMedia' ?
-                                        t('CUSTOM_DOWNLOAD_DELETING', { defaultValue: 'Deleting...' })
-                                        : isPartialMedia ?
-                                            t('CUSTOM_DOWNLOAD_DELETE_PARTIAL', { defaultValue: 'Delete partial data' })
-                                            : t('CUSTOM_DOWNLOAD_DELETE_DOWNLOAD', { defaultValue: 'Delete download' })}
-                                </Button>
-                                : null
-                        }
+                                    {
+                                        canOpenLocation ?
+                                            <button
+                                                type={'button'}
+                                                role={'menuitem'}
+                                                className={styles['location-button']}
+                                                title={t('CUSTOM_DOWNLOAD_OPEN_LOCATION_TITLE', {
+                                                    defaultValue: 'Open the location of {{title}} in File Explorer',
+                                                    title: labels.title
+                                                })}
+                                                aria-disabled={actionInProgress}
+                                                disabled={actionInProgress}
+                                                tabIndex={actionInProgress ? -1 : 0}
+                                                onClick={() => !actionInProgress && onOpenLocation?.(recordId)}
+                                            >
+                                                {action === 'location' ?
+                                                    t('CUSTOM_DOWNLOAD_OPENING_LOCATION', { defaultValue: 'Opening folder...' })
+                                                    :
+                                                    t('CUSTOM_DOWNLOAD_OPEN_LOCATION', { defaultValue: 'Open location' })}
+                                            </button>
+                                            :
+                                            null
+                                    }
+                                    {
+                                        canRemove ?
+                                            <button
+                                                type={'button'}
+                                                role={'menuitem'}
+                                                className={styles['remove-button']}
+                                                title={t('CUSTOM_DOWNLOAD_REMOVE_TITLE', {
+                                                    defaultValue: 'Remove {{title}} from this list; any local file data will stay on disk',
+                                                    title: labels.title
+                                                })}
+                                                aria-disabled={actionInProgress}
+                                                disabled={actionInProgress}
+                                                tabIndex={actionInProgress ? -1 : 0}
+                                                onClick={() => !actionInProgress && onRemove?.(recordId)}
+                                            >
+                                                <span>{action === 'remove' ?
+                                                    t('CUSTOM_DOWNLOAD_REMOVING', { defaultValue: 'Removing...' })
+                                                    :
+                                                    t('CUSTOM_DOWNLOAD_REMOVE', { defaultValue: 'Remove record' })}</span>
+                                                <small>{record?.partialPath && hasSharedPartialOwner ?
+                                                    t('CUSTOM_DOWNLOAD_REMOVE_SHARED_HINT', { defaultValue: 'Shared partial data stays protected' })
+                                                    : t('CUSTOM_DOWNLOAD_REMOVE_HINT', { defaultValue: 'Keeps the file on this device' })}</small>
+                                            </button>
+                                            :
+                                            null
+                                    }
+                                    {
+                                        canDeleteMedia ?
+                                            <button
+                                                type={'button'}
+                                                role={'menuitem'}
+                                                className={styles['delete-media-button']}
+                                                title={isPartialMedia ?
+                                                    t('CUSTOM_DOWNLOAD_DELETE_PARTIAL_TITLE', { defaultValue: 'Permanently delete partial data for {{title}}', title: labels.title })
+                                                    : t('CUSTOM_DOWNLOAD_DELETE_FILE_TITLE', { defaultValue: 'Permanently delete {{title}} from disk', title: labels.title })}
+                                                aria-disabled={actionInProgress}
+                                                disabled={actionInProgress}
+                                                tabIndex={actionInProgress ? -1 : 0}
+                                                onClick={() => !actionInProgress && setConfirmingMediaDelete(true)}
+                                            >
+                                                {action === 'deleteMedia' ?
+                                                    t('CUSTOM_DOWNLOAD_DELETING', { defaultValue: 'Deleting...' })
+                                                    : isPartialMedia ?
+                                                        t('CUSTOM_DOWNLOAD_DELETE_PARTIAL', { defaultValue: 'Delete partial data' })
+                                                        : t('CUSTOM_DOWNLOAD_DELETE_DOWNLOAD', { defaultValue: 'Delete download' })}
+                                            </button>
+                                            : null
+                                    }
+                                </div>, document.body) : null}
+                            </React.Fragment> : null}
                     </div>
                     :
                     null

@@ -4,20 +4,27 @@
     "version": "5.0.0-beta.37",
     "author": "Smart Code OOD",
     "private": true,
+    "jest": {
+        "roots": [
+            "<rootDir>/tests"
+        ]
+    },
     "license": "gpl-2.0",
     "scripts": {
         "start": "webpack serve --mode development",
         "start-prod": "webpack serve --mode production",
         "build": "webpack --mode production",
+        "build:core": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-custom-core.ps1",
+        "verify:release": "node scripts/verify-release-foundation.cjs",
         "test": "jest",
         "lint": "eslint src",
-        "scan-translations": "pnpx jest ./tests/i18nScan.test.js"
+        "scan-translations": "jest ./tests/i18nScan.test.js"
     },
     "dependencies": {
         "@babel/runtime": "7.29.2",
         "@sentry/browser": "8.42.0",
         "@stremio/stremio-colors": "5.2.0",
-        "@stremio/stremio-core-web": "0.58.0",
+        "@stremio/stremio-core-web": "file:vendor/stremio-stremio-core-web-0.58.0-custom.1.tgz",
         "@stremio/stremio-icons": "5.10.0",
         "@stremio/stremio-video": "0.0.79",
         "a-color-picker": "1.2.1",
@@ -47,6 +54,7 @@
     },
     "devDependencies": {
         "@babel/core": "7.29.0",
+        "@babel/parser": "7.29.3",
         "@babel/preset-env": "7.29.3",
         "@babel/preset-react": "7.28.5",
         "@eslint/js": "^9.39.4",

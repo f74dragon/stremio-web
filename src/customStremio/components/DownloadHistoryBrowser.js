@@ -181,7 +181,7 @@ const HistoryDetails = ({ group, onBack, onNavigate }) => {
             </button>
             <div className={styles['details-hero']}>
                 <div className={styles['details-poster']}>
-                    {group.poster ? <Image src={group.poster} alt={group.title} /> : <div><Icon name={'download'} /></div>}
+                    {group.poster ? <Image src={group.poster} alt={group.title} renderFallback={() => <div className={styles['poster-fallback']}><Icon name={'download'} /></div>} /> : <div><Icon name={'download'} /></div>}
                 </div>
                 <div className={styles['details-copy']}>
                     <div className={styles['details-eyebrow']}>{isSeries ? t('CUSTOM_HISTORY_SERIES', { defaultValue: 'Series history' }) : t('CUSTOM_HISTORY_MOVIE', { defaultValue: 'Movie history' })}</div>
@@ -313,7 +313,6 @@ const DownloadHistoryBrowser = ({
         <section className={styles['history-browser']}>
             <header className={styles['history-header']}>
                 <div>
-                    <div className={styles['eyebrow']}>{t('CUSTOM_HISTORY_EYEBROW', { defaultValue: 'Permanent local record' })}</div>
                     <h1>{t('CUSTOM_HISTORY_TITLE', { defaultValue: 'Download history' })}</h1>
                     <p>{t('CUSTOM_HISTORY_DESCRIPTION', { defaultValue: 'Past downloads remain here after their files or active records are removed.' })}</p>
                 </div>
@@ -331,7 +330,7 @@ const DownloadHistoryBrowser = ({
                 <div className={styles['state']} aria-live={'polite'}><Icon name={'download'} /><strong>{t('CUSTOM_HISTORY_LOADING', { defaultValue: 'Loading download history...' })}</strong></div>
                 : error && eventCount === 0 ?
                     <div className={styles['state']} role={'alert'}><Icon name={'warning'} /><strong>{t('CUSTOM_HISTORY_OFFLINE', { defaultValue: 'History is unavailable' })}</strong><span>{error}</span><Button onClick={() => onRefresh?.()}>{t('CUSTOM_HISTORY_TRY_AGAIN', { defaultValue: 'Try again' })}</Button></div>
-                    : groups.length === 0 ?
+                    : groups.length === 0 && !fromValue && !toValue ?
                         <div className={styles['state']}><Icon name={'download'} /><strong>{t('CUSTOM_HISTORY_EMPTY', { defaultValue: 'No download history yet' })}</strong><span>{t('CUSTOM_HISTORY_EMPTY_DESCRIPTION', { defaultValue: 'New downloads and lifecycle changes will be recorded here automatically.' })}</span></div>
                         : <React.Fragment>
                             <DownloadLibraryToolbar
@@ -356,20 +355,23 @@ const DownloadHistoryBrowser = ({
                                 onClear={() => onSearchChange('')}
                                 onSortChange={onSortChange}
                             />
-                            <div className={styles['date-range']} aria-label={t('CUSTOM_HISTORY_DATE_RANGE', { defaultValue: 'History date range' })}>
-                                <label>
-                                    <span>{t('CUSTOM_HISTORY_FROM_DATE', { defaultValue: 'From' })}</span>
-                                    <input type={'date'} value={fromValue} max={toValue || undefined} onChange={(event) => onFromChange(event.target.value)} />
-                                </label>
-                                <label>
-                                    <span>{t('CUSTOM_HISTORY_TO_DATE', { defaultValue: 'To' })}</span>
-                                    <input type={'date'} value={toValue} min={fromValue || undefined} onChange={(event) => onToChange(event.target.value)} />
-                                </label>
-                                {fromValue || toValue ? <Button onClick={() => {
-                                    onFromChange('');
-                                    onToChange('');
-                                }}>{t('CUSTOM_HISTORY_CLEAR_DATES', { defaultValue: 'Clear dates' })}</Button> : null}
-                            </div>
+                            <details className={styles['date-disclosure']} open={fromValue || toValue ? true : undefined}>
+                                <summary>{t('CUSTOM_HISTORY_DATE_FILTER', { defaultValue: 'Date range' })}{fromValue || toValue ? <small>{t('CUSTOM_HISTORY_DATE_FILTER_ACTIVE', { defaultValue: 'Active' })}</small> : null}</summary>
+                                <div className={styles['date-range']} aria-label={t('CUSTOM_HISTORY_DATE_RANGE', { defaultValue: 'History date range' })}>
+                                    <label>
+                                        <span>{t('CUSTOM_HISTORY_FROM_DATE', { defaultValue: 'From' })}</span>
+                                        <input type={'date'} value={fromValue} max={toValue || undefined} onChange={(event) => onFromChange(event.target.value)} />
+                                    </label>
+                                    <label>
+                                        <span>{t('CUSTOM_HISTORY_TO_DATE', { defaultValue: 'To' })}</span>
+                                        <input type={'date'} value={toValue} min={fromValue || undefined} onChange={(event) => onToChange(event.target.value)} />
+                                    </label>
+                                    {fromValue || toValue ? <Button onClick={() => {
+                                        onFromChange('');
+                                        onToChange('');
+                                    }}>{t('CUSTOM_HISTORY_CLEAR_DATES', { defaultValue: 'Clear dates' })}</Button> : null}
+                                </div>
+                            </details>
                             <div className={styles['filter-bar']} role={'tablist'} aria-label={t('CUSTOM_HISTORY_FILTERS', { defaultValue: 'History filters' })}>
                                 {filters.filter(({ key }) => key === HISTORY_FILTERS.ALL || filterCounts[key] > 0).map(({ key, label }) => (
                                     <button

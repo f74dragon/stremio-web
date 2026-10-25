@@ -1,0 +1,32 @@
+// Shared visual primitives for local downloads and playback.
+.custom-surface() {
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: 0.85rem;
+    background: #191824;
+    box-shadow: none;
+}
+
+.custom-control() {
+    min-height: 2.5rem;
+    border: 1px solid rgba(255, 255, 255, 0.13);
+    border-radius: 0.6rem;
+    color: inherit;
+    background: rgba(255, 255, 255, 0.055);
+    font-size: 0.82rem;
+    line-height: 1.35;
+
+    &:hover { background: rgba(255, 255, 255, 0.1); }
+    &:focus-visible {
+        outline: 2px solid #b6a7ff;
+        outline-offset: 3px;
+    }
+}
+
+.custom-primary() {
+    color: #fff;
+    border-color: transparent;
+    background: #7058df;
+    box-shadow: none;
+
+    &:hover { background: #8069ed; }
+}

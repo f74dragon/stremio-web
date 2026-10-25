@@ -40,8 +40,7 @@
     &:hover,
     &:focus-within {
         border-color: rgba(197, 187, 255, 0.78);
-        box-shadow: 0 1.55rem 3.2rem rgba(0, 0, 0, 0.46), 0 0 1.6rem rgba(121, 96, 255, 0.3);
-        transform: scale(1.025);
+        box-shadow: 0 1.1rem 2.5rem rgba(0, 0, 0, 0.35);
 
         &::after {
             border-color: rgba(213, 205, 255, 0.92);
@@ -93,7 +92,7 @@
 .poster-shade {
     position: absolute;
     inset: 0;
-    background: linear-gradient(180deg, rgba(0, 0, 0, 0.05) 35%, rgba(5, 4, 12, 0.92) 100%);
+    background: linear-gradient(180deg, rgba(0, 0, 0, 0.12), transparent 35%, rgba(5, 4, 12, 0.25));
     pointer-events: none;
 }
 
@@ -163,20 +162,24 @@
 }
 
 .movie-play-button {
+    width: 2.6rem;
+    height: 2.6rem;
     padding: 0;
+    border-color: rgba(255, 255, 255, 0.24);
     cursor: pointer;
-    background-color: rgba(96, 72, 225, 0.9);
+    background-color: rgba(16, 15, 24, 0.82);
     transition: background-color 0.18s ease, transform 0.18s ease, opacity 0.18s ease;
 
     > svg {
-        width: 1.2rem;
-        height: 1.2rem;
+        width: 1.05rem;
+        height: 1.05rem;
     }
 
     &:hover,
     &:focus-visible {
-        background-color: rgba(126, 102, 255, 0.98);
-        transform: scale(1.06);
+        border-color: rgba(255, 255, 255, 0.65);
+        background-color: var(--primary-accent-color);
+        transform: scale(1.04);
     }
 
     &:disabled {
@@ -185,82 +188,51 @@
     }
 }
 
-.poster-resume {
-    position: absolute;
-    z-index: 2;
-    right: 0.55rem;
-    bottom: 0.55rem;
-    left: 0.55rem;
+.playback-summary {
     display: flex;
     min-width: 0;
     flex-direction: column;
-    gap: 0.28rem;
-    padding: 0.55rem 0.6rem;
-    border: 1px solid rgba(255, 206, 129, 0.38);
-    border-radius: 0.65rem;
-    color: rgba(255, 250, 240, 0.98);
-    background: linear-gradient(145deg, rgba(43, 31, 26, 0.95), rgba(18, 16, 29, 0.94));
-    box-shadow: 0 0.45rem 1.2rem rgba(0, 0, 0, 0.38);
-    backdrop-filter: blur(0.55rem);
-    pointer-events: none;
+    gap: 0.4rem;
+    margin-top: 0.45rem;
 }
 
-.poster-resume-heading {
+.playback-summary-label {
     display: flex;
     align-items: baseline;
     justify-content: space-between;
     min-width: 0;
     gap: 0.4rem;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 0.65rem;
+    line-height: 1.4;
 
-    > strong {
+    > :first-child {
+        min-width: 0;
         overflow: hidden;
-        font-size: 0.7rem;
-        font-weight: 750;
-        line-height: 1.2;
+        color: rgba(255, 255, 255, 0.82);
+        font-weight: 500;
         text-overflow: ellipsis;
         white-space: nowrap;
     }
 
-    > span {
+    > :last-child {
         flex: none;
-        color: rgba(255, 211, 143, 0.94);
-        font-size: 0.6rem;
-        font-weight: 700;
-        line-height: 1.2;
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
     }
 }
 
-.poster-resume-episode,
-.poster-resume-time {
-    overflow: hidden;
-    font-size: 0.6rem;
-    line-height: 1.25;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.poster-resume-episode {
-    font-weight: 650;
-}
-
-.poster-resume-time {
-    color: rgba(255, 255, 255, 0.7);
-    font-variant-numeric: tabular-nums;
-}
-
-.poster-resume-track {
-    height: 0.22rem;
-    margin-top: 0.08rem;
+.playback-summary-track {
+    height: 3px;
     overflow: hidden;
     border-radius: 999px;
-    background-color: rgba(255, 255, 255, 0.16);
+    background-color: rgba(255, 255, 255, 0.12);
 }
 
-.poster-resume-value {
+.playback-summary-value {
     height: 100%;
     border-radius: inherit;
-    background: linear-gradient(90deg, #e99b45, #ffd38f);
-    box-shadow: 0 0 0.65rem rgba(255, 185, 89, 0.5);
+    background-color: var(--primary-accent-color);
     transition: width 0.3s ease;
 }
 
@@ -369,10 +341,39 @@
 }
 
 .action-error {
-    margin-top: 0.45rem;
-    color: var(--danger-accent-color);
-    font-size: 0.75rem;
-    line-height: 1.35;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.4rem;
+    margin-top: 0.65rem;
+    padding: 0.55rem 0.6rem;
+    border: 1px solid rgba(244, 128, 143, 0.15);
+    border-radius: 0.45rem;
+    color: #efb2bb;
+    font-size: 0.7rem;
+    line-height: 1.45;
+    background-color: rgba(218, 77, 102, 0.08);
+    overflow-wrap: anywhere;
+
+    > svg {
+        flex: none;
+        width: 0.85rem;
+        height: 0.85rem;
+        margin-top: 0.1rem;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .poster-container,
+    .poster,
+    .movie-play-button,
+    .playback-summary-value {
+        transition: none;
+    }
+
+    .movie-progress-indeterminate,
+    .movie-progress-indeterminate > span {
+        animation: none;
+    }
 }
 
 .selection-meta {

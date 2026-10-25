@@ -111,7 +111,7 @@ const useDownloadHistory = ({ enabled = true, pollInterval = DEFAULT_HISTORY_POL
         events,
         total,
         invalidEntryCount,
-        initialLoading,
+        initialLoading: initialLoading || (enabled && !loadedRef.current && !error),
         refreshing,
         error,
         refresh: load

@@ -1,6 +1,9 @@
+@import (reference) './custom-ui.less';
+
 @import (reference) '~@stremio/stremio-colors/less/stremio-colors.less';
 
 .record-card {
+    position: relative;
     display: flex;
     flex-direction: column;
     gap: 0.45rem;
@@ -9,20 +12,15 @@
     border: 1px solid rgba(255, 255, 255, 0.06);
     border-radius: var(--border-radius);
     color: var(--primary-foreground-color);
-    background-color: rgba(255, 255, 255, 0.07);
+    background-color: rgba(255, 255, 255, 0.025);
     transition: border-color 0.18s ease, background-color 0.18s ease, transform 0.18s ease;
 }
 
 .record-card-library {
     min-height: 9rem;
     padding: 1rem;
-    background: linear-gradient(145deg, rgba(255, 255, 255, 0.095), rgba(255, 255, 255, 0.045));
-
-    &:hover {
-        border-color: rgba(255, 255, 255, 0.14);
-        background-color: rgba(255, 255, 255, 0.1);
-        transform: translateY(-0.1rem);
-    }
+    background: transparent;
+    border: 0;
 }
 
 .record-heading {
@@ -135,7 +133,7 @@
 .progress-value {
     height: 100%;
     border-radius: inherit;
-    background: linear-gradient(90deg, var(--secondary-accent-color), var(--primary-accent-color));
+    background: #8b75ef;
     transition: width 0.3s ease;
 }
 
@@ -143,10 +141,7 @@
     display: flex;
     flex-direction: column;
     gap: 0.3rem;
-    padding: 0.5rem 0.6rem;
-    border: 1px solid rgba(160, 138, 255, 0.22);
-    border-radius: calc(var(--border-radius) * 0.65);
-    background: rgba(111, 81, 235, 0.1);
+    padding: 0.35rem 0;
 }
 
 .playback-progress-label {
@@ -173,7 +168,7 @@
 .playback-progress-value {
     height: 100%;
     border-radius: inherit;
-    background: linear-gradient(90deg, #a799ff, #e2d4ff);
+    background-color: var(--primary-accent-color);
     transition: width 0.3s ease;
 }
 
@@ -247,7 +242,8 @@
     padding: 0.45rem 0.6rem;
     border-radius: calc(var(--border-radius) * 0.65);
     font-size: 0.8rem;
-    color: var(--secondary-accent-color);
+    color: #f1b2ba;
+    line-height: 1.5;
     background-color: rgba(255, 255, 255, 0.06);
 }
 
@@ -290,12 +286,6 @@
     padding-top: 0.35rem;
 }
 
-.record-action-note {
-    margin-right: auto;
-    font-size: 0.72rem;
-    opacity: 0.55;
-}
-
 .play-button,
 .pause-button,
 .resume-button,
@@ -308,11 +298,7 @@
 .confirm-delete-button {
     flex: none;
     padding: 0.38rem 0.78rem;
-    border: 1px solid rgba(255, 255, 255, 0.14);
-    border-radius: 999px;
-    font-size: 0.8rem;
-    color: var(--primary-foreground-color);
-    background-color: rgba(255, 255, 255, 0.08);
+    .custom-control();
     transition: border-color 0.15s ease, background-color 0.15s ease, opacity 0.15s ease;
 
     &:hover,
@@ -383,11 +369,69 @@
         align-items: flex-start;
     }
 
-    .record-action-note {
-        flex-basis: 100%;
-    }
-
     .download-info-content {
         grid-template-columns: minmax(0, 1fr);
+    }
+}
+.play-button { .custom-control(); .custom-primary(); min-width: 6.5rem; order: -1; }
+.more-actions {
+    .custom-control();
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    width: 2.5rem;
+    height: 2.5rem;
+    padding: 0;
+    cursor: pointer;
+
+    > span { font-size: 1.5rem; line-height: 1; transform: translateY(-0.15rem); }
+}
+.more-actions-content {
+    position: fixed;
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+    width: 17rem;
+    max-width: calc(100vw - 1rem);
+    max-height: calc(100vh - 1rem);
+    overflow-y: auto;
+    padding: 0.35rem;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 0.75rem;
+    background: #24222f;
+    box-shadow: 0 0.75rem 2rem rgba(0, 0, 0, 0.4);
+
+    > button {
+        display: flex;
+        align-items: flex-start;
+        flex-direction: column;
+        justify-content: center;
+        gap: 0.2rem;
+        width: 100%;
+        min-height: 2.65rem;
+        padding: 0.65rem 0.75rem;
+        border: 0;
+        border-radius: 0.45rem;
+        color: #f1eef8;
+        cursor: pointer;
+        font: inherit;
+        font-size: 0.84rem;
+        line-height: 1.35;
+        text-align: left;
+        background: transparent;
+
+        &:hover, &:focus-visible { background: rgba(255, 255, 255, 0.08); }
+        &:focus-visible { outline: 2px solid #b6a7ff; outline-offset: -2px; }
+        &:disabled { opacity: 0.5; cursor: wait; }
+        > small { color: #aaa5b7; font-size: 0.74rem; font-weight: 400; }
+    }
+
+    > .delete-media-button {
+        margin-top: 0.3rem;
+        border-top: 1px solid rgba(255, 255, 255, 0.08);
+        border-top-left-radius: 0;
+        border-top-right-radius: 0;
+        color: #f3a3af;
     }
 }

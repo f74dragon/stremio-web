@@ -4,12 +4,9 @@ const React = require('react');
 const { useTranslation } = require('react-i18next');
 const { default: Icon } = require('@stremio/stremio-icons/react');
 const { Button, MainNavBars } = require('stremio/components');
-const { useCore } = require('stremio/core');
 const useDownloadRecords = require('stremio/customStremio/useDownloadRecords');
 const useDownloadHistory = require('stremio/customStremio/useDownloadHistory');
 const usePlaybackProgress = require('stremio/customStremio/usePlaybackProgress');
-const { useMpcHcWatchedSync } = require('stremio/customStremio/mpcHcWatchedSync');
-const { getBackendSettings } = require('stremio/customStremio/localBackendClient');
 const useLibrarySortPreference = require('stremio/customStremio/useLibrarySortPreference');
 const {
     DOWNLOAD_LIBRARY_SORTS,
@@ -32,8 +29,6 @@ const HISTORY_SORT_VALUES = Object.values(HISTORY_LIBRARY_SORTS);
 
 const Downloads = () => {
     const { t } = useTranslation();
-    const core = useCore();
-    const [watchedSyncEnabled, setWatchedSyncEnabled] = React.useState(false);
     const contentRef = React.useRef(null);
     const libraryScrollPositionRef = React.useRef(0);
     const [activeView, setActiveView] = React.useState('downloads');
@@ -44,7 +39,6 @@ const Downloads = () => {
     const [downloadSort, setDownloadSort] = useLibrarySortPreference('customStremio.downloads.sort', DOWNLOAD_LIBRARY_SORTS.RECENT, DOWNLOAD_SORT_VALUES);
     const [historySort, setHistorySort] = useLibrarySortPreference('customStremio.downloadHistory.sort', HISTORY_LIBRARY_SORTS.RECENT, HISTORY_SORT_VALUES);
     const [selectedMediaKey, setSelectedMediaKey] = React.useState(null);
-    const [settingsOpen, setSettingsOpen] = React.useState(false);
     const [selectionMode, setSelectionMode] = React.useState(false);
     const [selectedRecordIds, setSelectedRecordIds] = React.useState(() => new Set());
     const [confirmingBatchDelete, setConfirmingBatchDelete] = React.useState(false);
@@ -71,24 +65,7 @@ const Downloads = () => {
         removeMedia,
         removeMediaBatch
     } = useDownloadRecords();
-    const { records: playbackProgressRecords, progressByDownloadId } = usePlaybackProgress();
-    React.useEffect(() => {
-        let canceled = false;
-        getBackendSettings().then((settings) => {
-            if (!canceled) {
-                setWatchedSyncEnabled(settings?.player?.progressTracking?.watchedSyncEnabled === true);
-            }
-        }).catch(() => undefined);
-        return () => {
-            canceled = true;
-        };
-    }, []);
-    useMpcHcWatchedSync({
-        core,
-        downloads: items,
-        progressRecords: playbackProgressRecords,
-        enabled: watchedSyncEnabled
-    });
+    const { progressByDownloadId } = usePlaybackProgress();
     const {
         events: historyEvents,
         total: historyTotal,
@@ -148,7 +125,6 @@ const Downloads = () => {
     }, [updateScrollPosition]);
     const handleStartSelection = React.useCallback(() => {
         setBatchFeedback(null);
-        setSettingsOpen(false);
         setSelectionMode(true);
     }, []);
     const handleCancelSelection = React.useCallback(() => {
@@ -166,7 +142,6 @@ const Downloads = () => {
             return;
         }
         setActiveView(nextView);
-        setSettingsOpen(false);
         setSelectionMode(false);
         setSelectedRecordIds(new Set());
         setConfirmingBatchDelete(false);
@@ -299,239 +274,236 @@ const Downloads = () => {
                         <span>{t('CUSTOM_DOWNLOADS_VIEW_HISTORY', { defaultValue: 'History' })}</span>
                         {historyGroups.length > 0 ? <small>{historyGroups.length}</small> : null}
                     </button>
+                    <button
+                        type={'button'}
+                        className={activeView === 'settings' ? styles['view-tab-selected'] : styles['view-tab']}
+                        aria-current={activeView === 'settings' ? 'page' : undefined}
+                        disabled={batchDeleting}
+                        onClick={() => handleChangeView('settings')}
+                    >
+                        {t('CUSTOM_DOWNLOADS_VIEW_SETTINGS', { defaultValue: 'Settings' })}
+                    </button>
                 </nav>
                 {
-                    activeView === 'history' ?
-                        <DownloadHistoryBrowser
-                            groups={historyGroups}
-                            searchValue={historySearch}
-                            fromValue={historyFrom}
-                            toValue={historyTo}
-                            sortValue={historySort}
-                            eventCount={historyEvents.length}
-                            total={historyTotal}
-                            invalidEntryCount={historyInvalidEntryCount}
-                            initialLoading={historyInitialLoading}
-                            refreshing={historyRefreshing}
-                            error={historyError}
-                            onRefresh={refreshHistory}
-                            onSearchChange={setHistorySearch}
-                            onFromChange={setHistoryFrom}
-                            onToChange={setHistoryTo}
-                            onSortChange={setHistorySort}
-                            onNavigate={() => updateScrollPosition(0)}
-                        />
-                        : selectedMediaGroup ?
-                            <React.Fragment>
-                                <DownloadActivityPanel
-                                    records={items}
-                                    actionStates={actionStates}
-                                    actionErrors={actionErrors}
-                                    onReorder={moveInQueue}
-                                    onPause={pause}
-                                    onResume={resume}
-                                    onCancel={cancel}
-                                />
-                                <DownloadMediaDetails
-                                    group={selectedMediaGroup}
-                                    refreshing={refreshing}
-                                    error={error}
-                                    actionStates={actionStates}
-                                    actionErrors={actionErrors}
-                                    playbackProgressByDownloadId={progressByDownloadId}
-                                    onBack={handleBackToLibrary}
-                                    onPause={pause}
-                                    onResume={resume}
-                                    onCancel={cancel}
-                                    onRetry={retry}
-                                    onPlay={play}
-                                    onOpenLocation={openLocation}
-                                    onRemove={remove}
-                                    onDeleteMedia={removeMedia}
-                                    selectionMode={selectionMode}
-                                    selectedRecordIds={selectedRecordIds}
-                                    onStartSelection={handleStartSelection}
-                                    onCancelSelection={handleCancelSelection}
-                                    onToggleRecords={handleToggleRecords}
-                                />
-                            </React.Fragment>
-                            :
-                            <React.Fragment>
-                                <header className={styles['page-header']}>
-                                    <div className={styles['heading-group']}>
-                                        <div className={styles['eyebrow']}>
-                                            {t('CUSTOM_DOWNLOADS_LOCAL_LIBRARY', { defaultValue: 'On this device' })}
+                    activeView === 'settings' ?
+                        <section className={styles['settings-view']}>
+                            <header className={styles['page-header']}>
+                                <div className={styles['heading-group']}>
+                                    <h1 className={styles['page-title']}>{t('CUSTOM_DOWNLOADS_SETTINGS_TITLE', { defaultValue: 'Download settings' })}</h1>
+                                    <p className={styles['page-description']}>{t('CUSTOM_DOWNLOADS_SETTINGS_DESCRIPTION', { defaultValue: 'Manage downloads, playback, and connected services.' })}</p>
+                                </div>
+                            </header>
+                            <DownloadManagerSettingsPanel />
+                        </section>
+                        : activeView === 'history' ?
+                            <DownloadHistoryBrowser
+                                groups={historyGroups}
+                                searchValue={historySearch}
+                                fromValue={historyFrom}
+                                toValue={historyTo}
+                                sortValue={historySort}
+                                eventCount={historyEvents.length}
+                                total={historyTotal}
+                                invalidEntryCount={historyInvalidEntryCount}
+                                initialLoading={historyInitialLoading}
+                                refreshing={historyRefreshing}
+                                error={historyError}
+                                onRefresh={refreshHistory}
+                                onSearchChange={setHistorySearch}
+                                onFromChange={setHistoryFrom}
+                                onToChange={setHistoryTo}
+                                onSortChange={setHistorySort}
+                                onNavigate={() => updateScrollPosition(0)}
+                            />
+                            : selectedMediaGroup ?
+                                <React.Fragment>
+                                    <DownloadActivityPanel
+                                        records={items}
+                                        actionStates={actionStates}
+                                        actionErrors={actionErrors}
+                                        onReorder={moveInQueue}
+                                        onPause={pause}
+                                        onResume={resume}
+                                        onCancel={cancel}
+                                    />
+                                    <DownloadMediaDetails
+                                        group={selectedMediaGroup}
+                                        refreshing={refreshing}
+                                        error={error}
+                                        actionStates={actionStates}
+                                        actionErrors={actionErrors}
+                                        playbackProgressByDownloadId={progressByDownloadId}
+                                        onBack={handleBackToLibrary}
+                                        onPause={pause}
+                                        onResume={resume}
+                                        onCancel={cancel}
+                                        onRetry={retry}
+                                        onPlay={play}
+                                        onOpenLocation={openLocation}
+                                        onRemove={remove}
+                                        onDeleteMedia={removeMedia}
+                                        selectionMode={selectionMode}
+                                        selectedRecordIds={selectedRecordIds}
+                                        onStartSelection={handleStartSelection}
+                                        onCancelSelection={handleCancelSelection}
+                                        onToggleRecords={handleToggleRecords}
+                                    />
+                                </React.Fragment>
+                                :
+                                <React.Fragment>
+                                    <header className={styles['page-header']}>
+                                        <div className={styles['heading-group']}>
+                                            <h1 className={styles['page-title']}>
+                                                {t('CUSTOM_DOWNLOADS_PAGE_TITLE', { defaultValue: 'Downloads' })}
+                                            </h1>
+                                            <p className={styles['page-description']}>{t('CUSTOM_DOWNLOADS_LOCAL_LIBRARY_DESCRIPTION', { defaultValue: 'Your movies and shows, ready on this device.' })}</p>
                                         </div>
-                                        <h1 className={styles['page-title']}>
-                                            {t('CUSTOM_DOWNLOADS_PAGE_TITLE', { defaultValue: 'Downloads' })}
-                                        </h1>
-                                    </div>
-                                    <div className={styles['header-actions']}>
-                                        {refreshing ? <span className={styles['refreshing-label']}>{t('CUSTOM_DOWNLOADS_REFRESHING', { defaultValue: 'Refreshing...' })}</span> : null}
-                                        {
-                                            selectionMode ?
-                                                <React.Fragment>
-                                                    <span className={styles['selected-count-label']}>
-                                                        {t('CUSTOM_DOWNLOADS_SELECTED_COUNT', { defaultValue: '{{count}} selected', count: selectedRecordIds.size })}
-                                                    </span>
-                                                    <Button className={styles['select-all-button']} disabled={visibleSelectableRecordIds.length === 0} onClick={handleToggleAll}>
-                                                        {allVisibleSelected ?
-                                                            t('CUSTOM_DOWNLOADS_CLEAR_ALL', { defaultValue: 'Clear all' })
-                                                            : downloadSearch.trim() ?
-                                                                t('CUSTOM_DOWNLOADS_SELECT_ALL_RESULTS', { defaultValue: 'Select all results' })
-                                                                : t('CUSTOM_DOWNLOADS_SELECT_ALL', { defaultValue: 'Select all' })}
-                                                    </Button>
-                                                    <Button className={styles['cancel-selection-button']} onClick={handleCancelSelection}>
-                                                        {t('CUSTOM_DOWNLOADS_CANCEL_SELECTION', { defaultValue: 'Cancel' })}
-                                                    </Button>
-                                                </React.Fragment>
-                                                :
-                                                <React.Fragment>
-                                                    {hasItems ? <Button className={styles['select-button']} disabled={visibleMediaGroups.length === 0} onClick={handleStartSelection}>{t('CUSTOM_DOWNLOADS_SELECT', { defaultValue: 'Select' })}</Button> : null}
-                                                    <Button
-                                                        className={settingsOpen ? styles['options-button-active'] : styles['options-button']}
-                                                        aria-expanded={settingsOpen}
-                                                        onClick={() => setSettingsOpen((current) => !current)}
-                                                    >
-                                                        {t('CUSTOM_DOWNLOADS_OPTIONS', { defaultValue: 'Download options' })}
-                                                    </Button>
-                                                    <Button
-                                                        className={styles['refresh-button']}
-                                                        title={t('CUSTOM_DOWNLOADS_REFRESH_TITLE', { defaultValue: 'Refresh downloads' })}
-                                                        aria-disabled={refreshing}
-                                                        disabled={refreshing}
-                                                        onClick={() => refresh()}
-                                                    >
-                                                        {t('CUSTOM_DOWNLOADS_REFRESH', { defaultValue: 'Refresh' })}
-                                                    </Button>
-                                                </React.Fragment>
-                                        }
-                                    </div>
-                                </header>
-
-                                {settingsOpen ? <DownloadManagerSettingsPanel onSettingsChange={(settings) => {
-                                    setWatchedSyncEnabled(settings?.player?.progressTracking?.watchedSyncEnabled === true);
-                                }} /> : null}
-
-                                <DownloadActivityPanel
-                                    records={items}
-                                    actionStates={actionStates}
-                                    actionErrors={actionErrors}
-                                    onReorder={moveInQueue}
-                                    onPause={pause}
-                                    onResume={resume}
-                                    onCancel={cancel}
-                                />
-
-                                {
-                                    groups.attention.length > 0 ?
-                                        <div className={styles['status-strip']} aria-label={t('CUSTOM_DOWNLOADS_SUMMARY', { defaultValue: 'Download activity' })}>
-                                            <div className={styles['status-item-attention']}>
-                                                <Icon name={'warning'} />
-                                                <strong>{groups.attention.length}</strong>
-                                                <span>{t('CUSTOM_DOWNLOADS_FILES_NEED_ATTENTION', { defaultValue: groups.attention.length === 1 ? 'record needs attention' : 'records need attention' })}</span>
-                                            </div>
+                                        <div className={styles['header-actions']}>
+                                            {refreshing ? <span className={styles['refreshing-label']}>{t('CUSTOM_DOWNLOADS_REFRESHING', { defaultValue: 'Refreshing...' })}</span> : null}
+                                            {
+                                                selectionMode ?
+                                                    <React.Fragment>
+                                                        <span className={styles['selected-count-label']}>
+                                                            {t('CUSTOM_DOWNLOADS_SELECTED_COUNT', { defaultValue: '{{count}} selected', count: selectedRecordIds.size })}
+                                                        </span>
+                                                        <Button className={styles['select-all-button']} disabled={visibleSelectableRecordIds.length === 0} onClick={handleToggleAll}>
+                                                            {allVisibleSelected ?
+                                                                t('CUSTOM_DOWNLOADS_CLEAR_ALL', { defaultValue: 'Clear all' })
+                                                                : downloadSearch.trim() ?
+                                                                    t('CUSTOM_DOWNLOADS_SELECT_ALL_RESULTS', { defaultValue: 'Select all results' })
+                                                                    : t('CUSTOM_DOWNLOADS_SELECT_ALL', { defaultValue: 'Select all' })}
+                                                        </Button>
+                                                        <Button className={styles['cancel-selection-button']} onClick={handleCancelSelection}>
+                                                            {t('CUSTOM_DOWNLOADS_CANCEL_SELECTION', { defaultValue: 'Cancel' })}
+                                                        </Button>
+                                                    </React.Fragment>
+                                                    :
+                                                    <React.Fragment>
+                                                        {hasItems ? <Button className={styles['select-button']} disabled={visibleMediaGroups.length === 0} onClick={handleStartSelection}>{t('CUSTOM_DOWNLOADS_SELECT', { defaultValue: 'Select' })}</Button> : null}
+                                                        <Button
+                                                            className={styles['refresh-button']}
+                                                            title={t('CUSTOM_DOWNLOADS_REFRESH_TITLE', { defaultValue: 'Refresh downloads' })}
+                                                            aria-disabled={refreshing}
+                                                            disabled={refreshing}
+                                                            onClick={() => refresh()}
+                                                        >
+                                                            {t('CUSTOM_DOWNLOADS_REFRESH', { defaultValue: 'Refresh' })}
+                                                        </Button>
+                                                    </React.Fragment>
+                                            }
                                         </div>
-                                        :
-                                        null
-                                }
+                                    </header>
 
-                                {hasItems && error ? <div className={styles['offline-banner']} role={'status'}>{error}</div> : null}
+                                    <DownloadActivityPanel
+                                        records={items}
+                                        actionStates={actionStates}
+                                        actionErrors={actionErrors}
+                                        onReorder={moveInQueue}
+                                        onPause={pause}
+                                        onResume={resume}
+                                        onCancel={cancel}
+                                    />
 
-                                {
-                                    initialLoading && !hasItems ?
-                                        <div className={styles['page-state']} aria-live={'polite'}>
-                                            <div className={styles['state-icon']}><Icon name={'download'} /></div>
-                                            <div className={styles['state-title']}>{t('CUSTOM_DOWNLOADS_LOADING', { defaultValue: 'Loading downloads...' })}</div>
-                                        </div>
-                                        :
-                                        error && !hasItems ?
-                                            <div className={styles['page-state']} role={'alert'}>
-                                                <div className={styles['state-icon-error']}><Icon name={'warning'} /></div>
-                                                <div className={styles['state-title']}>{t('CUSTOM_DOWNLOADS_OFFLINE', { defaultValue: 'Download backend unavailable' })}</div>
-                                                <div className={styles['state-description']}>{error}</div>
-                                                <Button className={styles['retry-button']} onClick={() => refresh()}>
-                                                    {t('CUSTOM_DOWNLOADS_RETRY', { defaultValue: 'Try again' })}
-                                                </Button>
+                                    {
+                                        groups.attention.length > 0 ?
+                                            <div className={styles['status-strip']} aria-label={t('CUSTOM_DOWNLOADS_SUMMARY', { defaultValue: 'Download activity' })}>
+                                                <div className={styles['status-item-attention']}>
+                                                    <Icon name={'warning'} />
+                                                    <strong>{groups.attention.length}</strong>
+                                                    <span>{t('CUSTOM_DOWNLOADS_FILES_NEED_ATTENTION', { defaultValue: groups.attention.length === 1 ? 'record needs attention' : 'records need attention' })}</span>
+                                                </div>
                                             </div>
                                             :
-                                            !hasItems ?
-                                                <div className={styles['page-state']}>
-                                                    <div className={styles['state-icon']}><Icon name={'download'} /></div>
-                                                    <div className={styles['state-title']}>{t('CUSTOM_DOWNLOADS_EMPTY_TITLE', { defaultValue: 'Your downloads will appear here' })}</div>
-                                                    <div className={styles['state-description']}>
-                                                        {t('CUSTOM_DOWNLOADS_EMPTY_DESCRIPTION', { defaultValue: 'Choose Download from any available stream to add it to this device.' })}
-                                                    </div>
+                                            null
+                                    }
+
+                                    {hasItems && error ? <div className={styles['offline-banner']} role={'status'}>{error}</div> : null}
+
+                                    {
+                                        initialLoading && !hasItems ?
+                                            <div className={styles['page-state']} aria-live={'polite'}>
+                                                <div className={styles['state-icon']}><Icon name={'download'} /></div>
+                                                <div className={styles['state-title']}>{t('CUSTOM_DOWNLOADS_LOADING', { defaultValue: 'Loading downloads...' })}</div>
+                                            </div>
+                                            :
+                                            error && !hasItems ?
+                                                <div className={styles['page-state']} role={'alert'}>
+                                                    <div className={styles['state-icon-error']}><Icon name={'warning'} /></div>
+                                                    <div className={styles['state-title']}>{t('CUSTOM_DOWNLOADS_OFFLINE', { defaultValue: 'Download backend unavailable' })}</div>
+                                                    <div className={styles['state-description']}>{error}</div>
+                                                    <Button className={styles['retry-button']} onClick={() => refresh()}>
+                                                        {t('CUSTOM_DOWNLOADS_RETRY', { defaultValue: 'Try again' })}
+                                                    </Button>
                                                 </div>
                                                 :
-                                                <div className={styles['sections-container']}>
-                                                    <section className={styles['download-section']}>
-                                                        <div className={styles['section-header']}>
-                                                            <div>
-                                                                <h2 className={styles['section-title']}>{t('CUSTOM_DOWNLOADS_LIBRARY_TITLE', { defaultValue: 'Your downloaded titles' })}</h2>
-                                                                <p className={styles['section-description']}>
-                                                                    {t('CUSTOM_DOWNLOADS_LIBRARY_DESCRIPTION', { defaultValue: 'Select a movie or show to see its downloads and available actions.' })}
-                                                                </p>
-                                                            </div>
-                                                            <div className={styles['section-count']}>{mediaGroups.length}</div>
+                                                !hasItems ?
+                                                    <div className={styles['page-state']}>
+                                                        <div className={styles['state-icon']}><Icon name={'download'} /></div>
+                                                        <div className={styles['state-title']}>{t('CUSTOM_DOWNLOADS_EMPTY_TITLE', { defaultValue: 'Your downloads will appear here' })}</div>
+                                                        <div className={styles['state-description']}>
+                                                            {t('CUSTOM_DOWNLOADS_EMPTY_DESCRIPTION', { defaultValue: 'Choose Download from any available stream to add it to this device.' })}
                                                         </div>
-                                                        <DownloadLibraryToolbar
-                                                            label={t('CUSTOM_DOWNLOADS_LIBRARY_CONTROLS', { defaultValue: 'Download library search and sorting' })}
-                                                            searchValue={downloadSearch}
-                                                            searchPlaceholder={t('CUSTOM_DOWNLOADS_SEARCH_PLACEHOLDER', { defaultValue: 'Search titles and episodes' })}
-                                                            clearLabel={t('CUSTOM_DOWNLOADS_CLEAR_SEARCH', { defaultValue: 'Clear search' })}
-                                                            sortLabel={t('CUSTOM_DOWNLOADS_SORT_LABEL', { defaultValue: 'Sort' })}
-                                                            sortValue={downloadSort}
-                                                            sortOptions={downloadSortOptions}
-                                                            resultSummary={visibleMediaGroups.length === mediaGroups.length ?
-                                                                t('CUSTOM_DOWNLOADS_RESULT_TOTAL', {
-                                                                    defaultValue: visibleMediaGroups.length === 1 ? '{{count}} title' : '{{count}} titles',
-                                                                    count: visibleMediaGroups.length
-                                                                })
-                                                                : t('CUSTOM_DOWNLOADS_RESULT_FILTERED', {
-                                                                    defaultValue: '{{visible}} of {{total}} titles',
-                                                                    visible: visibleMediaGroups.length,
-                                                                    total: mediaGroups.length
-                                                                })}
-                                                            disabled={selectionMode}
-                                                            onSearchChange={setDownloadSearch}
-                                                            onClear={() => setDownloadSearch('')}
-                                                            onSortChange={setDownloadSort}
-                                                        />
-                                                        {visibleMediaGroups.length === 0 ?
-                                                            <div className={styles['library-filter-empty']}>
-                                                                <Icon name={'search'} />
-                                                                <strong>{t('CUSTOM_DOWNLOADS_NO_MATCHES', { defaultValue: 'No matching titles' })}</strong>
-                                                                <span>{t('CUSTOM_DOWNLOADS_NO_MATCHES_DESCRIPTION', { defaultValue: 'Try another title, episode name, or season and episode number.' })}</span>
-                                                                <Button onClick={() => setDownloadSearch('')}>{t('CUSTOM_DOWNLOADS_CLEAR_SEARCH', { defaultValue: 'Clear search' })}</Button>
-                                                            </div>
-                                                            : <div className={styles['media-grid']}>
-                                                                {visibleMediaGroups.map((group) => {
-                                                                    const selection = getSelectionState(group.records, selectedRecordIds);
-                                                                    return (
-                                                                        <DownloadMediaGroup
-                                                                            key={group.key}
-                                                                            group={group}
-                                                                            actionStates={actionStates}
-                                                                            actionErrors={actionErrors}
-                                                                            playbackProgressByDownloadId={progressByDownloadId}
-                                                                            onPlay={play}
-                                                                            onOpen={handleOpenMedia}
-                                                                            selectionMode={selectionMode}
-                                                                            selected={selection.allSelected}
-                                                                            partiallySelected={selection.partiallySelected}
-                                                                            selectionDisabled={selection.selectableCount === 0}
-                                                                            selectableCount={selection.selectableCount}
-                                                                            selectedCount={selection.selectedCount}
-                                                                            onToggleSelection={handleToggleMediaGroup}
-                                                                        />
-                                                                    );
-                                                                })}
-                                                            </div>}
-                                                    </section>
-                                                </div>
-                                }
-                            </React.Fragment>
+                                                    </div>
+                                                    :
+                                                    <div className={styles['sections-container']}>
+                                                        <section className={styles['download-section']}>
+                                                            <DownloadLibraryToolbar
+                                                                label={t('CUSTOM_DOWNLOADS_LIBRARY_CONTROLS', { defaultValue: 'Download library search and sorting' })}
+                                                                searchValue={downloadSearch}
+                                                                searchPlaceholder={t('CUSTOM_DOWNLOADS_SEARCH_PLACEHOLDER', { defaultValue: 'Search titles and episodes' })}
+                                                                clearLabel={t('CUSTOM_DOWNLOADS_CLEAR_SEARCH', { defaultValue: 'Clear search' })}
+                                                                sortLabel={t('CUSTOM_DOWNLOADS_SORT_LABEL', { defaultValue: 'Sort' })}
+                                                                sortValue={downloadSort}
+                                                                sortOptions={downloadSortOptions}
+                                                                resultSummary={visibleMediaGroups.length === mediaGroups.length ?
+                                                                    t('CUSTOM_DOWNLOADS_RESULT_TOTAL', {
+                                                                        defaultValue: visibleMediaGroups.length === 1 ? '{{count}} title' : '{{count}} titles',
+                                                                        count: visibleMediaGroups.length
+                                                                    })
+                                                                    : t('CUSTOM_DOWNLOADS_RESULT_FILTERED', {
+                                                                        defaultValue: '{{visible}} of {{total}} titles',
+                                                                        visible: visibleMediaGroups.length,
+                                                                        total: mediaGroups.length
+                                                                    })}
+                                                                disabled={selectionMode}
+                                                                onSearchChange={setDownloadSearch}
+                                                                onClear={() => setDownloadSearch('')}
+                                                                onSortChange={setDownloadSort}
+                                                            />
+                                                            {visibleMediaGroups.length === 0 ?
+                                                                <div className={styles['library-filter-empty']}>
+                                                                    <Icon name={'search'} />
+                                                                    <strong>{t('CUSTOM_DOWNLOADS_NO_MATCHES', { defaultValue: 'No matching titles' })}</strong>
+                                                                    <span>{t('CUSTOM_DOWNLOADS_NO_MATCHES_DESCRIPTION', { defaultValue: 'Try another title, episode name, or season and episode number.' })}</span>
+                                                                    <Button onClick={() => setDownloadSearch('')}>{t('CUSTOM_DOWNLOADS_CLEAR_SEARCH', { defaultValue: 'Clear search' })}</Button>
+                                                                </div>
+                                                                : <div className={styles['media-grid']}>
+                                                                    {visibleMediaGroups.map((group) => {
+                                                                        const selection = getSelectionState(group.records, selectedRecordIds);
+                                                                        return (
+                                                                            <DownloadMediaGroup
+                                                                                key={group.key}
+                                                                                group={group}
+                                                                                actionStates={actionStates}
+                                                                                actionErrors={actionErrors}
+                                                                                playbackProgressByDownloadId={progressByDownloadId}
+                                                                                onPlay={play}
+                                                                                onOpen={handleOpenMedia}
+                                                                                selectionMode={selectionMode}
+                                                                                selected={selection.allSelected}
+                                                                                partiallySelected={selection.partiallySelected}
+                                                                                selectionDisabled={selection.selectableCount === 0}
+                                                                                selectableCount={selection.selectableCount}
+                                                                                selectedCount={selection.selectedCount}
+                                                                                onToggleSelection={handleToggleMediaGroup}
+                                                                            />
+                                                                        );
+                                                                    })}
+                                                                </div>}
+                                                        </section>
+                                                    </div>
+                                    }
+                                </React.Fragment>
                 }
                 {
                     activeView === 'downloads' && selectionMode ?

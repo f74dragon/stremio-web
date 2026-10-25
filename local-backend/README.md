@@ -1,6 +1,7 @@
 # Custom Stremio Local Backend
 
-Development-only local backend for the custom Stremio download flow.
+Local backend for the custom Stremio download flow. It currently runs through
+Node/npm; the Windows desktop host is being prepared separately.
 
 It performs real direct HTTP/HTTPS file downloads in the background, persists download records locally, supports pause/resume and retry, updates progress fields over time, and can launch completed local files in an explicitly configured media player.
 
@@ -26,6 +27,15 @@ The server binds to:
 
 `http://127.0.0.1:5577`
 
+`GET /health` reports the backend package version, numeric `protocolVersion`,
+capabilities, readiness, and scheduler counts. The desktop foundation requires
+the exact bundled backend version and protocol/capabilities before connecting.
+This health response does not establish ownership or authorize stopping/reusing
+a process. A backend started before this change keeps its old `version: dev`
+response until restarted; running development processes are not restarted by the
+foundation checks. See `../docs/CUSTOM_STREMIO_WINDOWS_RELEASE.md` for the desktop
+data/compatibility contract and remaining launcher work.
+
 ## Media Player
 
 Start both the backend and frontend, then open **Downloads -> Download options -> Video player** and choose **Choose player**. A native Windows `.exe` picker opens so you can point directly to MPC-HC or another player. The validated path is stored in `%LOCALAPPDATA%\Custom Stremio\backend-settings.json` and applies immediately without restarting the backend.
@@ -50,7 +60,7 @@ Open **Downloads -> Download options -> MPC-HC playback progress** for setup. In
 
 Use **Test connection**, then enable and save progress tracking. The backend connects only to `127.0.0.1`, reads playback state without controlling the player, and accepts progress only when MPC-HC reports the exact file launched from a completed download record. MPC-HC remains responsible for actual resume behavior.
 
-Movie watched synchronization is a separate opt-in in the same panel. It requires verified progress of at least 90% and Stremio title metadata. New downloads save a bounded native metadata snapshot automatically; legacy movie records use their already-saved Stremio id, type, title, artwork, and descriptive metadata. Series/episode watched synchronization is not part of this pass.
+Account playback synchronization is a separate opt-in in the same panel. While the signed-in frontend is open, verified progress updates native Continue Watching through the custom Core package. At 90% completion, movies become watched and series update the matching episode plus the canonical released next episode. New downloads save a bounded native metadata snapshot; series also resolve the full episode list through installed metadata addons. MPC-HC continues to control local-file resume. See `../docs/CUSTOM_STREMIO_EXTERNAL_PLAYBACK.md` for setup and the live acceptance checklist.
 
 Verified observations are stored atomically in `%LOCALAPPDATA%\Custom Stremio\playback-progress.json`. Tracking is optional: playback continues normally if it is disabled or MPC-HC telemetry is unavailable. Full local paths are not returned by the progress API.
 

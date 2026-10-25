@@ -6,5 +6,6 @@
 .prettierignore
 /local-backend/node_modules
 /.codex
+/.core-build
 localhost+2-key.pem
 localhost+2.pem

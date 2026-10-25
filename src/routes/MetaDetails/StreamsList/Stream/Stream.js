@@ -483,7 +483,15 @@ const Stream = ({
                     aria-busy={downloadAction === 'play'}
                     aria-disabled={downloadButtonDisabled}
                     disabled={downloadButtonDisabled}
-                    tabIndex={-1}
+                    tabIndex={downloadButtonDisabled ? -1 : 0}
+                    onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            event.nativeEvent.buttonClickPrevented = true;
+                            event.currentTarget.click();
+                        }
+                    }}
                     onClick={downloadButtonOnClick}
                 >
                     <Icon className={styles['download-icon']} name={batchSelectionMode && batchSourceEligible ? 'checkmark' : downloadButtonIsPlayable ? 'play' : 'download'} />

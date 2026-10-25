@@ -1,24 +1,11 @@
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
+const { DATA_DIR_ENV, getDefaultDataDirectory } = require('./dataDirectory');
 
 const STORE_VERSION = 1;
-const DATA_DIR_ENV = 'CUSTOM_STREMIO_DATA_DIR';
 const RECORDS_FILE_NAME = 'download-records.json';
 const INTERRUPTED_STATUSES = new Set(['downloading']);
 const INTERRUPTED_ERROR = 'Download paused because the local backend stopped before completion. Resume to continue.';
-
-const getDefaultDataDirectory = () => {
-    if (process.env[DATA_DIR_ENV]) {
-        return path.resolve(process.env[DATA_DIR_ENV]);
-    }
-
-    if (process.env.LOCALAPPDATA) {
-        return path.join(process.env.LOCALAPPDATA, 'Custom Stremio');
-    }
-
-    return path.join(os.homedir(), '.custom-stremio');
-};
 
 const getDefaultRecordsPath = () => path.join(getDefaultDataDirectory(), RECORDS_FILE_NAME);
 

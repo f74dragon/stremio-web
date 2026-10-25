@@ -5,7 +5,8 @@ const PropTypes = require('prop-types');
 const classnames = require('classnames');
 const { useTranslation } = require('react-i18next');
 const { default: Icon } = require('@stremio/stremio-icons/react');
-const { Button, Image, MultiselectMenu } = require('stremio/components');
+const { Button, Image } = require('stremio/components');
+const SelectMenu = require('stremio/customStremio/components/SelectMenu');
 const { useCore } = require('stremio/core');
 const Stream = require('./Stream');
 const styles = require('./styles');
@@ -17,10 +18,11 @@ const {
     getBackendSettings,
     checkAllDebridAvailability,
     getAllDebridAvailabilityHistory,
-    checkRealDebridAvailability,
-    probeRealDebridAvailability,
     getRealDebridAvailabilityHistory
 } = require('stremio/customStremio/localBackendClient');
+const { runRealDebridAvailabilityCheck } = require('stremio/customStremio/debridAvailabilityCheck');
+const useCancelableAvailabilityCheck = require('stremio/customStremio/useCancelableAvailabilityCheck');
+const { filterAndSortSources } = require('stremio/customStremio/sourceListPresentation');
 const {
     findMatchingDownloadRecord,
     findMatchingFailedDownloadRecord,
@@ -32,11 +34,9 @@ const {
     SOURCE_READINESS,
     createRealDebridSourceKey,
     getStreamInfoHash,
-    getSourceReadinessSortRank,
     getRealDebridSourceDescriptor,
     getDebridProvider,
-    classifyProviderSourceReadiness,
-    shouldProbeRealDebridAvailability
+    classifyProviderSourceReadiness
 } = require('stremio/customStremio/debridSourceReadiness');
 const {
     ALL_ADDONS_KEY,
@@ -109,6 +109,7 @@ const StreamsList = ({
     onSelectBatchDownloadSource,
     onRecordBatchVerificationAttempt,
     onBatchAutomationStatusChange,
+    onChooseBatchSourceManually,
     onCancelBatchDownload,
     ...props
 }) => {
@@ -117,6 +118,8 @@ const StreamsList = ({
     const platform = usePlatform();
     const profile = useProfile();
     const streamsContainerRef = React.useRef(null);
+    const sourceSearchRef = React.useRef(null);
+    const sourceResultsId = React.useId();
     const autoBatchActionRef = React.useRef(null);
     const downloadStatusHideTimeoutRef = React.useRef(null);
     const downloadStatusClearTimeoutRef = React.useRef(null);
@@ -133,16 +136,27 @@ const StreamsList = ({
     const [allDebridConnected, setAllDebridConnected] = React.useState(false);
     const [backendSettingsLoaded, setBackendSettingsLoaded] = React.useState(false);
     const [allDebridHistoryLoaded, setAllDebridHistoryLoaded] = React.useState(false);
-    const [availabilityChecking, setAvailabilityChecking] = React.useState(false);
+    const checkContext = `${metaId}:${video?.id || ''}`;
+    const {
+        checking: availabilityChecking, canceling: availabilityCanceling, canceled: availabilityCanceled,
+        run: runAllDebridCheck, cancel: cancelAllDebridCheck
+    } = useCancelableAvailabilityCheck(checkContext);
     const [availabilityProgress, setAvailabilityProgress] = React.useState(null);
     const [availabilityError, setAvailabilityError] = React.useState(null);
     const [realDebridAvailabilityByKey, setRealDebridAvailabilityByKey] = React.useState({});
     const [realDebridConnected, setRealDebridConnected] = React.useState(false);
     const [realDebridHistoryLoaded, setRealDebridHistoryLoaded] = React.useState(false);
-    const [realDebridChecking, setRealDebridChecking] = React.useState(false);
+    const {
+        checking: realDebridChecking, canceling: realDebridCanceling, canceled: realDebridCanceled,
+        run: runRealDebridCheck, cancel: cancelRealDebridCheck
+    } = useCancelableAvailabilityCheck(checkContext);
     const [realDebridProgress, setRealDebridProgress] = React.useState(null);
     const [realDebridError, setRealDebridError] = React.useState(null);
     const [autoBatchStatus, setAutoBatchStatus] = React.useState(null);
+    const [batchChecksPaused, setBatchChecksPaused] = React.useState(false);
+    const [sourceSearch, setSourceSearch] = React.useState('');
+    const [sourceSort, setSourceSort] = React.useState('recommended');
+    const [sourceAvailability, setSourceAvailability] = React.useState('all');
     const [preferredAddon, setPreferredAddon] = React.useState(() => {
         try {
             if (typeof window === 'undefined' || !window.localStorage) {
@@ -155,7 +169,7 @@ const StreamsList = ({
         }
     });
     const onAddonSelected = React.useCallback((value) => {
-        streamsContainerRef.current.scrollTo({ top: 0, left: 0, behavior: platform.name === 'ios' ? 'smooth' : 'instant' });
+        streamsContainerRef.current?.scrollTo({ top: 0, left: 0, behavior: platform.name === 'ios' ? 'smooth' : 'instant' });
         setSelectedAddon(value);
 
         try {
@@ -181,6 +195,19 @@ const StreamsList = ({
             // Ignore storage errors and keep the in-memory selection.
         }
     }, []);
+    React.useEffect(() => {
+        setSourceSearch('');
+        setSourceAvailability('all');
+    }, [checkContext]);
+    React.useEffect(() => {
+        streamsContainerRef.current?.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+    }, [sourceSearch, sourceSort, sourceAvailability]);
+    const resetSourceFilters = React.useCallback(() => {
+        setSourceSearch('');
+        setSourceAvailability('all');
+        setSourceSort('recommended');
+        onAddonSelected(ALL_ADDONS_KEY);
+    }, [onAddonSelected]);
     const showInstallAddonsButton = React.useMemo(() => {
         return !profile || profile.auth === null || profile.auth?.user?.isNewUser === true && !video?.upcoming;
     }, [profile, video]);
@@ -205,9 +232,10 @@ const StreamsList = ({
             .reduce((streamsByAddon, streams) => {
                 streamsByAddon[streams.addon.transportUrl] = {
                     addon: streams.addon,
-                    streams: streams.content.content.map((stream) => {
+                    streams: streams.content.content.map((stream, index) => {
                         const enrichedStream = {
                             ...stream,
+                            sourceListKey: `${streams.addon.transportUrl}:${index}`,
                             addonName: streams.addon.manifest.name,
                             addonId: streams.addon.manifest.id,
                             addonDescription: streams.addon.manifest.description,
@@ -231,9 +259,6 @@ const StreamsList = ({
                 return streamsByAddon;
             }, {});
     }, [props.streams, core]);
-    const isPreferredAddonStream = React.useCallback((stream) => {
-        return normalizeAddonName(stream?.addonName) === normalizeAddonName(preferredAddon);
-    }, [preferredAddon]);
     const effectiveSelectedAddon = React.useMemo(
         () => resolveStreamAddonFilter(selectedAddon, streamsByAddon),
         [streamsByAddon, selectedAddon]
@@ -247,20 +272,14 @@ const StreamsList = ({
                 :
                 [];
     }, [streamsByAddon, effectiveSelectedAddon]);
-    const filteredInfoHashes = React.useMemo(() => Array.from(new Set(
+    const historyInfoHashes = React.useMemo(() => Array.from(new Set(
         filteredStreams
             .filter((stream) => getDebridProvider(stream) === DEBRID_PROVIDER.ALLDEBRID)
             .map(getStreamInfoHash)
             .filter(Boolean)
     )), [filteredStreams]);
-    const filteredInfoHashesKey = filteredInfoHashes.join(',');
-    const filteredAllDebridRowCount = React.useMemo(() => filteredStreams.filter(
-        (stream) => getDebridProvider(stream) === DEBRID_PROVIDER.ALLDEBRID
-    ).length, [filteredStreams]);
-    const filteredRealDebridRowCount = React.useMemo(() => filteredStreams.filter(
-        (stream) => getDebridProvider(stream) === DEBRID_PROVIDER.REALDEBRID
-    ).length, [filteredStreams]);
-    const filteredRealDebridSources = React.useMemo(() => {
+    const historyInfoHashesKey = historyInfoHashes.join(',');
+    const historyRealDebridSources = React.useMemo(() => {
         const byKey = new Map();
         filteredStreams.forEach((stream) => {
             if (getDebridProvider(stream) !== DEBRID_PROVIDER.REALDEBRID) {
@@ -273,7 +292,7 @@ const StreamsList = ({
         });
         return Array.from(byKey.values());
     }, [filteredStreams]);
-    const filteredRealDebridSourcesKey = filteredRealDebridSources.map((source) => source.key).join(',');
+    const historyRealDebridSourcesKey = historyRealDebridSources.map((source) => source.key).join(',');
     const applyAvailabilityItems = React.useCallback((items) => {
         if (!Array.isArray(items)) {
             return;
@@ -323,6 +342,50 @@ const StreamsList = ({
         });
     }, [getStreamAvailability, getStreamRealDebridAvailability]);
 
+    // Batch selection keeps its existing source pool and ranking. Browsing
+    // controls only narrow the displayed rows and explicit check targets.
+    const orderedFilteredStreams = React.useMemo(() => filterAndSortSources(filteredStreams, {
+        preferredAddon: effectiveSelectedAddon === ALL_ADDONS_KEY ? preferredAddon : '',
+        getReadiness: getStreamReadiness
+    }), [filteredStreams, effectiveSelectedAddon, preferredAddon, getStreamReadiness]);
+    const displayedStreams = React.useMemo(() => filterAndSortSources(orderedFilteredStreams, {
+        search: sourceSearch, availability: sourceAvailability, sort: sourceSort,
+        preferredAddon: effectiveSelectedAddon === ALL_ADDONS_KEY ? preferredAddon : '',
+        getReadiness: getStreamReadiness
+    }), [orderedFilteredStreams, sourceSearch, sourceAvailability, sourceSort, effectiveSelectedAddon, preferredAddon, getStreamReadiness]);
+    const filteredInfoHashes = React.useMemo(() => Array.from(new Set(displayedStreams
+        .filter((stream) => getDebridProvider(stream) === DEBRID_PROVIDER.ALLDEBRID)
+        .map(getStreamInfoHash).filter(Boolean))), [displayedStreams]);
+    const filteredInfoHashesKey = filteredInfoHashes.join(',');
+    const filteredAllDebridRowCount = displayedStreams.filter((stream) => getDebridProvider(stream) === DEBRID_PROVIDER.ALLDEBRID).length;
+    const filteredRealDebridRowCount = displayedStreams.filter((stream) => getDebridProvider(stream) === DEBRID_PROVIDER.REALDEBRID).length;
+    const filteredRealDebridSources = React.useMemo(() => {
+        const byKey = new Map();
+        displayedStreams.filter((stream) => getDebridProvider(stream) === DEBRID_PROVIDER.REALDEBRID).forEach((stream) => {
+            const source = getRealDebridSourceDescriptor(stream);
+            if (source) {
+                byKey.set(source.key, source);
+            }
+        });
+        return Array.from(byKey.values());
+    }, [displayedStreams]);
+    const filteredRealDebridSourcesKey = filteredRealDebridSources.map((source) => source.key).join(',');
+    const sourceFiltersActive = sourceSearch.trim().length > 0 || sourceAvailability !== 'all' || effectiveSelectedAddon !== ALL_ADDONS_KEY;
+    const sourceSortOptions = [
+        { value: 'recommended', label: t('CUSTOM_STREAM_SORT_RECOMMENDED', { defaultValue: 'Recommended' }) },
+        { value: 'quality', label: t('CUSTOM_STREAM_SORT_QUALITY', { defaultValue: 'Highest quality' }) },
+        { value: 'size-desc', label: t('CUSTOM_STREAM_SORT_LARGEST', { defaultValue: 'Largest files' }) },
+        { value: 'size-asc', label: t('CUSTOM_STREAM_SORT_SMALLEST', { defaultValue: 'Smallest files' }) },
+        { value: 'name', label: t('CUSTOM_STREAM_SORT_NAME', { defaultValue: 'Name A–Z' }) }
+    ];
+    const sourceAvailabilityOptions = [
+        { value: 'all', label: t('CUSTOM_STREAM_FILTER_ALL', { defaultValue: 'All sources' }) },
+        { value: 'available', label: t('CUSTOM_STREAM_FILTER_AVAILABLE', { defaultValue: 'Cached / ready' }) },
+        { value: 'unchecked', label: t('CUSTOM_STREAM_FILTER_UNCHECKED', { defaultValue: 'Needs checking' }) },
+        { value: 'uncached', label: t('CUSTOM_STREAM_FILTER_UNCACHED', { defaultValue: 'Not cached' }) },
+        { value: 'unavailable', label: t('CUSTOM_STREAM_FILTER_UNAVAILABLE', { defaultValue: 'Unavailable' }) }
+    ];
+
     React.useEffect(() => {
         let canceled = false;
         setBackendSettingsLoaded(false);
@@ -357,7 +420,7 @@ const StreamsList = ({
     React.useEffect(() => {
         let canceled = false;
         setAllDebridHistoryLoaded(false);
-        getAllDebridAvailabilityHistory(filteredInfoHashes)
+        getAllDebridAvailabilityHistory(historyInfoHashes)
             .then((result) => {
                 if (canceled) {
                     return;
@@ -378,12 +441,12 @@ const StreamsList = ({
         return () => {
             canceled = true;
         };
-    }, [filteredInfoHashesKey, applyAvailabilityItems]);
+    }, [historyInfoHashesKey, applyAvailabilityItems]);
 
     React.useEffect(() => {
         let canceled = false;
         setRealDebridHistoryLoaded(false);
-        getRealDebridAvailabilityHistory(filteredRealDebridSources)
+        getRealDebridAvailabilityHistory(historyRealDebridSources)
             .then((result) => {
                 if (canceled) {
                     return;
@@ -404,7 +467,7 @@ const StreamsList = ({
         return () => {
             canceled = true;
         };
-    }, [filteredRealDebridSourcesKey, applyRealDebridAvailabilityItems]);
+    }, [historyRealDebridSourcesKey, applyRealDebridAvailabilityItems]);
 
     React.useEffect(() => {
         const allDebridItems = [];
@@ -453,128 +516,77 @@ const StreamsList = ({
 
     const onCheckAvailability = React.useCallback(async (requestedHashes) => {
         const targetHashes = Array.isArray(requestedHashes) ? requestedHashes : filteredInfoHashes;
-        if (availabilityChecking || targetHashes.length === 0) {
+        if (targetHashes.length === 0) {
             return;
         }
-        setAvailabilityChecking(true);
-        setAvailabilityProgress({ completed: 0, total: targetHashes.length, currentHash: null });
-        setAvailabilityError(null);
-        try {
-            const checked = await checkAllDebridAvailability(targetHashes, {
-                batchSize: 1,
-                onBatchStart: ({ batch, batchIndex, totalBatches }) => {
-                    setAvailabilityProgress({ completed: batchIndex, total: totalBatches, currentHash: batch[0] || null });
-                },
-                onBatchComplete: ({ batchIndex, totalBatches, result }) => {
-                    applyAvailabilityItems(result?.items);
-                    setAvailabilityProgress({ completed: batchIndex + 1, total: totalBatches, currentHash: null });
-                }
-            });
-            setAllDebridConnected(checked?.connected === true);
-            applyAvailabilityItems(checked?.items);
-            if (checked?.cleanupWarning) {
-                setAvailabilityError(checked.cleanupWarning);
+        return runAllDebridCheck(async (signal, commit) => {
+            setAvailabilityProgress({ completed: 0, total: targetHashes.length, currentHash: null });
+            setAvailabilityError(null);
+            try {
+                const checked = await checkAllDebridAvailability(targetHashes, {
+                    batchSize: 1,
+                    signal,
+                    onBatchStart: ({ batch, batchIndex, totalBatches }) => commit(() => {
+                        setAvailabilityProgress({ completed: batchIndex, total: totalBatches, currentHash: batch[0] || null });
+                    }),
+                    onBatchComplete: ({ batchIndex, totalBatches, result }) => commit(() => {
+                        applyAvailabilityItems(result?.items);
+                        setAvailabilityProgress({ completed: batchIndex + 1, total: totalBatches, currentHash: null });
+                    })
+                });
+                commit(() => {
+                    if (typeof checked?.connected === 'boolean') {
+                        setAllDebridConnected(checked.connected);
+                    }
+                    applyAvailabilityItems(checked?.items);
+                    if (checked?.cleanupWarning) {
+                        setAvailabilityError(checked.cleanupWarning);
+                    }
+                });
+            } catch (error) {
+                commit(() => setAvailabilityError(error?.backendError || error?.message || 'Could not check AllDebrid availability.'));
+            } finally {
+                commit(() => setAvailabilityProgress(null));
             }
-        } catch (error) {
-            setAvailabilityError(error?.backendError || error?.message || 'Could not check AllDebrid availability.');
-        } finally {
-            setAvailabilityChecking(false);
-            setAvailabilityProgress(null);
-        }
-    }, [availabilityChecking, filteredInfoHashesKey, applyAvailabilityItems]);
+        });
+    }, [runAllDebridCheck, filteredInfoHashesKey, applyAvailabilityItems]);
 
     const onCheckRealDebridAvailability = React.useCallback(async (requestedSources) => {
         const targetSources = Array.isArray(requestedSources) ? requestedSources : filteredRealDebridSources;
-        if (realDebridChecking || targetSources.length === 0) {
+        if (targetSources.length === 0) {
             return;
         }
-        setRealDebridChecking(true);
-        setRealDebridProgress({ completed: 0, total: targetSources.length, currentKey: null });
-        setRealDebridError(null);
-        try {
-            const checkedItems = [];
-            const cleanupWarnings = new Set();
-            let connected = true;
-            for (let index = 0; index < targetSources.length; index += 1) {
-                const source = targetSources[index];
-                setRealDebridProgress({
-                    completed: index,
-                    total: targetSources.length,
-                    currentKey: source.key,
-                    stage: 'cache'
+        return runRealDebridCheck(async (signal, commit) => {
+            setRealDebridProgress({ completed: 0, total: targetSources.length, currentKey: null });
+            setRealDebridError(null);
+            try {
+                const checked = await runRealDebridAvailabilityCheck(targetSources, {
+                    signal,
+                    onProgress: (progress) => commit(() => setRealDebridProgress(progress)),
+                    onItems: (items) => commit(() => applyRealDebridAvailabilityItems(items))
                 });
-                const cacheResult = await checkRealDebridAvailability([source]);
-                connected = connected && cacheResult?.connected !== false;
-                if (cacheResult?.cleanupWarning) {
-                    cleanupWarnings.add(cacheResult.cleanupWarning);
-                }
-                let item = Array.isArray(cacheResult?.items) ? cacheResult.items[0] : null;
-                applyRealDebridAvailabilityItems(item ? [item] : []);
-
-                if (shouldProbeRealDebridAvailability(item)) {
-                    setRealDebridProgress({
-                        completed: index,
-                        total: targetSources.length,
-                        currentKey: source.key,
-                        stage: 'resolver'
-                    });
-                    const probeResult = await probeRealDebridAvailability(source);
-                    connected = connected && probeResult?.connected !== false;
-                    if (probeResult?.cleanupWarning) {
-                        cleanupWarnings.add(probeResult.cleanupWarning);
+                commit(() => {
+                    if (typeof checked.connected === 'boolean') {
+                        setRealDebridConnected(checked.connected);
                     }
-                    item = probeResult?.item || item;
-                    applyRealDebridAvailabilityItems(item ? [item] : []);
-                }
-                if (item) {
-                    checkedItems.push(item);
-                }
-                setRealDebridProgress({
-                    completed: index + 1,
-                    total: targetSources.length,
-                    currentKey: null,
-                    stage: null
+                    if (checked.cleanupWarning) {
+                        setRealDebridError(checked.cleanupWarning);
+                    } else {
+                        const unresolvedCount = checked.items.filter((item) =>
+                            ['error', 'invalid', 'unknown'].includes(item?.status) && item?.error
+                        ).length;
+                        if (unresolvedCount > 0) {
+                            setRealDebridError(`${unresolvedCount} source${unresolvedCount === 1 ? '' : 's'} could not be safely matched or checked.`);
+                        }
+                    }
                 });
+            } catch (error) {
+                commit(() => setRealDebridError(error?.backendError || error?.message || 'Could not check Real-Debrid availability.'));
+            } finally {
+                commit(() => setRealDebridProgress(null));
             }
-
-            setRealDebridConnected(connected);
-            if (cleanupWarnings.size > 0) {
-                setRealDebridError(Array.from(cleanupWarnings).join(' '));
-            } else {
-                const unresolvedCount = checkedItems.filter((item) =>
-                    ['error', 'invalid', 'unknown'].includes(item?.status) && item?.error
-                ).length;
-                if (unresolvedCount > 0) {
-                    setRealDebridError(`${unresolvedCount} source${unresolvedCount === 1 ? '' : 's'} could not be safely matched or checked.`);
-                }
-            }
-        } catch (error) {
-            setRealDebridError(error?.backendError || error?.message || 'Could not check Real-Debrid availability.');
-        } finally {
-            setRealDebridChecking(false);
-            setRealDebridProgress(null);
-        }
-    }, [realDebridChecking, filteredRealDebridSourcesKey, applyRealDebridAvailabilityItems]);
-    const orderedFilteredStreams = React.useMemo(() => {
-        return filteredStreams
-            .map((stream, index) => ({ stream, index }))
-            .sort((left, right) => {
-                if (effectiveSelectedAddon === ALL_ADDONS_KEY && normalizeAddonName(preferredAddon)) {
-                    const preferredDifference = Number(isPreferredAddonStream(right.stream)) - Number(isPreferredAddonStream(left.stream));
-                    if (preferredDifference !== 0) {
-                        return preferredDifference;
-                    }
-                }
-
-                const readinessDifference = getSourceReadinessSortRank(getStreamReadiness(left.stream)) -
-                    getSourceReadinessSortRank(getStreamReadiness(right.stream));
-                if (readinessDifference !== 0) {
-                    return readinessDifference;
-                }
-                return left.index - right.index;
-            })
-            .map(({ stream }) => stream);
-    }, [filteredStreams, effectiveSelectedAddon, preferredAddon, isPreferredAddonStream, getStreamReadiness]);
+        });
+    }, [runRealDebridCheck, filteredRealDebridSourcesKey, applyRealDebridAvailabilityItems]);
     const getStreamDownloadModel = React.useCallback((stream) => {
         const availability = getStreamAvailability(stream);
         const realDebridAvailability = getStreamRealDebridAvailability(stream);
@@ -625,8 +637,17 @@ const StreamsList = ({
         [batchDownloadSession, video?.id]);
     const isBatchSourceSelection = batchDownloadSession?.status === 'collecting' && Boolean(currentBatchEpisode) &&
         !batchDownloadSession.assignments?.[video?.id];
-    const isAutomaticBatchSelection = isBatchSourceSelection && batchDownloadSession?.automaticSelection !== false &&
+    const isAutomaticBatchSelection = isBatchSourceSelection && !batchChecksPaused && batchDownloadSession?.automaticSelection !== false &&
         !(batchDownloadSession?.manualSelectionEpisodeIds || []).includes(video?.id);
+    const onCancelAvailabilityCheck = React.useCallback((cancelCheck) => {
+        // Leave completed batch assignments intact and switch this episode to
+        // manual selection so automation cannot immediately restart the check.
+        if (isAutomaticBatchSelection) {
+            setBatchChecksPaused(true);
+            onChooseBatchSourceManually?.();
+        }
+        cancelCheck();
+    }, [isAutomaticBatchSelection, onChooseBatchSourceManually]);
     const batchCandidates = React.useMemo(() => isBatchSourceSelection ? orderedFilteredStreams.map(getStreamDownloadModel) : [],
         [getStreamDownloadModel, isBatchSourceSelection, orderedFilteredStreams]);
     const batchVerificationAttempts = React.useMemo(() => getBatchVerificationAttempts(batchDownloadSession, video?.id),
@@ -703,7 +724,8 @@ const StreamsList = ({
     React.useEffect(() => {
         autoBatchActionRef.current = null;
         setAutoBatchStatus(null);
-    }, [video?.id]);
+        setBatchChecksPaused(false);
+    }, [video?.id, batchDownloadSession?.status]);
 
     React.useEffect(() => {
         if (!isAutomaticBatchSelection ||
@@ -806,7 +828,6 @@ const StreamsList = ({
         return {
             options,
             value: preferredAddon,
-            title: `Preferred addon: ${preferredAddon || 'No preference'}`,
             onSelect: onPreferredAddonSelected
         };
     }, [streamsByAddon, preferredAddon, onPreferredAddonSelected]);
@@ -1041,25 +1062,56 @@ const StreamsList = ({
                     : null
             }
             <div className={styles['select-choices-wrapper']}>
-                {
-                    video ?
-                        <React.Fragment>
-                            <Button className={classnames(styles['button-container'], styles['back-button-container'])} tabIndex={0} onClick={backButtonOnClick}>
-                                <Icon className={styles['icon']} name={'chevron-back'} />
-                            </Button>
-                            <div className={styles['episode-title']}>
-                                {typeof video.season === 'number' && typeof video.episode === 'number'
-                                    ? `S${video.season}E${video.episode}${video.title ? ` ${video.title}` : ''}`
-                                    : (video.title ?? '')}
-                            </div>
-                        </React.Fragment>
-                        :
-                        null
-                }
+                <div className={styles['source-heading']}>
+                    {video ?
+                        <button type={'button'} className={styles['back-button-container']} aria-label={type === 'series' ? t('CUSTOM_STREAM_BACK_EPISODES', { defaultValue: 'Back to episodes' }) : t('BACK')} onClick={backButtonOnClick}>
+                            <Icon className={styles['icon']} name={'chevron-back'} />
+                        </button>
+                        : null}
+                    <div>
+                        <h2>{t('CUSTOM_STREAM_SOURCES', { defaultValue: 'Sources' })}</h2>
+                        {video ? <div className={styles['episode-title']}>
+                            {typeof video.season === 'number' && typeof video.episode === 'number'
+                                ? `S${video.season} · E${video.episode}${video.title ? ` · ${video.title}` : ''}`
+                                : (video.title ?? '')}
+                        </div> : null}
+                    </div>
+                </div>
+                {Object.keys(streamsByAddon).length > 0 ?
+                    <React.Fragment>
+                        <div className={styles['source-search']}>
+                            <Icon name={'search'} aria-hidden={'true'} />
+                            <input ref={sourceSearchRef} type={'search'} value={sourceSearch}
+                                placeholder={t('CUSTOM_STREAM_SEARCH_PLACEHOLDER', { defaultValue: 'Search sources…' })}
+                                aria-label={t('CUSTOM_STREAM_SEARCH_LABEL', { defaultValue: 'Search sources' })}
+                                aria-controls={sourceResultsId} autoComplete={'off'} spellCheck={false}
+                                onChange={(event) => setSourceSearch(event.target.value)}
+                                onKeyDown={(event) => {
+                                    if (event.key === 'Escape' && sourceSearch) {
+                                        event.preventDefault();
+                                        event.stopPropagation();
+                                        setSourceSearch('');
+                                    }
+                                }}
+                            />
+                            {sourceSearch ?
+                                <button type={'button'} aria-label={t('CUSTOM_STREAM_CLEAR_SEARCH', { defaultValue: 'Clear source search' })}
+                                    onClick={() => { setSourceSearch(''); sourceSearchRef.current?.focus(); }}>
+                                    <Icon name={'close'} aria-hidden={'true'} />
+                                </button>
+                                : null}
+                        </div>
+                        <SelectMenu label={t('CUSTOM_STREAM_SORT_LABEL', { defaultValue: 'Sort sources' })} value={sourceSort}
+                            options={sourceSortOptions} onSelect={setSourceSort} className={styles['select-input-container']} />
+                        <SelectMenu label={t('CUSTOM_STREAM_AVAILABILITY_LABEL', { defaultValue: 'Availability' })} value={sourceAvailability}
+                            options={sourceAvailabilityOptions} onSelect={setSourceAvailability} className={styles['select-input-container']} />
+                    </React.Fragment>
+                    : null}
                 {
                     Object.keys(streamsByAddon).length > 1 ?
-                        <MultiselectMenu
+                        <SelectMenu
                             {...selectableOptions}
+                            label={t('CUSTOM_STREAM_ADDON_FILTER', { defaultValue: 'Source addon' })}
                             className={styles['select-input-container']}
                         />
                         :
@@ -1067,27 +1119,28 @@ const StreamsList = ({
                 }
                 {
                     Object.keys(streamsByAddon).length > 0 ?
-                        <MultiselectMenu
+                        <SelectMenu
                             {...preferredAddonOptions}
+                            label={t('CUSTOM_STREAM_PREFERRED_ADDON', { defaultValue: 'Preferred addon' })}
                             className={styles['select-input-container']}
                         />
                         :
                         null
                 }
                 {
-                    filteredStreams.length > 0 ?
+                    filteredAllDebridRowCount > 0 || filteredRealDebridRowCount > 0 || availabilityChecking || realDebridChecking ?
                         <div className={styles['availability-controls']}>
                             {
-                                filteredStreams.length > 0 ?
+                                filteredAllDebridRowCount > 0 || availabilityChecking ?
                                     <div className={styles['availability-provider']}>
-                                        <Button
+                                        <button type={'button'}
                                             className={styles['availability-check-button']}
                                             title={t('CUSTOM_STREAM_CHECK_AVAILABILITY_TITLE', { defaultValue: 'Check the visible torrent hashes on AllDebrid' })}
                                             disabled={!allDebridConnected || availabilityChecking || filteredInfoHashes.length === 0}
                                             aria-busy={availabilityChecking}
                                             onClick={onCheckAvailability}
                                         >
-                                            <Icon className={classnames(styles['availability-check-icon'], availabilityChecking ? styles['availability-check-icon-active'] : null)} name={'checkmark'} />
+                                            <Icon className={classnames(styles['availability-check-icon'], availabilityChecking ? styles['availability-check-icon-active'] : null)} name={'search'} aria-hidden={'true'} />
                                             <span>{availabilityChecking ?
                                                 `Checking AllDebrid ${availabilityProgress?.completed || 0}/${availabilityProgress?.total || filteredInfoHashes.length}...`
                                                 : !allDebridConnected ?
@@ -1099,11 +1152,22 @@ const StreamsList = ({
                                                             :
                                                             t('CUSTOM_STREAM_CHECK_AVAILABILITY', { defaultValue: 'Check AllDebrid' })}
                                             </span>
-                                        </Button>
+                                        </button>
+                                        {availabilityChecking ?
+                                            <button type={'button'} className={classnames(styles['availability-check-button'], styles['availability-cancel-button'])}
+                                                aria-label={t('CUSTOM_STREAM_CANCEL_ALLDEBRID_CHECK', { defaultValue: 'Cancel AllDebrid check' })}
+                                                disabled={availabilityCanceling}
+                                                onClick={() => onCancelAvailabilityCheck(cancelAllDebridCheck)}
+                                            >
+                                                {availabilityCanceling ? t('CUSTOM_STREAM_CHECK_CANCELING', { defaultValue: 'Canceling…' }) : t('CUSTOM_STREAM_CHECK_CANCEL', { defaultValue: 'Cancel' })}
+                                            </button>
+                                            : null}
                                         {
                                             availabilitySummary.cached > 0 || availabilitySummary.uncached > 0 || availabilitySummary.unavailable > 0 ?
                                                 <span className={styles['availability-summary']}>
-                                                    {`${availabilitySummary.cached} cached · ${availabilitySummary.uncached} not cached · ${availabilitySummary.unavailable} unavailable`}
+                                                    {availabilitySummary.cached > 0 ? <span>{`${availabilitySummary.cached} cached`}</span> : null}
+                                                    {availabilitySummary.uncached > 0 ? <span>{`${availabilitySummary.uncached} not cached`}</span> : null}
+                                                    {availabilitySummary.unavailable > 0 ? <span>{`${availabilitySummary.unavailable} unavailable`}</span> : null}
                                                 </span>
                                                 : null
                                         }
@@ -1120,21 +1184,28 @@ const StreamsList = ({
                                                         defaultValue: 'Checks briefly create and remove temporary magnet entries in your AllDebrid account.'
                                                     })}
                                         </span>
+                                        {availabilityCanceling || availabilityCanceled ?
+                                            <span className={styles['availability-notice']} role={'status'}>
+                                                {availabilityCanceling ?
+                                                    t('CUSTOM_STREAM_CHECK_FINISHING', { defaultValue: 'Finishing the current request and its cleanup. Remaining checks are stopped.' })
+                                                    : t('CUSTOM_STREAM_CHECK_CANCELED', { defaultValue: 'Check canceled. Completed results are kept.' })}
+                                            </span>
+                                            : null}
                                         {availabilityError ? <span className={styles['availability-error']} role={'alert'}>{availabilityError}</span> : null}
                                     </div>
                                     : null
                             }
                             {
-                                filteredStreams.length > 0 ?
+                                filteredRealDebridRowCount > 0 || realDebridChecking ?
                                     <div className={styles['availability-provider']}>
-                                        <Button
+                                        <button type={'button'}
                                             className={classnames(styles['availability-check-button'], styles['availability-check-button-realdebrid'])}
                                             title={t('CUSTOM_STREAM_CHECK_REALDEBRID_TITLE', { defaultValue: 'Check each visible source file on Real-Debrid' })}
                                             disabled={!realDebridConnected || realDebridChecking || filteredRealDebridSources.length === 0}
                                             aria-busy={realDebridChecking}
                                             onClick={onCheckRealDebridAvailability}
                                         >
-                                            <Icon className={classnames(styles['availability-check-icon'], realDebridChecking ? styles['availability-check-icon-active'] : null)} name={'checkmark'} />
+                                            <Icon className={classnames(styles['availability-check-icon'], realDebridChecking ? styles['availability-check-icon-active'] : null)} name={'search'} aria-hidden={'true'} />
                                             <span>{realDebridChecking ?
                                                 `Checking Real-Debrid ${realDebridProgress?.completed || 0}/${realDebridProgress?.total || filteredRealDebridSources.length}...`
                                                 : !realDebridConnected ?
@@ -1146,11 +1217,23 @@ const StreamsList = ({
                                                             :
                                                             t('CUSTOM_STREAM_CHECK_REALDEBRID', { defaultValue: 'Check Real-Debrid' })}
                                             </span>
-                                        </Button>
+                                        </button>
+                                        {realDebridChecking ?
+                                            <button type={'button'} className={classnames(styles['availability-check-button'], styles['availability-cancel-button'])}
+                                                aria-label={t('CUSTOM_STREAM_CANCEL_REALDEBRID_CHECK', { defaultValue: 'Cancel Real-Debrid check' })}
+                                                disabled={realDebridCanceling}
+                                                onClick={() => onCancelAvailabilityCheck(cancelRealDebridCheck)}
+                                            >
+                                                {realDebridCanceling ? t('CUSTOM_STREAM_CHECK_CANCELING', { defaultValue: 'Canceling…' }) : t('CUSTOM_STREAM_CHECK_CANCEL', { defaultValue: 'Cancel' })}
+                                            </button>
+                                            : null}
                                         {
                                             realDebridAvailabilitySummary.cached > 0 || realDebridAvailabilitySummary.ready > 0 || realDebridAvailabilitySummary.uncached > 0 || realDebridAvailabilitySummary.unavailable > 0 ?
                                                 <span className={styles['availability-summary']}>
-                                                    {`${realDebridAvailabilitySummary.cached} cached · ${realDebridAvailabilitySummary.ready} link ready · ${realDebridAvailabilitySummary.uncached} not cached · ${realDebridAvailabilitySummary.unavailable} unavailable`}
+                                                    {realDebridAvailabilitySummary.cached > 0 ? <span>{`${realDebridAvailabilitySummary.cached} cached`}</span> : null}
+                                                    {realDebridAvailabilitySummary.ready > 0 ? <span>{`${realDebridAvailabilitySummary.ready} link ready`}</span> : null}
+                                                    {realDebridAvailabilitySummary.uncached > 0 ? <span>{`${realDebridAvailabilitySummary.uncached} not cached`}</span> : null}
+                                                    {realDebridAvailabilitySummary.unavailable > 0 ? <span>{`${realDebridAvailabilitySummary.unavailable} unavailable`}</span> : null}
                                                 </span>
                                                 : null
                                         }
@@ -1168,6 +1251,13 @@ const StreamsList = ({
                                                         defaultValue: 'Explicitly adds, selects, and removes temporary Real-Debrid torrents.'
                                                     })}
                                         </span>
+                                        {realDebridCanceling || realDebridCanceled ?
+                                            <span className={styles['availability-notice']} role={'status'}>
+                                                {realDebridCanceling ?
+                                                    t('CUSTOM_STREAM_CHECK_FINISHING', { defaultValue: 'Finishing the current request and its cleanup. Remaining checks are stopped.' })
+                                                    : t('CUSTOM_STREAM_CHECK_CANCELED', { defaultValue: 'Check canceled. Completed results are kept.' })}
+                                            </span>
+                                            : null}
                                         {realDebridError ? <span className={styles['availability-error']} role={'alert'}>{realDebridError}</span> : null}
                                     </div>
                                     : null
@@ -1175,6 +1265,16 @@ const StreamsList = ({
                         </div>
                         : null
                 }
+                {Object.keys(streamsByAddon).length > 0 ?
+                    <div className={styles['source-results-summary']}>
+                        <span role={'status'}>{t('CUSTOM_STREAM_RESULTS_COUNT', {
+                            defaultValue: '{{shown}} of {{total}} sources', shown: displayedStreams.length, total: filteredStreams.length
+                        })}</span>
+                        {sourceFiltersActive ? <button type={'button'} onClick={resetSourceFilters}>
+                            {t('CUSTOM_STREAM_RESET_FILTERS', { defaultValue: 'Reset filters' })}
+                        </button> : null}
+                    </div>
+                    : null}
             </div>
             {
                 props.streams.length === 0 ?
@@ -1213,15 +1313,29 @@ const StreamsList = ({
                             }
                         </div>
                         :
-                        orderedFilteredStreams.length === 0 ?
-                            <div className={styles['streams-container']}>
-                                <Stream.Placeholder />
-                                <Stream.Placeholder />
+                        displayedStreams.length === 0 ?
+                            <div className={styles['streams-container']} id={sourceResultsId} ref={streamsContainerRef}>
+                                {countLoadingAddons > 0 && !sourceFiltersActive ?
+                                    <React.Fragment><Stream.Placeholder /><Stream.Placeholder /></React.Fragment>
+                                    : <div className={styles['source-empty']}>
+                                        <Icon name={'search'} aria-hidden={'true'} />
+                                        <strong>{sourceFiltersActive ?
+                                            t('CUSTOM_STREAM_NO_MATCHES', { defaultValue: 'No matching sources' })
+                                            : t('CUSTOM_STREAM_NO_SOURCES', { defaultValue: 'No sources available' })}</strong>
+                                        <span>{countLoadingAddons > 0 ?
+                                            t('CUSTOM_STREAM_STILL_LOADING', { defaultValue: 'More addons are still loading.' })
+                                            : sourceFiltersActive ?
+                                                t('CUSTOM_STREAM_TRY_FILTERS', { defaultValue: 'Try another search or reset your filters.' })
+                                                : t('CUSTOM_STREAM_TRY_ADDON', { defaultValue: 'Try another addon or episode.' })}</span>
+                                        {sourceFiltersActive ? <button type={'button'} onClick={resetSourceFilters}>
+                                            {t('CUSTOM_STREAM_RESET_FILTERS', { defaultValue: 'Reset filters' })}
+                                        </button> : null}
+                                    </div>}
                             </div>
                             :
                             <React.Fragment>
-                                <div className={styles['streams-container']} ref={streamsContainerRef}>
-                                    {orderedFilteredStreams.map((stream, index) => {
+                                <div className={styles['streams-container']} ref={streamsContainerRef} id={sourceResultsId}>
+                                    {displayedStreams.map((stream) => {
                                         const streamModel = getStreamDownloadModel(stream);
                                         const {
                                             availability,
@@ -1234,9 +1348,9 @@ const StreamsList = ({
                                         const streamInfoHash = streamProvider === DEBRID_PROVIDER.ALLDEBRID ? getStreamInfoHash(stream) : null;
                                         const realDebridDescriptor = streamProvider === DEBRID_PROVIDER.REALDEBRID ? getRealDebridSourceDescriptor(stream) : null;
                                         const isAvailabilityChecking = streamProvider === DEBRID_PROVIDER.ALLDEBRID ?
-                                            Boolean(streamInfoHash && availabilityProgress?.currentHash === streamInfoHash)
+                                            Boolean(availabilityChecking && streamInfoHash && availabilityProgress?.currentHash === streamInfoHash)
                                             : streamProvider === DEBRID_PROVIDER.REALDEBRID ?
-                                                Boolean(realDebridDescriptor && realDebridProgress?.currentKey === realDebridDescriptor.key)
+                                                Boolean(realDebridChecking && realDebridDescriptor && realDebridProgress?.currentKey === realDebridDescriptor.key)
                                                 : false;
                                         const availabilityCheckStage = isAvailabilityChecking && streamProvider === DEBRID_PROVIDER.REALDEBRID ?
                                             realDebridProgress?.stage || 'cache'
@@ -1259,7 +1373,7 @@ const StreamsList = ({
 
                                         return (
                                             <Stream
-                                                key={index}
+                                                key={stream.sourceListKey}
                                                 videoId={video?.id}
                                                 videoReleased={video?.released}
                                                 addonName={stream.addonName}
@@ -1338,6 +1452,7 @@ StreamsList.propTypes = {
     onSelectBatchDownloadSource: PropTypes.func,
     onRecordBatchVerificationAttempt: PropTypes.func,
     onBatchAutomationStatusChange: PropTypes.func,
+    onChooseBatchSourceManually: PropTypes.func,
     onCancelBatchDownload: PropTypes.func
 };
 

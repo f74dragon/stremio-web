@@ -11,7 +11,7 @@ const {
     playDownload,
     openDownloadLocation
 } = require('./localBackendClient');
-const { ACTIVE_DOWNLOAD_STATUSES, POLLING_DOWNLOAD_STATUSES } = require('./downloadRecordPresentation');
+const { ACTIVE_DOWNLOAD_STATUSES, POLLING_DOWNLOAD_STATUSES, getDownloadActionError } = require('./downloadRecordPresentation');
 const { executeDownloadMediaBatch } = require('./downloadBatchDeletion');
 
 const DEFAULT_POLL_INTERVAL = 1500;
@@ -346,7 +346,7 @@ const useDownloadRecords = ({ metaId, enabled = true, pollInterval = DEFAULT_POL
         } catch (requestError) {
             setActionErrors((currentErrors) => ({
                 ...currentErrors,
-                [recordId]: requestError?.backendError || 'Could not open this download. Check the local backend player configuration.'
+                [recordId]: getDownloadActionError(requestError, 'Could not open this download. Check the local backend player configuration.')
             }));
         } finally {
             setAction(recordId, null);
@@ -365,7 +365,7 @@ const useDownloadRecords = ({ metaId, enabled = true, pollInterval = DEFAULT_POL
         } catch (requestError) {
             setActionErrors((currentErrors) => ({
                 ...currentErrors,
-                [recordId]: requestError?.backendError || 'Could not open this download location. Check that the local backend is running.'
+                [recordId]: getDownloadActionError(requestError, 'Could not open this download location. Check that the local backend is running.')
             }));
         } finally {
             setAction(recordId, null);

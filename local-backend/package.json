@@ -2,7 +2,7 @@
   "name": "custom-stremio-local-backend",
   "private": true,
   "version": "0.1.0",
-  "description": "Development-only local backend skeleton for custom Stremio downloads",
+  "description": "Local download manager and MPC-HC integration for Custom Stremio",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

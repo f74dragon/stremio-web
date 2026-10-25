@@ -1,0 +1,39 @@
+diff --git a/src/runtime/msg/action.rs b/src/runtime/msg/action.rs
+--- a/src/runtime/msg/action.rs
++++ b/src/runtime/msg/action.rs
+@@ -22,1 +22,1 @@
+-        resource::{MetaItemId, MetaItemPreview, Video},
++        resource::{MetaItem, MetaItemId, MetaItemPreview, Video},
+@@ -33,1 +33,9 @@
+ pub enum ActionCtx {
++    ExternalPlaybackProgressChanged {
++        meta_item: MetaItem,
++        video_id: String,
++        time: u64,
++        duration: u64,
++        observed_at: chrono::DateTime<chrono::Utc>,
++    },
++
+diff --git a/src/models/ctx/mod.rs b/src/models/ctx/mod.rs
+--- a/src/models/ctx/mod.rs
++++ b/src/models/ctx/mod.rs
+@@ -1,0 +1,2 @@
++mod update_external_playback;
++
+diff --git a/src/models/ctx/update_library.rs b/src/models/ctx/update_library.rs
+--- a/src/models/ctx/update_library.rs
++++ b/src/models/ctx/update_library.rs
+@@ -40,1 +40,8 @@
+     match msg {
++        Msg::Action(Action::Ctx(ActionCtx::ExternalPlaybackProgressChanged {
++            meta_item, video_id, time, duration, observed_at,
++        })) => super::update_external_playback::update_external_playback::<E>(
++            library, meta_item, video_id, *time, *duration, *observed_at,
++        ).map(|item| Effects::msg(Msg::Internal(Internal::UpdateLibraryItem(item))).unchanged())
++         .unwrap_or_else(|| Effects::none().unchanged()),
++
+diff --git a/src/unit_tests/ctx/mod.rs b/src/unit_tests/ctx/mod.rs
+--- a/src/unit_tests/ctx/mod.rs
++++ b/src/unit_tests/ctx/mod.rs
+@@ -1,0 +1,1 @@
++mod external_playback;

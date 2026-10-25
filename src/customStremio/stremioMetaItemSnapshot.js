@@ -61,6 +61,16 @@ const buildStremioMetaItemSnapshot = (metaItem) => {
     snapshot.released = metaItem.released instanceof Date ?
         (!isNaN(metaItem.released.getTime()) ? metaItem.released.toISOString() : null)
         : normalizeText(metaItem.released, 64);
+    if (type === 'series' && Array.isArray(metaItem.videos)) {
+        snapshot.videos = metaItem.videos.map((video) => ({
+            id: normalizeText(video?.id, 512),
+            title: normalizeText(video?.title, 1024) || '',
+            season: Number.isSafeInteger(video?.season) && video.season >= 0 ? video.season : null,
+            episode: Number.isSafeInteger(video?.episode) && video.episode >= 0 ? video.episode : null,
+            released: video?.released instanceof Date ?
+                (!isNaN(video.released.getTime()) ? video.released.toISOString() : null) : normalizeText(video?.released, 64)
+        })).filter((video) => video.id);
+    }
 
     const serialized = JSON.stringify(snapshot);
     return getUtf8ByteLength(serialized) <= MAX_META_ITEM_SNAPSHOT_BYTES ? snapshot : null;

@@ -554,6 +554,7 @@ const MetaDetails = ({ urlParams, queryParams }) => {
                                 onSelectBatchDownloadSource={selectBatchDownloadSource}
                                 onRecordBatchVerificationAttempt={recordBatchVerificationAttempt}
                                 onBatchAutomationStatusChange={setBatchAutomationStatus}
+                                onChooseBatchSourceManually={chooseBatchSourceManually}
                                 onCancelBatchDownload={cancelBatchDownload}
                             />
                         </div>

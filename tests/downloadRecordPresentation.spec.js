@@ -14,11 +14,21 @@ const {
     getDownloadActivitySummary,
     getDownloadTitleHref,
     getDownloadDetailsHref,
+    getDownloadActionError,
     getDownloadMediaGroupStoredBytes,
     filterAndSortDownloadMediaGroups
 } = require('../src/customStremio/downloadRecordPresentation');
 
 describe('downloadRecordPresentation', () => {
+    test('explains missing media with recovery guidance without exposing long filesystem errors', () => {
+        const error = (errorCode) => ({ responseBody: { errorCode }, backendError: 'A long raw filesystem path' });
+        expect(getDownloadActionError(error('MEDIA_FILE_NOT_FOUND'))).toContain('download it again');
+        expect(getDownloadActionError(error('DOWNLOAD_DIRECTORY_NOT_FOUND'))).toContain('Reconnect the drive');
+        expect(getDownloadActionError(error('DOWNLOAD_PATH_UNAVAILABLE'))).toContain('permissions');
+        expect(getDownloadActionError(error('PLAYER_NOT_FOUND'), 'Fallback')).toBe('A long raw filesystem path');
+        expect(getDownloadActionError(null, 'Fallback')).toBe('Fallback');
+    });
+
     test('groups records by user-facing state and sorts each group newest first', () => {
         const groups = groupDownloadRecords([
             { id: 'completed-old', status: 'completed', completedAt: '2026-01-01T00:00:00.000Z' },

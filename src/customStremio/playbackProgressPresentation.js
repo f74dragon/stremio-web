@@ -40,7 +40,8 @@ const getPlaybackProgressForRecord = (record, progressByDownloadId) => {
 
     const progress = progressByDownloadId?.[record?.id];
     const value = clampProgress(progress?.progress);
-    if (!progress || value === null || value <= 0 || value >= 1) {
+    if (!progress || value === null || value <= 0 || value >= 1 ||
+        (Number.isFinite(progress.positionMs) && progress.positionMs < 1000)) {
         return null;
     }
 

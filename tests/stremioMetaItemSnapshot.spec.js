@@ -43,6 +43,17 @@ describe('Stremio metadata snapshots', () => {
         expect(buildStremioMetaItemSnapshot({ ...valid, description: 'x'.repeat(MAX_META_ITEM_SNAPSHOT_BYTES) })).toBeNull();
     });
 
+    test('retains compact canonical series videos without route or watched state', () => {
+        const snapshot = buildStremioMetaItemSnapshot({
+            id: 'tt123', type: 'series', name: 'Series',
+            videos: [{ id: 'tt123:1:1', title: 'Pilot', season: 1, episode: 1,
+                released: new Date('2020-01-01T00:00:00Z'), watched: true, upcoming: false,
+                deepLinks: { player: 'private-link' }, streams: [{ url: 'private-source' }] }]
+        });
+        expect(snapshot.videos).toEqual([{ id: 'tt123:1:1', title: 'Pilot', season: 1, episode: 1,
+            released: '2020-01-01T00:00:00.000Z' }]);
+    });
+
     test('builds a valid movie preview from a legacy download record', () => {
         expect(buildLegacyStremioMetaItemSnapshot({
             metaId: 'tt123',

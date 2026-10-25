@@ -8,6 +8,12 @@ const {
 } = require('../src/customStremio/playbackProgressPresentation');
 
 describe('playbackProgressPresentation', () => {
+    test('does not show a resume summary for less than a second of playback', () => {
+        expect(getPlaybackProgressForRecord({ id: 'just-opened', status: 'completed' }, {
+            'just-opened': { progress: 0.00001, positionMs: 32, durationMs: 3200000 }
+        })).toBeNull();
+    });
+
     test('formats playback time without treating it as a watched state', () => {
         expect(formatPlaybackTime(65_000)).toBe('1:05');
         expect(formatPlaybackTime(3_665_000)).toBe('1:01:05');

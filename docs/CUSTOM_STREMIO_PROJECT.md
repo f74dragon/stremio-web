@@ -11,12 +11,12 @@
 - `stremio-web` is the React frontend/client UI in this repo.
 - Stremio account state, installed addons, and stream/meta data are not stored in this repo; they are loaded after login from Stremio backend/account services and addon services.
 - Most UI work for this customization belongs in this repo.
-- Real downloads and MPC-HC launching should later go through a local backend/native integration layer, not browser-only code.
-- `stremio-core` should not be modified unless a later step proves it is unavoidable.
+- Real downloads, MPC-HC launching, and verified playback telemetry use the local backend/native integration layer.
+- Account playback sync uses a narrow, tested Core extension because the pinned upstream action surface cannot accept external position/duration. Its source overlay and reproducible build are in `core-patches/` and `scripts/`.
 
 ## Planned Architecture
 
-`Modified stremio-web UI -> local backend/native layer later -> downloader/filesystem/MPC-HC -> optional final desktop packaging later`
+`Modified stremio-web UI + pinned custom Core -> local backend -> downloader/filesystem/MPC-HC -> Windows desktop packaging next`
 
 ## Important Files / Areas
 
@@ -35,7 +35,7 @@
 Notes:
 
 - `docs/` did not previously exist and is created with this tracker file.
-- There is an unrelated existing worktree modification in `package.json`; future agents should avoid touching it unless needed.
+- The October 24 dependency and playback-sync changes include intentional edits to `package.json` and `pnpm-lock.yaml`.
 
 ## Implementation Milestones
 
@@ -62,8 +62,8 @@ Notes:
 - `7. Add title-specific downloads panel`: Completed for the planned panel scope (`Milestones 7A-7B`; later shared file-management actions remain tracked under the download manager)
 - `8. Add global downloads page`: In progress (`Milestones 8A-8C.3` implemented, including archive-wide cursor pagination and date filtering)
 - `9. Add MPC-HC launch support`: Completed for the planned scope (`Milestones 9A-9C`; panel playback, stream-row playback, and persistent in-app player selection implemented)
-- `10. Add watched/unwatched integration`: In progress (`Milestones 10A-10D` complete; movie watched sync is live-verified and opt-in local Home resume integration is implemented)
-- `11. Package as Windows app`: Not started
+- `10. Add watched/unwatched integration`: Completed for the planned scope through `Milestone 10E`; automated checks pass and the user reported the live playback/sync flow working after the UI/crash fixes. Detailed clean-install and recovery checks remain part of packaging acceptance.
+- `11. Package as Windows app`: In progress (Phase 1 release foundation completed October 25; desktop launcher is next, followed by installer, updater, and installed-app acceptance)
 
 ## Agent Rules
 
@@ -78,14 +78,122 @@ Notes:
 
 ## Next Recommended Step
 
-Add a narrow supported stremio-core context action for verified external playback progress, or adopt an upstream equivalent that accepts identity, position, and duration without loading the singleton Player/MetaDetails models. Use that action for true account-backed Continue Watching plus canonical episode/season and next-episode synchronization.
+Phase 2: build the Windows desktop launcher using the completed release foundation in `desktop/` and `docs/CUSTOM_STREMIO_WINDOWS_RELEASE.md`. Register/test the stable packaged origin, persist the desktop profile, manage the bundled backend with exclusive data-root ownership, handle legacy/occupied-port conflicts, and implement explicit Windows shutdown/recovery. Installer, updater, and clean-profile acceptance follow. Keep upstream source maintenance separate from binary update delivery; the detailed upstream audit identifies pre-distribution migration/review work.
+
+## October 25: Windows Release Foundation (Phase 1)
+
+- Status: Completed; user approved Phase 1 only. No desktop launcher, installer, publishing, or automatic updater is included in this phase.
+- Completed: captured the existing tracked and non-ignored untracked source in checkpoint `bf0863a1b9f207f064b9372d63b1bffae50f7fec`, retained at `refs/checkpoints/windows-phase1-2026-10-25`. The current branch, HEAD, staged files, and working files were preserved. An additional source archive and its SHA-256 manifest are in ignored `.core-build/release-foundation/`.
+- Reviewed: fetched official upstream development and releases through `v5.0.0-beta.43` without merging. The shared base is `87ccc591dfeded23de2fde0820e4e277edc88749`; upstream has 648 commits absent from HEAD and changes 434 paths from that base. Seventeen paths overlap the checkpoint's custom changes. The Core dependency advances to 0.65.1 upstream; our tested 0.58.0 custom playback extension must be deliberately ported and revalidated before adopting that dependency.
+- Implemented: isolated `Custom Stremio` desktop identity/version metadata (`0.1.0-alpha.1`), stable shared data-directory resolution, versioned backend health/compatibility checks, and `pnpm verify:release` with a clean-tree release gate. `.nvmrc` now pins the tested Node 24.19.0 runtime alongside the existing pnpm 10.33.2 pin.
+- Documented: `docs/CUSTOM_STREMIO_WINDOWS_RELEASE.md` covers persistent profiles/data retention, process ownership versus compatibility, packaged-origin/security boundaries, and safe update requirements. `docs/CUSTOM_STREMIO_UPSTREAM_UPDATES.md` records exact source refs, integration risks, and the repeatable upstream-update workflow. The tested custom Core is retained for the first local alpha; trust/URL fixes and the larger Core/router/shell migration remain explicit pre-distribution review work.
+- Verification: frozen offline dependency install passes; all 50 suites / 390 tests pass, including an actual isolated backend health request, old/incompatible service rejection, custom/fallback data roots, and loading existing record fixtures without a migration. Frontend and all new/changed foundation code pass ESLint. Production build passes with its three existing bundle-size warnings. Release metadata/Core-hash preflight passes; `--require-clean` correctly rejects the current uncommitted source tree. The current branch/HEAD and real staging index remain unchanged.
+- Runtime isolation: tests used a temporary backend data directory and owned test process; existing accounts, provider credentials, media, and development processes are untouched. An already-running old backend will still report `version: dev` until restarted; Phase 2 must handle that explicitly rather than reuse/kill it silently.
+
+| Windows phase | Status |
+| --- | --- |
+| 1. Release foundation and upstream audit | Completed |
+| 2. Desktop launcher and backend lifecycle | Not started |
+| 3. Windows installer and clean-profile checks | Not started |
+| 4. Packaged-app update delivery and A -> B upgrade test | Not started |
+| 5. Installed-app playback/sync/recovery acceptance | Not started |
+
+### Git Backup and CI Preparation
+
+- The user requested committing/pushing the current work to the existing fork, `https://github.com/f74dragon/stremio-web.git`, on `development`. Origin was fetched and matched the audited local HEAD before preparing the commit. The local checkpoint/archive remains an additional recovery option.
+- The push includes the completed playback/Core, UI/source-control, test-dependency, and Windows Phase 1 work. Local build output, temporary checkpoints, development TLS keys, and installed dependencies remain ignored.
+- Fixed the Build workflow to install the backend's locked dependencies before its new integration test, use a frozen frontend lockfile, and run the clean-source release-foundation check. A normal source push does not create a Windows installer release; Phase 2 remains next.
+
+## October 24 Follow-up: Test Baseline and Playback Synchronization
+
+- Completed: `@babel/parser` is declared directly at the already-locked `7.29.3` version; the translation scan command uses the project's pinned Jest rather than downloading a separate runner. Frozen offline install succeeded; all 40 suites / 311 tests pass, including translation scanning.
+- Implemented: a narrow `ExternalPlaybackProgressChanged` Core context action using the pinned 0.58.0 source. The isolated build passes 208 Rust unit tests and 18 doc tests, including progress, rewind, completion, episode/season boundaries, stale observations, episode-counter isolation, storage, and a mocked account datastore write. The reproducible source overlay lives in `core-patches/`; `scripts/build-custom-core.ps1` creates the vendored package for normal frontend/Windows builds.
+- Implemented: the app-wide sync service observes explicit opt-in, account identity, native Player activity, exact local playback identity, retryable dispatches, and an account-scoped progress ledger. It resolves canonical episode metadata through installed metadata addons, with compact saved snapshots for offline fallback. Account API failures retry through Core's normal library sync with backoff. Signed-in Home now uses native Continue Watching; the local presentation fallback remains for signed-out use.
+- Verified: the installed custom WASM initializes and persists synthetic progress, updates native Continue Watching, advances across a season boundary, and clears resume on the final episode. These checks use synthetic storage/network responses and do not modify the user's account or media. Live account/MPC-HC verification is still outstanding.
+- Final frontend verification: all 41 suites / 322 tests pass, including translation scanning and sync validation/retry cases; lint, frozen offline install, and the production build pass. The build reports the existing bundle-size warnings and outdated Browserslist data.
+
+## Milestone 10E: Supported Account Playback Synchronization
+
+- Replaces the Downloads-only movie watched hook with an app-wide service while the app is open. Partial progress and backward seeks flow through Core's normal library persistence path without loading hidden Player/MetaDetails models.
+- At verified 90% completion, movies become watched; series update only the matching episode's watched bit and select the immediate released next episode from the full canonical metadata list. Upcoming/unknown-release episodes and normal-to-special jumps are not selected. No player is launched automatically.
+- Preserves library membership and notification settings; new items enter temporary watch history like native playback. Observed positions do not fabricate elapsed watch time, and older observations cannot replace newer Core playback state.
+- The custom Core archive is included as a vendored dependency artifact with its upstream MIT license and provenance. Ordinary frontend builds do not require Rust or Docker; rebuild instructions are in `core-patches/README.md`.
+
+## October 24: Visual UX Refinement Before Packaging
+
+- Completed at the user's request: visually audited and refined Downloads, title/episode details, History, settings, stream/provider controls, and batch selection before Windows packaging.
+- Findings: settings expanded above the library; repeated headings/counters; oversized artwork; redundant completed progress bars; maintenance actions/raw paths competing with Play; unreliable history poster sizing/fallbacks; stream rows squeezing filenames into tiny fragments.
+- Added a separate Settings view, consistent neutral surfaces and purple primary actions, concise file summaries, collapsed technical info/actions, reliable poster sizing/fallbacks, and readable stream cards. Shared visual primitives are in `src/customStremio/components/custom-ui.less`. Changes are confined to the Downloads route, shared download components/presentation, the history loading state, stream presentation, and detail background styling.
+- Removed repeated detail artwork/episode headings and sub-second resume summaries; actual download progress remains visible during transfers. Native checked controls now clearly show saved playback options. MPC-HC setup instructions and History date filters expand on demand. Date controls remain available when the selected range returns no history.
+- Verification: all 45 suites / 341 tests pass; lint, diff checks, and the production build pass (three existing bundle-size warnings). Actual browser checks covered the saved library/episode, settings, history, source list, batch selection, and expanding file actions/deletion confirmation followed by Keep. Regression rendering also confirms empty date ranges retain their Clear dates control. Synthetic real-component fixtures covered batch review, long labels, transfer/paused/failed states, and 800px/420px layouts without provider/account/media mutations. Screenshots are in ignored `.core-build/ui-review/`.
+- Backend health is good; the frontend and backend remain running for review. Windows packaging is the next implementation step, including upstream source maintenance and packaged-app update delivery.
+
+### File Actions Follow-up
+
+- The user caught an expanded More actions layout that the first visual review missed: an oversized disclosure bar moved Play and exposed a cluttered maintenance row.
+- Replaced it with a compact ellipsis button and an anchored menu outside the app's clipping containers. Opening it preserves the card and Play button's position and size; the menu fits the window and closes on outside click, Escape, focus leaving, or viewport changes. Native menu buttons support arrow navigation; Escape returns focus to the trigger.
+- File removal explains that local data stays on disk. Delete still opens the existing explicit confirmation; Keep restores focus to the actions button. No download or media data was removed during verification.
+- Verified in the live saved-episode view: opening/closing, identical card/Play bounds, keyboard navigation, outside dismissal, and Delete followed by Keep. Interactive synthetic fixtures confirmed visible menus at 800px and 420px with the app's overflow rules. Screenshots: `.core-build/ui-review/file-actions.png` and `file-actions-responsive.png`.
+- Verification: all 45 suites / 341 tests, lint, and production build pass; the build retains its three existing bundle-size warnings. Frontend/backend remain running; the temporary fixture server was stopped.
+
+### Downloads Sort and Media Title Polish
+
+- Replaced the native Downloads/History sort dropdown and media source/preferred-addon selectors with one styled, labelled select menu. Selected options have a checkmark; menus stay within the window, avoid clipping, and support arrows, Home/End, typeahead, Escape, and outside dismissal.
+- Media source panels now have a clear Sources heading, readable episode context, and separate filter labels. Availability checks use search icons, consistent native buttons/disabled states, separate provider rows, and concise nonzero result badges. Temporary provider-account actions remain explained before running a check; availability/download behavior is unchanged.
+- Scoped the title-page layout to smaller artwork, a clean background, actions directly after the synopsis, and local downloads below those actions. Removed the duplicated background logo and bottom-anchored action row. Existing title, library, watched, rating, trailer, and playback controls remain available.
+- Live verification covered sorting (including resulting title order), addon filtering, restoring original selections, selected-option focus, Escape, outside dismissal, and menus opening above their trigger near the bottom of a 420px window. Reviewed the actual signed-in app at desktop, 800px, and 420px widths. No provider checks, playback launches, downloads, or deletion were triggered during this review.
+- Verification: all 45 suites / 341 tests and lint pass; production build passes with the three existing bundle-size warnings. Screenshots are in ignored `.core-build/ui-review/`: `downloads-sort.png`, `media-title.png`, `media-responsive.png`, and `downloads-responsive.png`. Frontend/backend remain running; temporary visual-review hosting is stopped after verification.
+
+### Cancelable Debrid Availability Checks
+
+- Added a compact Cancel button beside active AllDebrid and Real-Debrid checks. Cancel stops remaining sources and unstarted Real-Debrid resolver probes; the current request finishes its temporary-entry cleanup before the controls become available again. Completed observations and cleanup warnings remain visible.
+- Cancellation shows a clear finishing/canceled status. Navigating to another title or episode stops queued checks and ignores late UI updates. During automatic batch selection, cancel switches the current episode to manual selection and preserves existing assignments, preventing automatic checks or source selection from restarting.
+- Kept Cancel reachable when filters return no sources, and allowed result badges to wrap cleanly beside the new controls in narrow panels.
+- Verification: all 46 suites / 350 tests pass, including canceled batches, cancellation during cache/resolver requests, skipped probes, retained partial results/cleanup warnings, and normal completion. Lint and the production build pass (three existing bundle-size warnings).
+- Browser verification used the actual Sources component with isolated mock requests: independent provider cancellation, retry, resolver-stage cancellation, keyboard operation, automatic-batch pause, navigation/stale-result protection, and desktop/420px layouts. No live provider-account checks or media actions were triggered. Screenshots are in ignored `.core-build/ui-review/`. Frontend/backend remain available for testing; temporary review hosting was stopped afterward.
+
+## October 25: Source Search, Sorting, and Availability Filters
+
+- Added a full-width source search field, styled Sort sources and Availability menus, visible-result counts, and Reset filters. Search matches multiple words across source names, filenames, descriptions, addon names, and hashes; clearing it restores focus to the field, and Escape clears the query.
+- Sorting supports Recommended (the existing preferred-addon/readiness order), highest resolution, largest/smallest files, and natural name order. Sizes use numeric hints or parsed addon text; unknown sizes stay last in either direction. Availability filters show cached/ready, unchecked, not-cached, or unavailable sources using existing observations, without contacting a provider.
+- Explicit debrid checks target only matching visible rows. Availability history still loads the full addon source pool, so filtering cannot prevent observations from loading. Active Cancel buttons remain reachable even if search removes all matching rows. Search/availability reset when switching titles or episodes; stable row keys keep controls attached to their source during sorting.
+- Automatic batch selection retains its existing source pool and ranking independently of the new browsing controls. Empty search/filter results show a recovery message rather than indefinite loading placeholders.
+- Verification: all 47 suites / 362 tests, lint, production build, and diff checks pass (three existing bundle-size warnings). Live checks covered multiword search (286 to 17 sources), combined availability filtering (7 matching sources), numeric size ordering, Escape, clear/reset, and no-results recovery. Isolated mock-provider checks confirmed one matching request per provider, reachable Cancel controls after changing search, unchanged batch selection, and episode reset; no live provider checks or media actions were triggered.
+- Reviewed the live app at desktop, 800px, and 420px widths, including keyboard selection and visible dropdown menus in the narrow window. Screenshots: `.core-build/ui-review/source-controls-desktop.png`, `source-controls-responsive.png`, and `source-sort-responsive.png`. Frontend/backend remain running; temporary review hosting was stopped after verification.
 
 ## Remaining Tracked Work
 
-- True account-backed Continue Watching synchronization remains blocked by the pinned `@stremio/stremio-core-web` 0.58.0 action surface. The local Home row is implemented safely, but core exposes no supported global action for writing external position and duration.
-- Episode/season watched synchronization and canonical next-episode behavior require the same supported core path. Do not infer canonical episode order only from downloaded files or background-load the singleton Player/MetaDetails models.
+- The user accepted the live playback/sync flow after testing. Preserve the movie/episode, rewind, account, offline, and native-player scenarios in the desktop release checklist; the user did not supply an individual result for every checklist item.
+- Implement Milestone 11 Windows packaging: desktop launcher, backend startup/shutdown, persistent settings/history/download paths, MPC-HC detection/configuration, and installer/update/uninstall behavior. Validate it on a clean Windows profile.
+- Figure out how to add updates from the actual upstream Stremio repositories. Define how to regularly merge/rebase upstream `stremio-web` releases into this fork, review/reapply the narrow Core extension when upstream Core changes, rebuild the vendored package, and run regression checks before shipping. Keep this source-maintenance process distinct from distributing updates to the packaged Windows app; decide the app's update delivery/versioning strategy during packaging.
+- Close out the download-manager and global-downloads milestones with the packaging acceptance pass, including backend restart/recovery, persisted queue/history, download/play/delete actions, and disabled/offline states.
+
+## October 24 Live Acceptance Session
+
+- Final outcome: the user reported "ok i tested, things work" after the playback UI/crash fixes. Accepted the live flow for proceeding to Windows packaging. This is user-reported acceptance; no separate per-scenario or second-client timestamp evidence was supplied.
+- Started the backend at `http://127.0.0.1:5577` with the existing persisted settings/downloads, and the frontend at `https://localhost:8080` (bound to loopback). Opened Downloads in Chrome; the page renders the five saved titles and the configured MPC-HC player is Ready.
+- Confirmed in the UI: progress tracking, localhost-only confirmation, and account sync are already enabled; the new app-wide service displays an active playback-sync timestamp. This establishes startup and UI integration, not second-client acceptance.
+- In progress, user-operated: launch a completed file from this app, pause below 90%, confirm Home and the same account on another Stremio client; then seek backward and repeat. Next verify episode completion, season boundaries/series end, and the disabled/offline/account/native-player cases from `CUSTOM_STREMIO_EXTERNAL_PLAYBACK.md`.
+- Windows packaging remains after this live pass. Upstream source-update integration and packaged-app update delivery are now explicit packaging considerations.
+
+## October 24 Playback UI and Live-Test Recovery
+
+- Fixed the reported `Cannot read properties of null (reading 'season')` crash in `DownloadMediaGroup`: a series without a completed episode no longer attempts to read resume metadata. Actual component rendering reproduced the failure for queued, downloading, paused, failed, and canceled series before the fix; all five states now pass regression checks.
+- Replaced the gold/brown poster overlays with unobscured artwork, smaller neutral play controls, and a compact playback summary below the title. A thin purple progress bar and remaining time replace the crowded percent/elapsed box. Episode context remains visible; progress is exposed accessibly to assistive technology. The detailed file view uses the same quieter progress styling.
+- Missing-file/folder actions now explain how to recover instead of showing a long raw Windows path on a title card. Errors use a contained, muted inline treatment. Files are never recreated, relocated, or removed automatically.
+- The prior backend process had stopped between testing turns; restarted the app and backend with hidden background processes and separate logs under ignored `.core-build/live-check/`. Backend health is good. The current saved library contains one completed VisionQuest episode, and its file exists; the live Downloads page renders it without a runtime overlay.
+- Verification: all 42 frontend suites / 329 tests pass, including the crash reproduction and missing-file guidance; lint and the production build pass (existing bundle-size warnings only). Inspected the live episode page and an isolated component preview covering movie/episode progress, near-end progress, and missing-file errors. Live MPC-HC/account/second-client acceptance remains pending; the app is left at VisionQuest S1E1's Play control.
+
+## Milestone 11 Plan: Windows Packaging
+
+1. Desktop launcher: serve the built frontend, start/manage the bundled backend, wait for health before showing the app, and support one application instance. Handle an already-running compatible backend or occupied port without spawning a duplicate or killing an unrelated process. Decide close/minimize/quit behavior and preserve download recovery.
+2. Persistence and runtime: retain existing settings, account/browser data, queue/history, progress, provider credentials, player selection, and downloaded media across launches and app upgrades. Include the runtime dependencies needed on a PC without developer tools; MPC-HC remains an explicitly configured external player.
+3. Installer and release verification: produce a Windows installer and validate install, relaunch, playback/sync, interrupted download recovery, update, and uninstall/data-retention behavior on a clean profile.
+4. Updates: define both the fork's upstream source-update workflow and packaged-app update delivery/versioning. The `upstream` Git remote already points to `https://github.com/Stremio/stremio-web.git`; upstream Core changes also require review of the custom action overlay and a rebuilt/tested vendored archive.
 
 ## Milestone 10D Findings: Local Home Resume Integration and Core Boundary
+
+Historical findings below describe the upstream boundary before 10E. The supported custom Core extension now resolves that boundary; signed-in Home uses native account state.
 
 - When the existing explicit MPC-HC watched-sync option is enabled, verified partial local playback is merged into the existing Home Continue Watching presentation without mutating Stremio core or account state.
 - Local entries require a completed matching download, exact download/meta/type/video identity, a positive finite position, and a valid duration. Backend-offline and disabled states fail closed.

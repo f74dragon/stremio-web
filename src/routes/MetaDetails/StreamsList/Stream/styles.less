@@ -12,13 +12,15 @@
 }
 
 .stream-container {
-    display: flex;
-    flex-direction: row;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 1rem;
-    padding: 0.5rem 1rem;
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 0.5rem 1rem;
+    padding: 1rem;
     margin-bottom: 0.5rem;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    background: rgba(255, 255, 255, 0.025);
     border-radius: var(--border-radius);
 
     &:hover, &:focus {
@@ -40,6 +42,8 @@
     }
 
     .info-container {
+        grid-column: 1 / -1;
+        min-width: 0;
         flex: none;
         display: flex;
         flex-direction: column;
@@ -65,8 +69,10 @@
         }
 
         .addon-name {
-            width: 7rem;
-            font-size: 1.1rem;
+            width: auto;
+            font-size: 0.82rem;
+            font-weight: 650;
+            opacity: 0.7;
             text-align: left;
             white-space: pre-wrap;
             color: var(--primary-foreground-color);
@@ -113,6 +119,9 @@
         -webkit-line-clamp: 3;
         -webkit-box-orient: vertical;
         white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        font-size: 0.9rem;
+        line-height: 1.45;
         overflow: hidden;
         text-overflow: ellipsis;
     }
@@ -207,7 +216,9 @@
         align-items: center;
         gap: 0.4rem;
         padding: 0.45rem 0.8rem;
-        border-radius: 999px;
+        min-height: 2.5rem;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 0.6rem;
         background-color: var(--overlay-color);
 
         &:hover, &:focus {
@@ -233,8 +244,8 @@
     }
 
     .download-button-playable {
-        background-color: var(--secondary-accent-color);
-        box-shadow: 0 0.45rem 1rem rgba(0, 0, 0, 0.18);
+        background-color: #7058df;
+        box-shadow: none;
 
         &:hover, &:focus {
             background-color: var(--primary-accent-color);
@@ -257,22 +268,26 @@
     }
 
     .download-button-completed {
-        background-color: var(--secondary-accent-color);
+        background-color: #7058df;
     }
 
     .download-action-error {
-        flex: 1 0 100%;
-        padding-left: 9rem;
+        grid-column: 1 / -1;
+        padding-left: 0;
         color: var(--danger-accent-color);
         font-size: 0.85rem;
         line-height: 1.35;
     }
     
     .icon {
+        position: absolute;
+        top: 0.65rem;
+        right: 0.65rem;
+        pointer-events: none;
         flex: none;
-        width: 3rem;
-        height: 3rem;
-        padding: 0.7rem;
+        width: 1.5rem;
+        height: 1.5rem;
+        padding: 0.35rem;
         border-radius: 50%;
         opacity: 0;
         color: var(--primary-foreground-color);
@@ -384,5 +399,15 @@
                 top: 90%;
             }
         }
+    }
+}
+.stream-container .download-button-container:focus-visible {
+    outline: 2px solid #b6a7ff;
+    outline-offset: 3px;
+}
+@media only screen and (max-width: 400px) {
+    .stream-container {
+        grid-template-columns: minmax(0, 1fr);
+        .download-button-container { justify-self: start; }
     }
 }

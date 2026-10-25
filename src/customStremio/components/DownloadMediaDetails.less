@@ -8,7 +8,7 @@
 
 .hero {
     position: relative;
-    min-height: 30rem;
+    min-height: 24rem;
     margin: 0;
     padding: clamp(1.25rem, 2.5vw, 2.5rem);
     overflow: hidden;
@@ -26,7 +26,7 @@
 
 .hero-background {
     object-fit: cover;
-    opacity: 0.42;
+    opacity: 0.16;
     filter: saturate(0.88);
 }
 
@@ -102,10 +102,10 @@
 
 .hero-content {
     display: grid;
-    grid-template-columns: minmax(11rem, 16rem) minmax(0, 42rem);
+    grid-template-columns: minmax(9rem, 12rem) minmax(0, 42rem);
     align-items: end;
     gap: 2rem;
-    min-height: 23.5rem;
+    min-height: 19rem;
     padding-top: 2rem;
 }
 
@@ -165,7 +165,7 @@
 .title-logo {
     display: block;
     width: auto;
-    max-width: min(30rem, 85%);
+    max-width: min(24rem, 85%);
     max-height: 8rem;
     margin-top: 0.7rem;
     object-fit: contain;
@@ -653,3 +653,5 @@
         flex-direction: column;
     }
 }
+.episode-records > .record-row { border-top: 1px solid rgba(255, 255, 255, 0.07); }
+.episode-records .thumbnail-label { display: none; }

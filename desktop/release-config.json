@@ -1,0 +1,13 @@
+{
+    "schemaVersion": 1,
+    "appId": "io.github.f74dragon.customstremio",
+    "executableName": "custom-stremio",
+    "channel": "alpha",
+    "rendererOrigin": "custom-stremio://app",
+    "releaseRepository": {
+        "provider": "github",
+        "owner": "f74dragon",
+        "repo": "stremio-web"
+    },
+    "automaticUpdatesEnabled": false
+}
