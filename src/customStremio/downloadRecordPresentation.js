@@ -346,6 +346,12 @@ const getDownloadDetailsHref = (record) => {
 
 const getDownloadActionError = (error, fallback) => {
     switch (error?.responseBody?.errorCode) {
+        case 'DOWNLOAD_DESTINATION_CONFLICT':
+            return 'This title already has a download using the same filename. Open Downloads to play, retry, or manage it.';
+        case 'DOWNLOAD_DESTINATION_DELETING':
+            return 'This download is still being deleted. Wait for deletion to finish, then try again.';
+        case 'BACKEND_AUTH_REQUIRED':
+            return 'The app lost its connection to the download service. Quit Custom Stremio and reopen it, then try again.';
         case 'MEDIA_FILE_NOT_FOUND':
             return 'This file is no longer at its saved location. Restore it or download it again.';
         case 'DOWNLOAD_DIRECTORY_NOT_FOUND':

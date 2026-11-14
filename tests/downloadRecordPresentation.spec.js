@@ -20,6 +20,15 @@ const {
 } = require('../src/customStremio/downloadRecordPresentation');
 
 describe('downloadRecordPresentation', () => {
+    test('distinguishes destination conflicts and lost desktop authentication from an offline service', () => {
+        const error = (errorCode) => ({ responseBody: { errorCode }, backendError: 'Internal detail' });
+        expect(getDownloadActionError(error('DOWNLOAD_DESTINATION_CONFLICT'))).toContain('Open Downloads');
+        expect(getDownloadActionError(error('DOWNLOAD_DESTINATION_DELETING'))).toContain('Wait for deletion');
+        expect(getDownloadActionError(error('BACKEND_AUTH_REQUIRED'))).toContain('Quit Custom Stremio and reopen it');
+        expect(getDownloadActionError({ backendError: 'Could not save the new download record' }, 'Offline')).toBe('Could not save the new download record');
+        expect(getDownloadActionError(new TypeError('Failed to fetch'), 'Offline')).toBe('Offline');
+    });
+
     test('explains missing media with recovery guidance without exposing long filesystem errors', () => {
         const error = (errorCode) => ({ responseBody: { errorCode }, backendError: 'A long raw filesystem path' });
         expect(getDownloadActionError(error('MEDIA_FILE_NOT_FOUND'))).toContain('download it again');

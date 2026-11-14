@@ -2,6 +2,7 @@
 
 const {
     LOCAL_BACKEND_BASE_URL,
+    createDownload,
     getBackendSettings,
     updateBackendSettings,
     startAllDebridPinAuth,
@@ -44,6 +45,14 @@ describe('localBackendClient settings', () => {
         await expect(getBackendSettings()).resolves.toEqual(responseBody);
         expect(global.fetch).toHaveBeenCalledWith(`${LOCAL_BACKEND_BASE_URL}/settings`, {
             headers: {}
+        });
+    });
+
+    test('preserves rejected download details instead of treating an HTTP rejection as a connection failure', async () => {
+        const body = { errorCode: 'DOWNLOAD_DESTINATION_CONFLICT', error: 'The destination is already in use' };
+        global.fetch.mockResolvedValue(createJsonResponse(body, { ok: false, status: 409 }));
+        await expect(createDownload({ downloadUrl: 'https://example.com/fixture.mp4' })).rejects.toMatchObject({
+            status: 409, backendError: body.error, responseBody: body
         });
     });
 

@@ -80,6 +80,12 @@ app.whenReady().then(async () => {
         assert(state.backend?.startsWith('http://127.0.0.1:'), 'Preload receives ready owned connection');
         const health = await window.webContents.executeJavaScript('fetch(window.customStremioDesktop.backendBaseUrl + \'/health\').then(r => r.json())');
         assert.equal(health.ok, true, 'Renderer reaches authenticated managed backend');
+        const rejectedDownload = await window.webContents.executeJavaScript(`fetch(window.customStremioDesktop.backendBaseUrl + '/downloads', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
+        }).then(async response => ({ status: response.status, body: await response.json() }))`);
+        assert.equal(rejectedDownload.status, 400, 'Packaged JSON download requests reach the backend');
+        assert(rejectedDownload.body.error.includes('No usable source URL'), 'Download rejection details reach the renderer');
+        report.downloadRequests = true;
         const direct = await fetch(`${state.backend}/health`);
         assert.equal(direct.status, 401, 'Untrusted local client cannot use the service');
         assert.equal(await window.webContents.executeJavaScript('navigator.serviceWorker.getRegistrations().then(x => x.length).catch(() => 0)'), 0);

@@ -13,6 +13,7 @@ const styles = require('./styles');
 const { usePlatform, useProfile } = require('stremio/common');
 const { default: SeasonEpisodePicker } = require('../EpisodePicker');
 const { buildDownloadPayload } = require('stremio/customStremio/downloadPayload');
+const { getDownloadActionError } = require('stremio/customStremio/downloadRecordPresentation');
 const {
     createDownload,
     getBackendSettings,
@@ -855,6 +856,7 @@ const StreamsList = ({
     }, [filteredRealDebridSourcesKey, realDebridAvailabilityByKey]);
     const showDownloadStatus = React.useCallback((message, tone) => {
         const statusId = Date.now();
+        const visibleDuration = tone === 'error' ? 8000 : 3200;
         setDownloadStatus({ id: statusId, message, tone, visible: true });
 
         if (downloadStatusHideTimeoutRef.current !== null) {
@@ -876,12 +878,12 @@ const StreamsList = ({
                 };
             });
             downloadStatusHideTimeoutRef.current = null;
-        }, 3200);
+        }, visibleDuration);
 
         downloadStatusClearTimeoutRef.current = setTimeout(() => {
             setDownloadStatus((currentStatus) => currentStatus !== null && currentStatus.id === statusId ? null : currentStatus);
             downloadStatusClearTimeoutRef.current = null;
-        }, 4000);
+        }, visibleDuration + 800);
     }, []);
     const getPendingDownloadKey = React.useCallback((downloadPayload) => {
         const sourceUrl = getPayloadSourceUrl(downloadPayload);
@@ -960,7 +962,8 @@ const StreamsList = ({
                 }
                 showDownloadStatus(error?.backendError || (status === 'unavailable' ? 'Source unavailable.' : 'Source not cached.'), 'error');
             } else {
-                showDownloadStatus('Download backend unavailable.', 'error');
+                showDownloadStatus(getDownloadActionError(error,
+                    'Could not connect to the download service. Quit Custom Stremio and reopen it, then try again.'), 'error');
             }
         } finally {
             if (pendingDownloadKey) {

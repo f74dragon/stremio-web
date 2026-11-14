@@ -96,7 +96,7 @@ Phase 5: use the installed personal app for live account/addon playback, movie/e
 | 2. Desktop launcher and backend lifecycle | Completed |
 | 3. Windows installer and isolated-profile checks | Completed locally; VM validation is optional for personal use |
 | 4. Personal app updates and A -> B upgrade test | Completed locally |
-| 5. Installed-app playback/sync/recovery acceptance | Not started |
+| 5. Installed-app playback/sync/recovery acceptance | In progress; download error reporting corrected, live playback/sync checklist remains |
 
 ### Git Backup and CI
 
@@ -104,6 +104,13 @@ Phase 5: use the installed personal app for live account/addon playback, movie/e
 - The push includes the completed playback/Core, UI/source-control, test-dependency, and Windows Phase 1 work. Local build output, temporary checkpoints, development TLS keys, and installed dependencies remain ignored.
 - Completed: implementation commit `5a78392c05bc655bcd212ba3bc6e83988068193d` was pushed to `origin/development`. `pnpm verify:release --require-clean` passes on the committed source. The earlier 50-suite / 390-test, lint, and production-build results remain the local validation baseline; remote CI results are not yet verified.
 - Fixed the Build workflow to install the backend's locked dependencies before its new integration test, use a frozen frontend lockfile, and run the clean-source release-foundation check. A normal source push does not create a Windows installer release; Phase 2 remains next.
+
+## November 14: Installed-App Download Error Reporting
+
+- Investigated the reported "Download backend unavailable" toast. The installed alpha.2 backend is running, owns its private loopback listener, and responds with the expected authentication rejection to an untrusted health request. Launcher logs show successful startup without a recorded backend exit. The earlier failing request itself is not retained, so its exact HTTP error is unconfirmed.
+- Found and corrected a misleading catch-all in the stream Download handler: HTTP failures other than the two source-readiness codes were presented as a disconnected backend. The handler now preserves backend rejection details and gives explicit guidance for a filename/destination conflict, deletion in progress, or a lost desktop connection. Error messages remain visible for eight seconds to allow time to read the recovery steps. Existing destination/overwrite protections remain enforced.
+- Files: shared download error presentation, stream Download handler, client/presentation regression checks, packaged runtime acceptance, and desktop version metadata. Personal alpha.3 uses the existing signed local-bundle workflow after a clean commit; no changes to store schemas, Core, updater identity, or the user's installed files/media.
+- Verified: all 53 suites / 411 tests, changed-file ESLint, production build (three existing size warnings), and the fresh alpha.3 packaged runtime pass. Both alpha.2 and alpha.3 accept authenticated renderer JSON download requests and return their real HTTP 400 rejection details; sandbox, update IPC permissions, backend crash/retry, profile retention, tray, and graceful Quit checks pass. The user confirms the error appears when clicking Download while other backend features work, narrowing the issue to download creation rather than a general service outage. Exact request rejection still needs confirmation from the corrected message during live use.
 
 ## October 25: Personal App Updates (Phase 4)
 
@@ -200,8 +207,8 @@ Phase 5: use the installed personal app for live account/addon playback, movie/e
 ## Remaining Tracked Work
 
 - The user accepted the live playback/sync flow after testing. Preserve the movie/episode, rewind, account, offline, and native-player scenarios in the desktop release checklist; the user did not supply an individual result for every checklist item.
-- Implement Milestone 11 Windows packaging: desktop launcher, backend startup/shutdown, persistent settings/history/download paths, MPC-HC detection/configuration, and installer/update/uninstall behavior. Validate it on a clean Windows profile.
-- Figure out how to add updates from the actual upstream Stremio repositories. Define how to regularly merge/rebase upstream `stremio-web` releases into this fork, review/reapply the narrow Core extension when upstream Core changes, rebuild the vendored package, and run regression checks before shipping. Keep this source-maintenance process distinct from distributing updates to the packaged Windows app; decide the app's update delivery/versioning strategy during packaging.
+- Finish Milestone 11 installed-app acceptance: live account/addon playback, movie/episode MPC-HC and second-client sync, close/tray/Quit, and real download interruption/resume. Launcher, per-user installer, persistence/recovery, and signed local updates are implemented and tested with isolated fixtures. Address findings from ordinary use before closing the milestone.
+- Figure out how to add updates from the actual upstream Stremio repositories. Follow the reviewed source-maintenance workflow in `CUSTOM_STREMIO_UPSTREAM_UPDATES.md`: merge/rebase deliberately, review/reapply the narrow Core extension when upstream Core changes, rebuild the vendored package, and run regression checks. Personal app delivery uses signed local bundles; upstream code is not adopted automatically.
 - Close out the download-manager and global-downloads milestones with the packaging acceptance pass, including backend restart/recovery, persisted queue/history, download/play/delete actions, and disabled/offline states.
 
 ## October 24 Live Acceptance Session
