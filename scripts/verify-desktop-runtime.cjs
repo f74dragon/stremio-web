@@ -1,5 +1,6 @@
 // Run with Electron after desktop:build. Tests the actual ASAR in an isolated profile.
-const { app, BrowserWindow, utilityProcess, session, ipcMain } = require('electron');
+const { app, BrowserWindow, utilityProcess, session, ipcMain, dialog } = require('electron');
+const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
@@ -15,6 +16,22 @@ const packaged = path.join(application, 'resources/app.asar');
 fs.mkdirSync(qa, { recursive: true });
 process.env.CUSTOM_STREMIO_DATA_DIR = path.join(qa, 'runtime-profile');
 process.env.CUSTOM_STREMIO_DOWNLOAD_DIR = path.join(qa, 'downloads');
+fs.mkdirSync(process.env.CUSTOM_STREMIO_DATA_DIR, { recursive: true });
+fs.writeFileSync(path.join(process.env.CUSTOM_STREMIO_DATA_DIR, 'desktop-preferences.json'), JSON.stringify({ version: 1, closeBehavior: 'tray' }));
+const manifest = { id: 'org.customstremio.qa', version: '1.0.0', name: 'Local QA sources', description: 'Isolated size visibility fixture',
+    types: ['series'], resources: ['meta', 'stream'], catalogs: [], idPrefixes: ['qa-health'] };
+const fixtureServer = http.createServer((request, response) => {
+    response.setHeader('Access-Control-Allow-Origin', '*');
+    response.setHeader('Content-Type', 'application/json');
+    const body = request.url.includes('/meta/') ? { meta: { id: 'qa-health', type: 'series', name: 'Size visibility fixture',
+        description: 'Synthetic title for checking size badges in a narrow sidebar.', videos: [{ id: 'qa-health:1:1', title: 'The long filename episode', season: 1, episode: 1, released: '2020-01-01T00:00:00.000Z' }] } } :
+        request.url.includes('/stream/') ? { streams: [
+            { name: 'Local QA 1080p', title: `${'A.very.long.release.filename.'.repeat(12)}\n💾 12.5 GB`, url: `http://127.0.0.1:${fixtureServer.address().port}/media.mp4`, behaviorHints: { videoSize: 12.5 * 1024 ** 3 } },
+            { name: 'Local QA 720p', title: 'An addon that does not report a size', url: `http://127.0.0.1:${fixtureServer.address().port}/unknown.mp4` }
+        ] } : manifest;
+    response.end(JSON.stringify(body));
+});
+const fixtureReady = new Promise((resolve) => fixtureServer.listen(0, '127.0.0.1', resolve));
 // Exercise packaged paths while using the test entry point rather than the release entry point.
 Object.defineProperty(app, 'isPackaged', { value: true });
 const fork = utilityProcess.fork.bind(utilityProcess);
@@ -43,6 +60,7 @@ require(path.join(packaged, 'desktop/main.cjs'));
 
 app.whenReady().then(async () => {
     try {
+        await fixtureReady;
         const window = BrowserWindow.getAllWindows()[0];
         assert(window, 'Main window exists');
         const preferences = window.webContents.getLastWebPreferences();
@@ -73,6 +91,67 @@ app.whenReady().then(async () => {
         }
         assert(report.downloadsText.includes('Your downloads will appear here'), 'Downloads finishes loading its isolated empty library');
         assert(!/backend unavailable|failed to fetch|not ready/i.test(report.downloadsText), 'Downloads reaches the managed backend');
+        const click = async (text) => {
+            const deadline = Date.now() + 10000;
+            while (Date.now() < deadline) {
+                const clicked = await window.webContents.executeJavaScript(`(() => {
+                    const element = Array.from(document.querySelectorAll('button,[role="button"],[tabindex="0"]')).find(item => item.innerText.trim() === ${JSON.stringify(text)} && !item.disabled && !item.classList.contains('disabled'));
+                    if (!element) return false; element.click(); return true;
+                })()`);
+                if (clicked) return;
+                await new Promise((resolve) => setTimeout(resolve, 100));
+            }
+            throw new Error(`Missing enabled UI control: ${text}`);
+        };
+        const waitForText = async (text) => {
+            const deadline = Date.now() + 10000;
+            while (Date.now() < deadline) {
+                if (await window.webContents.executeJavaScript(`document.body.innerText.includes(${JSON.stringify(text)})`)) return;
+                await new Promise((resolve) => setTimeout(resolve, 100));
+            }
+            throw new Error(`Missing runtime UI: ${text}`);
+        };
+        await click('Settings');
+        await waitForText('Settings, records, history, and playback progress loaded.');
+        await waitForText('The Core worker responded. Individual addon streams depend on their own services.');
+        fs.writeFileSync(path.join(qa, 'native-health.png'), (await window.webContents.capturePage()).toPNG());
+        window.setSize(840, 840);
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        fs.writeFileSync(path.join(qa, 'native-health-narrow.png'), (await window.webContents.capturePage()).toPNG());
+        await window.webContents.executeJavaScript('localStorage.setItem(\'customStremio.batchDownloadSession\', \'fixture-selection\')');
+        await click('Clear episode selection…');
+        await waitForText('Clear saved episode selection?');
+        await click('Cancel');
+        assert.equal(await window.webContents.executeJavaScript('localStorage.getItem(\'customStremio.batchDownloadSession\')'), 'fixture-selection');
+        await click('Clear episode selection…');
+        await click('Clear selection');
+        await waitForText('Saved episode selection cleared.');
+        assert.equal(await window.webContents.executeJavaScript('localStorage.getItem(\'customStremio.batchDownloadSession\')'), null);
+        await click('Reset download options…');
+        await click('Reset options');
+        await waitForText('Simultaneous downloads reset to 2.');
+        assert.equal((await window.webContents.executeJavaScript('fetch(window.customStremioDesktop.backendBaseUrl + \'/settings\').then(r=>r.json())')).downloads.maxConcurrentDownloads, 2);
+        report.healthAndResets = true;
+        assert.equal((await window.webContents.executeJavaScript('window.customStremioDesktop.setCloseBehavior(\'quit\')')).closeBehavior, 'quit');
+        assert.equal(await window.webContents.executeJavaScript('window.customStremioDesktop.setCloseBehavior(\'invalid\').then(()=>false,()=>true)'), true);
+        await window.webContents.executeJavaScript('window.customStremioDesktop.setCloseBehavior(\'tray\')');
+        const addon = { transportUrl: `http://127.0.0.1:${fixtureServer.address().port}/manifest.json`, manifest, flags: { official: false, protected: false } };
+        const addonError = await window.webContents.executeJavaScript(`(async () => { try {
+            await window.core.dispatch({ action: 'Ctx', args: { action: 'InstallAddon', args: ${JSON.stringify(addon)} } }); return null;
+        } catch (error) { return String(error); } })()`);
+        assert.equal(addonError, null, `Local fixture addon installs: ${addonError}`);
+        await window.webContents.executeJavaScript('location.hash = \'#/metadetails/series/qa-health/qa-health:1:1\'');
+        await waitForText('12.5 GB');
+        const badges = await window.webContents.executeJavaScript(`Array.from(document.querySelectorAll('[aria-label^="File size:"]')).map(element => {
+            const box = element.getBoundingClientRect(); return { label: element.innerText, visible: box.width > 0 && box.right <= innerWidth && element.scrollWidth <= element.clientWidth + 1 };
+        })`);
+        assert(badges.some((item) => item.label === '12.5 GB' && item.visible), 'Long filenames cannot clip the independent file size');
+        assert(badges.some((item) => item.label === 'Size unknown' && item.visible), 'Missing sizes are explicit');
+        fs.writeFileSync(path.join(qa, 'native-source-size-narrow.png'), (await window.webContents.capturePage()).toPNG());
+        await window.webContents.executeJavaScript(`window.core.dispatch({ action: 'Ctx', args: { action: 'UninstallAddon', args: ${JSON.stringify(addon)} } })`);
+        report.sourceSize = true;
+        window.setSize(1280, 840);
+        await window.webContents.executeJavaScript('location.hash = \'#/downloads\'');
         report.body = state.text.slice(0, 2500);
         report.resources = state.resources.filter((url) => url.startsWith('custom-stremio:'));
         assert.equal(state.node, 'undefined');
@@ -96,6 +175,8 @@ app.whenReady().then(async () => {
         if (updatesWindow.webContents.isLoadingMainFrame()) await new Promise((resolve) => updatesWindow.webContents.once('did-finish-load', resolve));
         assert.equal(await updatesWindow.webContents.executeJavaScript('typeof require'), 'undefined');
         assert.equal(await updatesWindow.webContents.executeJavaScript('window.customStremioDesktop.getStatus().then(() => false, () => true)'), true, 'Update page cannot access backend lifecycle IPC');
+        assert.equal(await updatesWindow.webContents.executeJavaScript('window.customStremioDesktop.restartService().then(() => false, () => true)'), true, 'Update page cannot restart the download service');
+        assert.equal(await updatesWindow.webContents.executeJavaScript('window.customStremioDesktop.setCloseBehavior(\'quit\').then(() => false, () => true)'), true, 'Update page cannot change desktop preferences');
         assert.equal(await updatesWindow.webContents.executeJavaScript('window.customStremioDesktop.getUpdateStatus().then(s => s.currentVersion)'), require(path.join(packaged, 'desktop/package.json')).version);
         fs.writeFileSync(path.join(qa, 'native-updates.png'), (await updatesWindow.webContents.capturePage()).toPNG());
         updatesWindow.close();
@@ -124,17 +205,54 @@ app.whenReady().then(async () => {
         while (Date.now() < recoveredDeadline && window.webContents.getURL() !== 'custom-stremio://app/') await new Promise((resolve) => setTimeout(resolve, 100));
         assert.equal(window.webContents.getURL(), 'custom-stremio://app/');
         assert.equal(children.length, 2, 'Retry owns exactly one replacement service');
+        const waitForReady = async (previousUrl = null) => {
+            const deadline = Date.now() + 15000;
+            while (Date.now() < deadline) {
+                if (window.webContents.getURL() === 'custom-stremio://app/' && !window.webContents.isLoadingMainFrame()) {
+                    try {
+                        const current = await window.webContents.executeJavaScript('({ core: !!window.core, backend: window.customStremioDesktop.backendBaseUrl })');
+                        if (current.core && current.backend && current.backend !== previousUrl) return current.backend;
+                    } catch { /* Navigation can replace the execution context while polling. */ }
+                }
+                await new Promise((resolve) => setTimeout(resolve, 100));
+            }
+            throw new Error('Replacement frontend did not receive its new backend connection');
+        };
+        const beforeRestart = await waitForReady();
+        dialog.showMessageBox = async () => ({ response: 1 });
+        await window.webContents.executeJavaScript('window.customStremioDesktop.restartService()');
+        assert.equal(children.length, 2, 'Cancel never restarts the service');
+        dialog.showMessageBox = async () => ({ response: 0 });
+        await window.webContents.executeJavaScript('window.customStremioDesktop.restartService(); true');
+        await waitForReady(beforeRestart);
+        assert.equal(children.length, 3, 'Explicit restart replaces exactly the owned service');
+        assert(!children[1].pid, 'Previous owned service exited before replacement');
+        report.serviceRestart = true;
         report.recovery = true;
         report.security = true;
         report.persistence = true;
         report.closeToTray = true;
         // Use the same Quit handler as the tray and validated renderer IPC.
         assert(ipcMain);
-        stop();
-    } catch (error) { stop(error); }
+        if (process.env.CUSTOM_STREMIO_TEST_QUIT_MODE === 'restart') {
+            app.relaunch = () => { report.appRelaunch = true; };
+            await window.webContents.executeJavaScript('window.customStremioDesktop.restartApp(); true');
+        } else {
+            await window.webContents.executeJavaScript('window.customStremioDesktop.setCloseBehavior(\'quit\')');
+            report.quitOnClose = true;
+            window.close();
+            assert.equal(window.isVisible(), true, 'Quit on close saves instead of hiding to tray');
+        }
+    } catch (error) {
+        const failedWindow = BrowserWindow.getAllWindows()[0];
+        if (failedWindow && !failedWindow.isDestroyed()) fs.writeFileSync(path.join(qa, 'native-failure.png'), (await failedWindow.webContents.capturePage()).toPNG());
+        stop(error);
+    }
 }).catch(stop);
 
 app.on('will-quit', () => {
+    fixtureServer.closeAllConnections();
+    fixtureServer.close();
     report.ownedChildrenExited = children.every((child) => !child.pid);
     fs.writeFileSync(result, `${JSON.stringify({ ...report, passed: !failure, error: failure?.message }, null, 2)}\n`);
 });

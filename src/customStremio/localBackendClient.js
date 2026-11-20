@@ -109,6 +109,8 @@ const requestAvailabilityBatches = async (path, fieldName, items, maxBatchSize, 
 };
 
 const getBackendHealth = async () => requestJson('/health');
+const getBackendDiagnostics = async () => requestJson('/diagnostics', { signal: AbortSignal.timeout(8000) });
+const checkBackendConnections = async () => requestJson('/diagnostics/check-connections', { method: 'POST', signal: AbortSignal.timeout(45000) });
 
 const getBackendSettings = async () => requestJson('/settings');
 
@@ -331,6 +333,8 @@ module.exports = {
     getLocalBackendBaseUrl,
     requestJson,
     getBackendHealth,
+    getBackendDiagnostics,
+    checkBackendConnections,
     getBackendSettings,
     updateBackendSettings,
     startAllDebridPinAuth,

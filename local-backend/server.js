@@ -4,6 +4,8 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const crypto = require('crypto');
+const { createBackendDiagnostics } = require('./backendDiagnostics');
+const { getDefaultDownloadsRoot } = require('./fileUtils');
 const { getDefaultDataDirectory } = require('./dataDirectory');
 const { acquireDataRootLock } = require('./dataRootLock');
 const { TOKEN_HEADER, DESKTOP_ORIGIN, createManagedAccess, assertNoLegacyBackend } = require('./managedAccess');
@@ -774,7 +776,22 @@ app.use(MANAGED ? cors({ origin: DESKTOP_ORIGIN, allowedHeaders: ['Content-Type'
 if (MANAGED) app.use(createManagedAccess({ token: process.env.CUSTOM_STREMIO_BACKEND_TOKEN }));
 app.use(express.json());
 
+const diagnostics = createBackendDiagnostics({
+    getSettings: () => backendSettings, getRecords: () => Array.from(downloads.values()),
+    getScheduler: () => downloadScheduler.getSnapshot(), isReady: () => ready && !shuttingDown,
+    dataDirectory: getDefaultDataDirectory(), downloadsDirectory: getDefaultDownloadsRoot(), version: SERVICE_VERSION,
+    validatePlayer: validatePlayerExecutable,
+    allDebridClient: new AllDebridClient({ timeoutMs: 5000 }), realDebridClient: new RealDebridClient({ timeoutMs: 5000 }),
+    getRealDebridToken: getFreshRealDebridAccessToken, mpcClient: mpcHcStatusClient
+});
 app.use((request, response, next) => {
+    if (request.method === 'POST' && request.path === '/downloads') {
+        const send = response.json.bind(response);
+        response.json = (body) => {
+            if (response.statusCode >= 400) diagnostics.rememberRejection(response.statusCode, body?.errorCode);
+            return send(body);
+        };
+    }
     console.log(`${request.method} ${request.path}`);
     next();
 });
@@ -805,6 +822,13 @@ api.get('/health', (request, response) => {
 
 api.get('/settings', requireTrustedLocalOrigin, (request, response) => {
     response.json(getBackendSettingsResponse());
+});
+
+api.get('/diagnostics', requireTrustedLocalOrigin, async (_request, response) => {
+    response.json(await diagnostics.snapshot());
+});
+api.post('/diagnostics/check-connections', requireTrustedLocalOrigin, async (_request, response) => {
+    response.json(await diagnostics.checkConnections());
 });
 
 api.patch('/settings', requireTrustedLocalOrigin, async (request, response) => {
@@ -1261,7 +1285,27 @@ api.post('/downloads', async (request, response) => {
             return false;
         }
     });
-    if (destinationConflict) {
+    if (destinationConflict && destinationConflict.sourceUrl !== sourceUrl &&
+        record.metaId && record.metaId === destinationConflict.metaId && record.type === destinationConflict.type &&
+        (record.type === 'movie' || (record.videoId && record.videoId === destinationConflict.videoId &&
+            record.season === destinationConflict.season && record.episode === destinationConflict.episode))) {
+        // A deliberate second source gets its own stable filename. Never share partial bytes.
+        let reserved = false;
+        for (let attempt = 0; attempt < 8; attempt++) {
+            record.destinationVariant = crypto.randomBytes(6).toString('hex');
+            destinationPathKeys = getDownloadDestinationPathKeys(record);
+            reserved = !destinationPathKeys.some((key) => deletingArtifactPathKeys.has(key)) &&
+                !Array.from(downloads.values()).some((existing) => {
+                    try { return getDownloadDestinationPathKeys(existing).some((key) => destinationPathKeys.includes(key)); }
+                    catch { return false; }
+                });
+            if (reserved) break;
+        }
+        if (!reserved) {
+            response.status(409).json({ ok: false, errorCode: 'DOWNLOAD_DESTINATION_CONFLICT', error: 'Could not reserve a separate filename. Please try again.' });
+            return;
+        }
+    } else if (destinationConflict) {
         response.status(409).json({
             ok: false,
             errorCode: 'DOWNLOAD_DESTINATION_CONFLICT',

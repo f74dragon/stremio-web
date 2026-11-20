@@ -9,12 +9,35 @@ required. Windows setup remains unsigned; bundle signatures use your own local k
 
 ## Install and use
 
-Run `Custom-Stremio-0.1.0-alpha.2-windows-x64-setup.exe` from
+Run `Custom-Stremio-0.1.0-alpha.4-windows-x64-setup.exe` from
 `dist/windows-installer/`, then open **Custom Stremio** from the Start Menu or
 desktop shortcut. Setup installs for the current user without requesting
 administrator rights and does not auto-launch the app. Quit an already-running
-copy before installing, reinstalling, or uninstalling. Closing its window keeps
-the app running in the tray; use **App > Quit** or **Ctrl+Q**.
+copy before installing, reinstalling, or uninstalling. The one-click setup closes
+when finished; the default installation is `%LOCALAPPDATA%\Programs\custom-stremio-desktop`.
+By default, closing the window keeps downloads running in the tray; use
+**App > Quit** or **Ctrl+Q** to fully exit. Reopening restores that same instance.
+Choose **Downloads > Settings > When I close the window** to pause and quit instead.
+
+**Downloads > Settings > Connection health** checks the local download service,
+queue, data/media storage, configured player, Core worker, and account-sync state.
+Use **Check connections** for provider account and local MPC-HC/streaming-service
+checks. Saved credentials and live checks are shown separately; a responsive
+provider cannot guarantee the speed or availability of an individual source.
+Diagnostics retain only the latest rejected-download time, HTTP status, and
+sanitized code for the current service session, never the source URL or credentials.
+
+Restart service/app requires explicit confirmation and saves active transfers as
+paused. Queued work can start after restart; resume paused transfers explicitly.
+Reset download options restores concurrency to two, while Clear episode selection
+removes only the saved selection draft. Both require confirmation and keep files,
+records/history/progress, provider connections, login, and player settings.
+
+Trying another source for the same movie or episode creates a separate copy with
+an `alternate <id>` filename when necessary. Partial files are never shared or
+overwritten; each copy can be resumed or deleted independently. Pause competing
+transfers to compare source speeds. Source rows always show an independent addon
+size badge, including an explicit unknown state when size is not supplied.
 
 Uninstall through Windows Installed Apps. Ordinary uninstall removes the app and
 shortcuts while keeping the desktop login/profile, backend settings, download
@@ -30,7 +53,7 @@ Use Node 24.19.0 and the repository's pinned pnpm 10.33.2 from the repository ro
 pnpm install --frozen-lockfile
 npm ci --prefix local-backend --ignore-scripts
 pnpm desktop:installer
-& .\dist\windows-installer\Custom-Stremio-0.1.0-alpha.2-windows-x64-setup.exe
+& .\dist\windows-installer\Custom-Stremio-0.1.0-alpha.4-windows-x64-setup.exe
 ```
 
 The installer output includes a SHA-256 checksum, blockmap for future updater

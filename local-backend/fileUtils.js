@@ -11,6 +11,8 @@ const collapseWhitespace = (value) => String(value ?? '').replace(/\s+/g, ' ').t
 const sanitizeWindowsName = (value, fallback = 'Unknown') => {
     const collapsedValue = collapseWhitespace(value);
     const sanitizedValue = collapsedValue
+        // Windows filenames cannot contain these control characters.
+        // eslint-disable-next-line no-control-regex
         .replace(/[<>:"/\\|?*\u0000-\u001F]/g, ' ')
         .replace(/\.+$/g, '')
         .trim()
@@ -85,7 +87,13 @@ const deriveLocalPath = (record) => {
     const extension = urlExtension || trustedFileNameExtension || '.mp4';
     const containerFolderName = getContainerFolderName(record);
     const fileBaseName = record?.type === 'series' ? getSeriesBaseName(record) : getMovieBaseName(record);
-    const fileName = `${fileBaseName}${extension}`;
+    if (record?.destinationVariant && !/^[a-f0-9]{12}$/.test(record.destinationVariant)) {
+        const error = new Error('The alternate download filename is invalid.');
+        error.code = 'DOWNLOAD_DESTINATION_INVALID';
+        throw error;
+    }
+    const variant = record?.destinationVariant ? ` (alternate ${record.destinationVariant})` : '';
+    const fileName = `${fileBaseName}${variant}${extension}`;
 
     return record?.type === 'series' ?
         path.join(downloadsRoot, containerFolderName, getSeasonFolderName(record), fileName)

@@ -918,7 +918,7 @@ const StreamsList = ({
             } else {
                 // eslint-disable-next-line no-console
                 console.debug('customStremio.downloadCreated', record);
-                showDownloadStatus('Download queued.', 'created');
+                showDownloadStatus(record?.destinationVariant ? 'Another copy queued. Your existing download is kept.' : 'Download queued.', 'created');
             }
 
             if (typeof onDownloadCreated === 'function') {

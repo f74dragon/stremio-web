@@ -9,6 +9,16 @@ const {
     finalizePartialDownload
 } = require('../local-backend/fileUtils');
 
+test('alternate sources have stable distinct paths and reject path text in the variant', () => {
+    const { deriveLocalPath } = require('../local-backend/fileUtils');
+    const original = { type: 'series', parentTitle: 'Show', videoTitle: 'Episode', season: 1, episode: 2 };
+    const alternate = { ...original, destinationVariant: '0123456789ab' };
+    expect(deriveLocalPath(alternate)).not.toBe(deriveLocalPath(original));
+    expect(deriveLocalPath(alternate)).toContain('(alternate 0123456789ab)');
+    expect(deriveLocalPath({ ...alternate })).toBe(deriveLocalPath(alternate));
+    expect(() => deriveLocalPath({ ...original, destinationVariant: '../other-file' })).toThrow();
+});
+
 describe('download file finalization safety', () => {
     let tempDirectory;
     let partialPath;

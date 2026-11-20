@@ -16,6 +16,7 @@ const {
 } = require('../localBackendClient');
 const styles = require('./DownloadManagerSettingsPanel.less');
 const { subscribeStatus, getStatus } = require('../externalPlaybackSync');
+const DownloadHealthPanel = require('./DownloadHealthPanel');
 
 const PRIMARY_CONCURRENCY_OPTIONS = [1, 2, 3, 4];
 const UNLIMITED_CONCURRENT_DOWNLOADS = 'unlimited';
@@ -497,6 +498,7 @@ const DownloadManagerSettingsPanel = ({ onSettingsChange }) => {
 
     return (
         <div className={styles['options-stack']}>
+            <DownloadHealthPanel onSettingsChange={(nextSettings) => { setSettings(nextSettings); onSettingsChange?.(nextSettings); }} />
             <section className={styles['settings-panel']} aria-labelledby={'download-manager-settings-title'}>
                 <div className={styles['settings-copy']}>
                     <h2 id={'download-manager-settings-title'}>

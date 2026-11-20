@@ -5,6 +5,7 @@ const { spawn } = require('node:child_process');
 const { PersonalUpdater } = require('./personal-update.cjs');
 const { getDesktopDataPaths } = require('./data-paths.cjs');
 const { BackendController } = require('./backend-controller.cjs');
+const { createDesktopPreferences } = require('./preferences.cjs');
 const { isAppUrl, safeExternalUrl, createAppProtocolHandler } = require('./app-protocol.cjs');
 const { TOKEN_HEADER } = require('../local-backend/managedAccess');
 const release = require('./release-config.json');
@@ -20,6 +21,7 @@ for (const directory of [dataPaths.userData, dataPaths.sessionData, dataPaths.lo
 app.setPath('userData', dataPaths.userData);
 app.setPath('sessionData', dataPaths.sessionData);
 app.setPath('logs', dataPaths.logs);
+const preferences = createDesktopPreferences(dataPaths.backendData);
 
 let window;
 let tray;
@@ -28,6 +30,7 @@ let quitting = false;
 let quitComplete = false;
 let starting = false;
 let closeNoticeShown = false;
+let restartAfterQuit = false;
 let status = { phase: 'starting', message: 'Starting your local service…', version };
 const root = path.resolve(__dirname, '..');
 const buildDirectory = app.isPackaged ? path.join(root, 'build') : path.join(root, '.core-build', 'desktop-ui');
@@ -109,14 +112,34 @@ const quit = async () => {
     try {
         const result = await backend.stop();
         log(result.forced ? 'quit-recovery-required' : 'quit-saved');
+        if (restartAfterQuit && result.forced) {
+            restartAfterQuit = false;
+            throw new Error('The service needed forced shutdown. Retry recovery before restarting.');
+        }
         quitComplete = true;
         tray?.destroy();
+        if (restartAfterQuit) app.relaunch();
         app.quit();
     } catch {
+        restartAfterQuit = false;
         quitting = false;
         setStatus({ phase: 'error', message: 'The local service has not finished stopping. Please retry Quit.', code: 'SHUTDOWN_FAILED' });
         showWindow();
     }
+};
+
+const restart = async (target) => {
+    if (quitting || starting) return;
+    showWindow();
+    const { response } = await dialog.showMessageBox(window, {
+        type: 'question', title: target === 'app' ? 'Restart Custom Stremio' : 'Restart download service',
+        message: target === 'app' ? 'Save and restart the app?' : 'Save and restart the download service?',
+        detail: 'Active transfers will pause and partial files will be kept. Resume them from Downloads afterward. Queued downloads can start when the service returns. Settings, provider connections, and media are kept.',
+        buttons: ['Restart', 'Cancel'], defaultId: 1, cancelId: 1
+    });
+    if (response !== 0 || quitting || starting) return;
+    if (target === 'app') { restartAfterQuit = true; await quit(); }
+    else { log('service-restart-requested'); await start(); }
 };
 
 const openUpdates = () => {
@@ -146,7 +169,7 @@ const installUpdate = async () => {
         detail: 'This pauses downloads, saves your progress, and closes in-app playback. Custom Stremio reopens after the update. Settings, login, and media stay on this PC.',
         buttons: ['Restart and update', 'Cancel'], defaultId: 1, cancelId: 1
     });
-    if (response !== 0 || quitting || updater.state.phase !== 'ready' || updater.pending.id !== selected) return updateStatus();
+    if (response !== 0 || quitting || starting || status.phase !== 'ready' || updater.state.phase !== 'ready' || updater.pending.id !== selected) return updateStatus();
     quitting = true;
     updater.setState({ phase: 'installing', version: updater.pending.manifest.version });
     try {
@@ -227,6 +250,13 @@ if (!app.requestSingleInstanceLock()) {
         handle('retry', () => { start(); });
         handle('quit', () => { quit(); });
         handle('diagnostics', () => shell.openPath(dataPaths.logs));
+        handle('desktop-settings', () => ({ ...preferences.get(), version, backendPhase: backend.phase }));
+        handle('restart-service', () => restart('service'));
+        handle('restart-app', () => restart('app'));
+        ipcMain.handle('custom-stremio:close-behavior', (event, value) => {
+            if (!trustedSender(event)) throw new Error('Untrusted desktop request');
+            return preferences.setCloseBehavior(value);
+        });
         handle('open-updates', openUpdates);
         const updateHandle = (name, action) => ipcMain.handle(`custom-stremio:update-${name}`, (event) => {
             if (!updatesWindow || event.sender !== updatesWindow.webContents || event.senderFrame !== updatesWindow.webContents.mainFrame || event.senderFrame.url !== updatesUrl) throw new Error('Untrusted update request');
@@ -271,6 +301,7 @@ if (!app.requestSingleInstanceLock()) {
         window.on('close', (event) => {
             if (quitting) return;
             event.preventDefault();
+            if (preferences.get().closeBehavior === 'quit') { quit(); return; }
             window.hide();
             if (!closeNoticeShown && process.platform === 'win32') {
                 closeNoticeShown = true;
@@ -284,6 +315,7 @@ if (!app.requestSingleInstanceLock()) {
             { label: `Open ${productName}`, click: showWindow },
             { label: 'App updates…', click: openUpdates },
             { label: 'Open diagnostics folder', click: () => shell.openPath(dataPaths.logs) },
+            { label: 'Restart download service…', click: () => restart('service') },
             { type: 'separator' }, { label: 'Quit', click: quit }
         ]));
         Menu.setApplicationMenu(Menu.buildFromTemplate([

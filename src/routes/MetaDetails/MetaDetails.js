@@ -9,6 +9,7 @@ const { useContentGamepadNavigation } = require('stremio/services/GamepadNavigat
 const { withCoreSuspender } = require('stremio/common');
 const useDownloadRecords = require('stremio/customStremio/useDownloadRecords');
 const { createDownload } = require('stremio/customStremio/localBackendClient');
+const { getDownloadActionError } = require('stremio/customStremio/downloadRecordPresentation');
 const {
     SAFE_BATCH_READINESS,
     createBatchDownloadSession,
@@ -259,7 +260,7 @@ const MetaDetails = ({ urlParams, queryParams }) => {
                 nextSession = markBatchDownloadAssignmentSubmitted(nextSession, episode.id, record);
                 updateBatchDownloadSession(nextSession);
             } catch (error) {
-                errors.push({ episode, message: error?.backendError || error?.message || 'Could not queue this episode.' });
+                errors.push({ episode, message: getDownloadActionError(error, 'Could not connect to the download service. Open Downloads settings to check its health.') });
             }
             setBatchQueueState({ queueing: true, completed: index + 1, total: assignments.length, errors: [...errors] });
         }

@@ -1,0 +1,39 @@
+.health-panel {
+    padding: 1.4rem;
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: 1rem;
+    color: var(--primary-foreground-color);
+    background: rgba(255, 255, 255, 0.025);
+    h2 { margin: 0 0 0.4rem; font-size: 1.1rem; }
+    h3 { margin: 0 0 0.5rem; font-size: 0.95rem; }
+    p { margin: 0.4rem 0; line-height: 1.5; font-size: 0.85rem; }
+}
+.header { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 1rem; }
+.version { flex: none; padding: 0.35rem 0.6rem; border-radius: 0.5rem; background: rgba(155, 132, 255, 0.12); font-size: 0.75rem; }
+.actions { display: flex; flex-wrap: wrap; gap: 0.6rem; margin: 1rem 0 0.65rem;
+    button { min-height: 2.5rem; padding: 0.6rem 0.85rem; border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 0.6rem; color: inherit; font: inherit; font-size: 0.83rem; cursor: pointer; background: rgba(255, 255, 255, 0.05);
+        &:hover, &:focus-visible { background: rgba(155, 132, 255, 0.18); border-color: #a68afa; }
+        &:disabled { opacity: 0.5; cursor: default; }
+        &.primary { background: rgba(119, 92, 238, 0.32); border-color: rgba(155, 132, 255, 0.5); }
+    }
+}
+.hint { opacity: 0.65; font-size: 0.78rem !important; }
+.checks { margin: 1.2rem 0 0.65rem; }
+.check { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; padding: 0.9rem 0; border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+    > div { min-width: 0; }
+    strong { display: block; margin-bottom: 0.3rem; font-size: 0.86rem; }
+    span { display: block; opacity: 0.65; font-size: 0.79rem; line-height: 1.45; overflow-wrap: anywhere; }
+    small { flex: none; border-radius: 0.4rem; padding: 0.3rem 0.5rem; font-size: 0.71rem; line-height: 1.2; }
+}
+.ok { color: #a3e4cb; background: rgba(69, 171, 132, 0.12); }
+.warning { color: #ebca9d; background: rgba(198, 143, 73, 0.12); }
+.unverified, .off { color: #c3bed0; background: rgba(255, 255, 255, 0.05); }
+.error { padding: 0.8rem; border-radius: 0.6rem; background: rgba(178, 71, 90, 0.13); color: #ffc1cb; }
+.issue { margin: 1rem 0; padding: 1rem; border: 1px solid rgba(210, 155, 108, 0.2); border-radius: 0.7rem; font-size: 0.85rem;
+    small { opacity: 0.65; overflow-wrap: anywhere; }
+}
+.recovery, .close-setting { margin-top: 1.3rem; padding-top: 1.2rem; border-top: 1px solid rgba(255, 255, 255, 0.09); }
+.close-setting {
+    .close-choice { box-sizing: border-box; max-width: 100%; width: 25rem; margin-top: 0.8rem; }
+}
+@media (max-width: 600px) { .health-panel { padding: 1rem; } .check { gap: 0.6rem; } }

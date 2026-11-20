@@ -11,6 +11,7 @@ const { Button, Image, Popup } = require('stremio/components');
 const { useRouteFocused } = require('stremio-router');
 const StreamPlaceholder = require('./StreamPlaceholder');
 const styles = require('./styles');
+const { getSourceSizeLabel } = require('stremio/customStremio/sourceSizePresentation');
 const {
     DEBRID_PROVIDER,
     SOURCE_READINESS,
@@ -88,6 +89,7 @@ const Stream = ({
     const platform = usePlatform();
     const core = useCore();
     const routeFocused = useRouteFocused();
+    const sizeLabel = getSourceSizeLabel({ name, description, behaviorHints: downloadPayload?.behaviorHints });
 
     const [menuOpen, , closeMenu, toggleMenu] = useBinaryState(false);
 
@@ -338,21 +340,24 @@ const Stream = ({
                 onClick={onClick}
             >
                 <div className={styles['info-container']}>
-                    {
-                        typeof thumbnail === 'string' && thumbnail.length > 0 ?
-                            <div className={styles['thumbnail-container']} title={name || addonName}>
-                                <Image
-                                    className={styles['thumbnail']}
-                                    src={thumbnail}
-                                    alt={' '}
-                                    renderFallback={renderThumbnailFallback}
-                                />
-                            </div>
-                            :
-                            <div className={styles['addon-name-container']} title={name || addonName}>
-                                <div className={styles['addon-name']}>{name || addonName}</div>
-                            </div>
-                    }
+                    <div className={styles['source-summary']}>
+                        {
+                            typeof thumbnail === 'string' && thumbnail.length > 0 ?
+                                <div className={styles['thumbnail-container']} title={name || addonName}>
+                                    <Image
+                                        className={styles['thumbnail']}
+                                        src={thumbnail}
+                                        alt={' '}
+                                        renderFallback={renderThumbnailFallback}
+                                    />
+                                </div>
+                                :
+                                <div className={styles['addon-name-container']} title={name || addonName}>
+                                    <div className={styles['addon-name']}>{name || addonName}</div>
+                                </div>
+                        }
+                        <span className={styles['source-size']} aria-label={`File size: ${sizeLabel}`} title={'Size reported by the addon'}>{sizeLabel}</span>
+                    </div>
                     {
                         progress !== null && !isNaN(progress) && progress > 0 ?
                             <div className={styles['progress-bar-container']}>

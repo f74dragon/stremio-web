@@ -16,6 +16,77 @@ const createController = (dataDirectory) => new BackendController({
     dataDirectory,
     fork: (entry, options) => fork(entry, [], { ...options, execArgv: isolatedRuntime, windowsHide: true, stdio: ['ignore', 'ignore', 'ignore', 'ipc'] })
 });
+
+test('batch episodes and an alternate source keep separate bytes across restart, resume, and deletion', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'stremio-alternate-'));
+    const content = (url) => Buffer.alloc(512 * 1024, url.includes('alternate') ? 66 : 65);
+    const source = http.createServer((req, res) => {
+        const bytes = content(req.url);
+        const offset = Number(/^bytes=(\d+)-$/.exec(req.headers.range || '')?.[1] || 0);
+        res.writeHead(offset ? 206 : 200, { 'Content-Length': bytes.length - offset, 'Accept-Ranges': 'bytes', ETag: `"${req.url}"`,
+            ...(offset ? { 'Content-Range': `bytes ${offset}-${bytes.length - 1}/${bytes.length}` } : {}) });
+        let cursor = offset;
+        const timer = setInterval(() => {
+            const end = Math.min(cursor + 8192, bytes.length);
+            res.write(bytes.subarray(cursor, end));
+            cursor = end;
+            if (cursor === bytes.length) { clearInterval(timer); res.end(); }
+        }, 25);
+        res.on('close', () => clearInterval(timer));
+    });
+    await new Promise((resolve) => source.listen(0, '127.0.0.1', resolve));
+    const controller = new BackendController({ dataDirectory: root,
+        fork: (entry, options) => fork(entry, [], { ...options, env: { ...options.env, CUSTOM_STREMIO_DOWNLOAD_DIR: path.join(root, 'files') },
+            execArgv: isolatedRuntime, windowsHide: true, stdio: ['ignore', 'ignore', 'ignore', 'ipc'] }) });
+    try {
+        await controller.start();
+        const post = (route, body) => request(controller, route, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        await request(controller, '/settings', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ downloads: { maxConcurrentDownloads: 4 } }) });
+        const payload = (episode, alternate = false) => ({ type: 'series', metaId: 'test-show', videoId: `test-show:1:${episode}`, season: 1, episode,
+            parentTitle: 'Batch fixture', videoTitle: `Episode ${episode}`, downloadUrl: `http://127.0.0.1:${source.address().port}/${alternate ? 'alternate' : 'original'}-${episode}.mp4` });
+        const originals = [];
+        for (const episode of [1, 2, 3]) originals.push(await post('/downloads', payload(episode)));
+        const alternate = await post('/downloads', payload(1, true));
+        expect(alternate.destinationVariant).toMatch(/^[a-f0-9]{12}$/);
+        expect((await post('/downloads', payload(1, true))).duplicate).toBe(true);
+        await until(() => request(controller, '/downloads'), (value) => value.items.length === 4 && value.items.every((item) => item.bytesDownloaded > 0));
+        expect(await controller.stop()).toEqual({ forced: false });
+        const saved = JSON.parse(fs.readFileSync(path.join(root, 'download-records.json'), 'utf8')).records;
+        const originalSaved = saved.find((item) => item.id === originals[0].id);
+        const alternateSaved = saved.find((item) => item.id === alternate.id);
+        expect(saved.every((item) => item.status === 'paused')).toBe(true);
+        expect(alternateSaved.partialPath).not.toBe(originalSaved.partialPath);
+        expect(fs.readFileSync(originalSaved.partialPath).every((byte) => byte === 65)).toBe(true);
+        expect(fs.readFileSync(alternateSaved.partialPath).every((byte) => byte === 66)).toBe(true);
+        await controller.start();
+        await post(`/downloads/${originalSaved.id}/resume`, {});
+        await post(`/downloads/${alternateSaved.id}/resume`, {});
+        const completed = await until(() => request(controller, '/downloads'), (value) =>
+            [originalSaved.id, alternateSaved.id].every((id) => value.items.find((item) => item.id === id)?.status === 'completed'));
+        const first = completed.items.find((item) => item.id === originalSaved.id);
+        const second = completed.items.find((item) => item.id === alternateSaved.id);
+        expect(fs.readFileSync(first.localPath)).toEqual(content('original'));
+        expect(fs.readFileSync(second.localPath)).toEqual(content('alternate'));
+        expect(second.destinationVariant).toBe(alternate.destinationVariant);
+        const health = await request(controller, '/diagnostics');
+        expect(health.checks.find((item) => item.id === 'data').state).toBe('ok');
+        expect(JSON.stringify(health)).not.toContain('Batch fixture');
+        const rejected = await fetch(`${controller.connection.baseUrl}/downloads`, {
+            method: 'POST', headers: { [TOKEN_HEADER]: controller.connection.token, Origin: DESKTOP_ORIGIN, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...payload(1), metaId: 'unrelated-show', videoId: 'other:1:1' })
+        });
+        expect(rejected.status).toBe(409);
+        expect((await request(controller, '/diagnostics')).lastRejection.code).toBe('DOWNLOAD_DESTINATION_CONFLICT');
+        await request(controller, `/downloads/${second.id}/media`, { method: 'DELETE' });
+        expect(fs.existsSync(second.localPath)).toBe(false);
+        expect(fs.readFileSync(first.localPath)).toEqual(content('original'));
+    } finally {
+        await controller.stop();
+        source.closeAllConnections();
+        await new Promise((resolve) => source.close(resolve));
+        fs.rmSync(root, { recursive: true, force: true });
+    }
+}, 30000);
 const request = async (controller, route, options = {}) => {
     const response = await fetch(`${controller.connection.baseUrl}${route}`, {
         ...options, headers: { [TOKEN_HEADER]: controller.connection.token, Origin: DESKTOP_ORIGIN, ...options.headers }
